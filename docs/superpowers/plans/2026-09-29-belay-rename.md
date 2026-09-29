@@ -134,7 +134,7 @@ git grep -hoiI 'tutorails' -- . ":(exclude)$D" ":(exclude)$P" | wc -l           
 git grep -hoiI 'tutorial' | wc -l                        # must equal /tmp/belay-tutorial-before
 git grep -hoiI 'tutorial' -- skills/belay/references/ tests/ | wc -l                         # 543
 git ls-files | grep -ci 'tutorail' || true                                                   # 0
-git grep -hoI '__belay_decoy__' | wc -l                                                      # 2
+git grep -hoI '__belay_decoy__' -- . ":(exclude)$D" ":(exclude)$P" | wc -l                # 2
 ```
 
 Expected, in order: `0`, `10`, *the captured before-value*, `543`, `0`, `2`. **Any deviation stops the task.**
