@@ -19,7 +19,8 @@ Every task's requirements implicitly include this section.
 - **The bundle format does not change.** `tutorial/`, `tutorial.yaml`, `STATE.md`, `lessons.generated/`, `catalog.yaml`, and the terms **course** and **lesson** keep their current spelling everywhere. They name the subject, not the brand.
 - **Never run a case-insensitive substitution on a stem shorter than the four brand literals.** `tutorail` and `tutorial` differ by one transposition and share every file.
 - **The 10 occurrences of `tutorails` are protected.** They are a deliberate misspelling of the format key `tutorials`, not the brand. See "Protected set" below.
-- **`docs/superpowers/specs/2026-09-29-belay-rename-design.md` is never substituted.** It names the old brand 54 times because the old brand is its subject.
+- **Two documents are never substituted:** `docs/superpowers/specs/2026-09-29-belay-rename-design.md` (54 brand occurrences) and `docs/superpowers/plans/2026-09-29-belay-rename.md` (63). Both name the old brand because the old brand is their subject.
+- **Use `git grep`, not `grep -r`, for every sweep.** This work happens in a worktree, where `.git` is a *file* containing `gitdir: /Users/robert/src/github.com/skomp/tutorAIl/.git/worktrees/belay-rename` — a path that contains the brand. `--exclude-dir=.git` does not exclude a file, so `grep -r` reports a phantom 264th hit that cannot be fixed. `git grep` reads tracked files only and is immune to it, to untracked scratch, and to nested worktrees.
 - **Do not `git add -A` or `git commit -a`.** A worktree is live at `.claude/worktrees/output-style-spike` and `.claude/` is untracked. Stage explicit paths only.
 - **Commit messages end with `Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>` and contain no `claude.ai/code/session_*` URL.**
 - **No closing keyword** (`close`/`fixes`/`resolves`) beside an issue number unless you mean it. This plan does not close tutorAIl#54; Task 4 does, by hand.
@@ -33,9 +34,11 @@ Every number here was produced by running the command against a `git archive HEA
 | Distinct brand spellings in the tree | exactly **4**: `tutorail`, `tutorAIl`, `TutorAIl`, `TUTORAIL` | Enumerated, not assumed. No `Tutorail` or `TUTORAIl` exists. |
 | Brand occurrences to remove | **263** | Excludes the design doc. |
 | Brand occurrences in the design doc | **54** | These stay. |
-| Brand occurrences in the whole tree today | **317** | 263 + 54. A count of 317 is not a bug. |
-| `tutorial` repo-wide | **838** | Must be **838** after. Unchanged. |
+| Brand occurrences in the plan doc (this file) | **63** | These stay. |
+| Brand occurrences in all tracked files today | **380** | 263 + 54 + 63. A count of 380 is not a bug. |
+| `tutorial` repo-wide | **865** | Must be **865** after. Unchanged. |
 | `tutorial` in `references/` + `tests/` | **543** | Must be **543** after. This is the invariant that catches a bad substitution. |
+| Files the substitution edits | **23** | `git grep -liI` with both documents excluded. |
 | `tutorAIl` occurrences by context | 60 issue refs `tutorAIl#NN`, 13 `skomp/tutorAIl`, ~7 prose | Issue refs dominate; only ~7 need the capitalised `Belay`. |
 | `tutorails` (protected) | **10** | 6 in `tests/test_validate_bundle.py`, 3 in the misspelling fixture, 1 in `catalogue-format.md`. |
 | `__tutorail_decoy__` sites | **2** | `tests/test_validate_bundle.py:4726` and `:4805`. Renamed automatically by rule 7. |
@@ -97,39 +100,40 @@ Rule order matters and each rule earns its place:
 - [ ] **Step 2: Record the before-counts, and prove the probe can see a positive**
 
 ```bash
-cd /Users/robert/src/github.com/skomp/tutorAIl
-grep -rhoiI 'tutorail' --exclude-dir=.git --exclude-dir=worktrees \
-  --exclude=2026-09-29-belay-rename-design.md . | wc -l   # expect 263
-grep -rhoiI 'tutorial' --exclude-dir=.git --exclude-dir=worktrees . | wc -l  # expect 838
+D=docs/superpowers/specs/2026-09-29-belay-rename-design.md
+P=docs/superpowers/plans/2026-09-29-belay-rename.md
+git grep -hoiI 'tutorail' -- . ":(exclude)$D" ":(exclude)$P" | wc -l   # expect 263
+git grep -hoiI 'tutorial' | wc -l                                      # expect 865
+git grep -hoiI 'tutorial' -- skills/tutorail/references/ tests/ | wc -l # expect 543
 ```
 
-Expected: `263` and `838`. If either differs, STOP and report — the tree moved since this plan was measured.
+Expected: `263`, `865`, `543`. If any differs, STOP and report — the tree moved since this plan was measured.
 
 - [ ] **Step 3: Apply the substitution**
 
 The `-i` in `-rliI` is load-bearing. A case-sensitive file list silently skips every file containing only `tutorAIl` — this was observed leaving 5 occurrences behind in `TODO.md` and `skills/tutorail/scripts/yamlite.py`.
 
 ```bash
-grep -rliI 'tutorail' --exclude-dir=.git --exclude-dir=worktrees \
-  --exclude=2026-09-29-belay-rename-design.md . \
+git grep -liI 'tutorail' -- . ":(exclude)$D" ":(exclude)$P" \
   | while read -r f; do sed -i '' -f /tmp/belay-rename.sed "$f"; done
 git mv skills/tutorail skills/belay
 ```
 
+`git grep -l` lists 23 files. It reads tracked files only, so it cannot pick up the
+worktree's `.git` file or any untracked scratch.
+
 - [ ] **Step 4: Verify all six invariants**
 
 ```bash
-grep -rniI 'tutorail' --exclude-dir=.git --exclude-dir=worktrees \
-  --exclude=2026-09-29-belay-rename-design.md . | grep -vi 'tutorails' | wc -l  # 0
-grep -rhoiI 'tutorails' --exclude-dir=.git --exclude-dir=worktrees \
-  --exclude=2026-09-29-belay-rename-design.md . | wc -l                          # 10
-grep -rhoiI 'tutorial' --exclude-dir=.git --exclude-dir=worktrees . | wc -l      # 838
-grep -rhoiI 'tutorial' skills/belay/references/ tests/ | wc -l                   # 543
-find . -path ./.git -prune -o -iname '*tutorail*' -print | wc -l                 # 0
-grep -rhoI '__belay_decoy__' --exclude-dir=.git --exclude-dir=worktrees . | wc -l # 2
+git grep -niI 'tutorail' -- . ":(exclude)$D" ":(exclude)$P" | grep -vi 'tutorails' | wc -l  # 0
+git grep -hoiI 'tutorails' -- . ":(exclude)$D" ":(exclude)$P" | wc -l                        # 10
+git grep -hoiI 'tutorial' | wc -l                                                            # 865
+git grep -hoiI 'tutorial' -- skills/belay/references/ tests/ | wc -l                         # 543
+git ls-files | grep -ci 'tutorail' || true                                                   # 0
+git grep -hoI '__belay_decoy__' | wc -l                                                      # 2
 ```
 
-Expected, in order: `0`, `10`, `838`, `543`, `0`, `2`. **Any deviation stops the task.** In particular a `tutorial` count other than 838 or 543 means the format contract was damaged — revert with `git checkout -- .` and report.
+Expected, in order: `0`, `10`, `865`, `543`, `0`, `2`. **Any deviation stops the task.** In particular a `tutorial` count other than 865 or 543 means the format contract was damaged — revert with `git checkout -- . && git reset` and report.
 
 - [ ] **Step 5: Run both suites**
 
@@ -222,7 +226,7 @@ and the Codex block must clone `skomp/belay` into `~/.local/share/belay` and lin
 - [ ] **Step 3: Verify no brand word returned**
 
 ```bash
-grep -niI 'tutorail' README.md | grep -vi 'tutorails'   # expect no output
+git grep -niI 'tutorail' -- README.md | grep -vi 'tutorails'   # expect no output
 ```
 
 - [ ] **Step 4: Commit**
@@ -299,9 +303,12 @@ Expected: validate passes, and all three print `0.9.0`.
 `CLAUDE.md` requires this after every bump, with the version you are leaving. `--exclude=CLAUDE.md` is load-bearing, and the design doc is excluded for the same reason — it cites `0.8.0` deliberately.
 
 ```bash
-grep -rn '0\.8\.0' --include='*.json' --include='*.md' \
-  --exclude=CLAUDE.md --exclude=2026-09-29-belay-rename-design.md . | grep -v worktrees
+git grep -n '0\.8\.0' -- '*.json' '*.md' ":(exclude)CLAUDE.md" \
+  ":(exclude)$D" ":(exclude)$P"
 ```
+
+Both documents are excluded alongside `CLAUDE.md` because all three cite `0.8.0`
+deliberately.
 
 Expected: no output. Before trusting that zero, prove the grep works by running it for `0.9.0` and confirming it finds the four files you just changed.
 
@@ -364,11 +371,13 @@ Expected: it passes, and reports what the sweep added on its own line rather tha
 - [ ] **Step 2: Confirm the whole-repository sweep is clean, and that it can report a positive**
 
 ```bash
-echo 'tutorAIl' > PLANTED.md
-grep -rniI 'tutorail' --exclude-dir=.git --exclude-dir=worktrees \
-  --exclude=2026-09-29-belay-rename-design.md . | grep -vi 'tutorails'
-rm PLANTED.md
+printf 'tutorAIl\n' > PLANTED.md && git add -N PLANTED.md
+git grep -niI 'tutorail' -- . ":(exclude)$D" ":(exclude)$P" | grep -vi 'tutorails'
+git rm -q --cached PLANTED.md && rm PLANTED.md
 ```
+
+This control is only meaningful once the sweep is otherwise empty. Run it here and not
+in Task 1, where 263 real hits would hide the planted one.
 
 Expected: the planted line is found. Then re-run without `PLANTED.md` and expect no output. A zero from a probe you have not seen produce a one is not evidence.
 
