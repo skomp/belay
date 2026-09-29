@@ -1,6 +1,8 @@
 # Belay
 
-**Structured, adaptive tutorials for coding agents.**
+**Structured, adaptive courses that run inside your coding agent.**
+
+It catches you. It doesn't climb for you.
 
 Build real software yourself, with an agent that follows a deliberate curriculum, inspects
 what you actually wrote, and only moves on once the step is genuinely done.
@@ -176,7 +178,7 @@ none is implied.
 Ask the tutor, in the agent you installed it into:
 
 ```
-Add git@github.com:skomp/belay-bundles.git as a tutorial catalogue.
+Add git@github.com:skomp/belay-bundles.git as a course catalogue.
 ```
 
 It follows the procedure in
