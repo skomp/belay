@@ -216,8 +216,14 @@ in `README.md`. After the bump, the leaving-version grep runs and must return ze
 
 One window, three repositories, no phasing.
 
-1. **Merge or park** tutorail-bundles#29 and tutorail-bundles#30 first. Both touch
-   `README.md` and `catalog.yaml`, which the rename also touches.
+1. **The bundles repository clears its own decks first, on its own plan.** A rename
+   changes `README.md` and `catalog.yaml`, so any branch touching those conflicts, and any
+   branch surviving the rename carries a diff that mixes a name change with real work.
+   That repository's session decides what to finish, carry or close, and records the
+   decision on tutorail-bundles#31. It is not planned from here.
+
+   (PR: tutorail-bundles#29 and PR: tutorail-bundles#30 both merged on 2026-09-29 and are
+   no longer a constraint. Nine issues remain open there.)
 2. **Rename the three repositories on GitHub.** GitHub keeps a permanent redirect, so
    nothing breaks between this step and the content changes.
 3. **Content rename in each repository**, each by its own session — this repository here,
