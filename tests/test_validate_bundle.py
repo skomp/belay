@@ -6981,10 +6981,16 @@ def test_no_manifest_in_reach_gains_an_unknown_field_warning() -> None:
     # worktrees the machine happens to have: 614 with none, 622 with one, 638
     # with three, all at one commit. A reader who runs the suite and sees a
     # different number could not tell a defect from a worktree. See tutorAIl#37.
+    # Anchor the exclusion at THIS checkout's own worktree directory. A bare
+    # substring test excluded the checkout under test whenever the suite was
+    # run from inside a worktree, because that checkout's own path contains
+    # `.claude/worktrees/`: in_repo came back empty, and the positive control
+    # below raised IndexError on manifests[0] before it could report anything.
+    nested_worktrees = (REPO / ".claude" / "worktrees").as_posix() + "/"
     in_repo = sorted(
         m
         for m in REPO.glob("**/tutorial.yaml")
-        if ".claude/worktrees/" not in m.as_posix()
+        if not m.as_posix().startswith(nested_worktrees)
     )
     manifests = list(in_repo)
     record(
