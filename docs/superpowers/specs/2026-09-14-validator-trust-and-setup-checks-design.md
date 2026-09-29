@@ -1,7 +1,7 @@
 # Validator trust, and setup checks — Design
 
 **Date:** 2026-09-14
-**Last amended:** 2026-09-21
+**Last amended:** 2026-09-29
 **Status:** sections 4 to 7 implemented in `PR: belay#44`. Sections 5.4 and 5.5 — the
 validator deriving the disclosure block, and its harness — implemented for belay#45;
 section 7's failure path is conversational behaviour and stays open there. Section 2.2 -

@@ -1,9 +1,9 @@
 # Generic Tutorial Runner + Portable Tutorial Bundles — Design
 
 **Date:** 2026-09-11
-**Last amended:** 2026-09-21
+**Last amended:** 2026-09-29
 **Status:** Design approved. Formats and first bundle implemented; runner in progress.
-**Repositories:** `Belay` (runner), `belay-bundles` (courses), `automaton-db` (a learner)
+**Repositories:** `belay` (runner), `belay-bundles` (courses), `automaton-db` (a learner)
 
 ---
 
@@ -1028,7 +1028,7 @@ One shared `skills/` directory, sibling per-host manifests. Proven shape: superp
 6.3.0 ships `.claude-plugin/`, `.codex-plugin/` and others over a single `skills/`.
 
 ```
-Belay/
+belay/
 ├── .claude-plugin/{plugin.json,marketplace.json}
 ├── .codex-plugin/plugin.json          "skills": "./skills/", "hooks": {}
 ├── skills/belay/
@@ -1071,7 +1071,7 @@ Codex:        codex plugin marketplace add <repo> ; codex plugin add belay
 
 Three repositories, deliberately separate.
 
-### `Belay` — the runner
+### `belay` — the runner
 
 The plugin. Contains no course content. Ships the skill, the reference documents, the
 validator, and a small example bundle.

@@ -1,9 +1,9 @@
 # Bundle Relationships and Concept-Based Prerequisites — Design
 
 **Date:** 2026-09-12
-**Last amended:** 2026-09-21
+**Last amended:** 2026-09-29
 **Status:** Approved, not started. **Blocked on the `supplies` branch merging.**
-**Repository:** `Belay`
+**Repository:** `belay`
 
 ---
 

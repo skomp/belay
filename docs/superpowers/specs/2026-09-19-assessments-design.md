@@ -1,7 +1,7 @@
 # Knowledge assessments — Design
 
 **Date:** 2026-09-19
-**Last amended:** 2026-09-19
+**Last amended:** 2026-09-29
 **Status:** approved in brainstorm, not implemented
 **Issue:** belay#33
 **Does not close:** belay#34, which stays open and narrower — see §9.

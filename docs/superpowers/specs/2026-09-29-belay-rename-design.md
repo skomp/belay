@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-29
 **Last amended:** 2026-09-29
-**Status:** approved in brainstorm, not implemented
+**Status:** implemented, on branch `belay-rename`
 **Issue:** tutorAIl#54
 **Sibling issues:** tutorail-bundles#31, tutorail-authoring#29
 
@@ -191,11 +191,13 @@ writing rules about: a check that cannot report a positive.
 **The rule:** the substitution matches exactly four literal strings — `tutorail`,
 `tutorAIl`, `TutorAIl`, `TUTORAIL` — and is never case-insensitive on a shorter stem.
 
-**The proof:** `tutorial` is counted in `skills/*/references/` and `tests/` before and
-after the change. The count is **543** and it must be 543 afterwards. This invariant
-catches a botched substitution that no test would catch. A repository-wide count of
-`tutorial` is *not* a valid invariant, because README prose deliberately changes some
-occurrences to "course".
+**The proof:** `tutorial` is counted, case-insensitively, in `skills/*/references/` and
+`tests/` before and after the change. The count is **543** and it must be 543 afterwards.
+(The exact-case count is a different number, 534 — a reader who runs a case-sensitive grep
+against this invariant will get 534 and wrongly conclude it moved.) This invariant catches
+a botched substitution that no test would catch. A repository-wide count of `tutorial` is
+*not* a valid invariant, because README prose deliberately changes some occurrences to
+"course".
 
 ## 7. Version
 
@@ -246,19 +248,33 @@ coordinated window, not one session reaching into three working trees.
 - The sweep returns zero lines, and is first proven able to report a positive:
 
   ```bash
-  grep -rni 'tutorail' --exclude-dir=.git \
-       --exclude=2026-09-29-belay-rename-design.md . | grep -v worktrees
+  D=docs/superpowers/specs/2026-09-29-belay-rename-design.md
+  P=docs/superpowers/plans/2026-09-29-belay-rename.md
+  git grep -niI 'tutorail' -- . ":(exclude)$D" ":(exclude)$P" | grep -vi 'tutorails'
   ```
 
-  **The exclusion is load-bearing, for the same reason `--exclude=CLAUDE.md` is in the
-  release check.** This document names the old brand 37 times because the old brand is
-  its subject. Without the exclusion the check reports a hit on its own design document
-  on every run, and teaches the reader to ignore it.
+  **`git grep`, not `grep -r`.** This work happens in a worktree, where `.git` is a *file*
+  containing `gitdir: /path/to/skomp/tutorAIl/.git/worktrees/belay-rename` — a path that
+  names the old brand. `--exclude-dir=.git` excludes a directory, not a file, so `grep -r`
+  matches `.git` itself and reports a phantom hit that cannot be fixed by editing anything.
+  `git grep` reads tracked files only and is immune to it, and to any untracked scratch or
+  nested worktree besides.
 
-  The exclusion covers this file and no other. Every *other* spec's `tutorAIl#NN` issue
-  references are live references, not history — after the repository is renamed the
-  correct spelling is `belay#NN`, so those are rewritten like any other occurrence.
-- `tutorial` in `skills/belay/references/` and `tests/` counts **543**, unchanged.
+  **Both exclusions are load-bearing, for the same reason `--exclude=CLAUDE.md` is in the
+  release check.** This document names the old brand because the old brand is its subject,
+  and the plan document does too, at greater length. Without both exclusions the check
+  reports a hit on its own documents on every run, and teaches the reader to ignore it.
+
+  **The filter is load-bearing too.** `tutorails` is a deliberate misspelling of the format
+  key `tutorials`, protected by the Global Constraints in the companion plan — 10
+  occurrences that are not the brand and must not be renamed.
+
+  The exclusion covers these two documents and no other. Every *other* spec's
+  `tutorAIl#NN` issue references are live references, not history — after the repository is
+  renamed the correct spelling is `belay#NN`, so those are rewritten like any other
+  occurrence.
+- `tutorial`, case-insensitively, in `skills/belay/references/` and `tests/` counts **543**,
+  unchanged.
 - `python3 tests/test_validate_bundle.py` passes.
 - `python3 tests/test_catalogs.py` passes.
 - `BELAY_SWEEP_SIBLING_REPOS=1 python3 tests/test_validate_bundle.py` passes, and reports
