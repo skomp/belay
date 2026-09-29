@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""A restricted YAML reader shared by the tutorAIl scripts.
+"""A restricted YAML reader shared by the Belay scripts.
 
 Stdlib only. This is the ONLY reader: the parse never consults the
 environment, and PyYAML is not used even when it happens to be importable.
-The reader parses the deliberately shallow subset the tutorAIl formats use,
+The reader parses the deliberately shallow subset the Belay formats use,
 and *rejects* anything outside it rather than guessing.
 
 Two scripts need this reader, so it lives in one place:
@@ -16,7 +16,7 @@ Two scripts need this reader, so it lives in one place:
 Both run on a learner's machine, which is why neither may import a third-party
 parser.
 
-This module used to prefer PyYAML when it could import it (tutorAIl#29). That
+This module used to prefer PyYAML when it could import it (belay#29). That
 made the answer a property of the machine rather than of the document: PyYAML
 accepts an anchor and silently collapses a duplicate key, where this reader
 refuses both, and it resolves `no`, `0x10` and `2026-09-13` to values this
@@ -533,7 +533,7 @@ class _RestrictedYaml:
 # A fixed string, kept so that a report can say which reader produced a
 # diagnostic. There is no second reader to select and nothing reads this to
 # choose one: it never varies, by machine or by flag. If it ever becomes
-# conditional again, tutorAIl#29 explains why that was a defect.
+# conditional again, belay#29 explains why that was a defect.
 YAML_READER = "restricted (built in, stdlib only)"
 
 

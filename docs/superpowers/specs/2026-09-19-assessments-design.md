@@ -3,8 +3,8 @@
 **Date:** 2026-09-19
 **Last amended:** 2026-09-19
 **Status:** approved in brainstorm, not implemented
-**Issue:** tutorAIl#33
-**Does not close:** tutorAIl#34, which stays open and narrower — see §9.
+**Issue:** belay#33
+**Does not close:** belay#34, which stays open and narrower — see §9.
 
 ---
 
@@ -56,7 +56,7 @@ assesses: [write-ahead-log, fsync-boundaries, crash-recovery]
 
 There is no `type: quiz`. The behaviour follows from the declaration that makes assessment
 *possible* — an answer cannot be judged without knowing what it must demonstrate — rather
-than from a label. That is what keeps this clear of tutorAIl#33's own non-goal about nominal
+than from a label. That is what keeps this clear of belay#33's own non-goal about nominal
 lesson types: remove `assesses` and there is nothing left to assess, whereas removing a
 `type` field would change only a word.
 
@@ -230,7 +230,7 @@ standing rule that nothing derivable from `tutorial.yaml` is repeated.
 ```
 
 **One row per assessment, updated in place** — not appended per attempt. Appending is how
-this becomes the transcript tutorAIl#34 exists to keep out of a file read every turn.
+this becomes the transcript belay#34 exists to keep out of a file read every turn.
 
 **Four states:** `passed`, `partial`, `stopped`, `skipped`. `misconception` is an *answer*
 outcome, not an assessment one; it surfaces as a concept under "not demonstrated", where it
@@ -251,14 +251,14 @@ as a consequence rather than as a goal.
 `state-lifecycle.md` opens: *"`STATE.md` is the only place a learner's progress is
 recorded."* That sentence stands. This design introduces no event log and no second file.
 
-tutorAIl#34's attempt-level questions — hint counts, which checks failed repeatedly, whether
+belay#34's attempt-level questions — hint counts, which checks failed repeatedly, whether
 remediation improved the next result — are **not** answered here. §5.1 records per-concept
 failure counts for assessments because §4.4 needs them, and nothing further.
 
 ### 5.3 Check 31
 
 **The numbers 30 and 31 are provisional.** 29 is the highest that exists today, and
-tutorAIl#51's `version` check also wants the next free one. Whichever lands first takes 30.
+belay#51's `version` check also wants the next free one. Whichever lands first takes 30.
 Cite these two by name when writing anything else, not by number, until one of them is
 merged.
 
@@ -287,7 +287,7 @@ A generated question derives its scope from the objectives, the content and the 
 learner has demonstrated. It never introduces an expectation the course did not set.
 
 "The current section" is not supported, because the format has no grouping concept.
-tutorAIl#36 would add one; this design does not depend on it.
+belay#36 would add one; this design does not depend on it.
 
 ### 6.3 What they leave behind
 
@@ -352,16 +352,16 @@ lesson still appears under `## Generated lessons` with its `reason:`.
 
 ## 9. Relationship to other issues
 
-- **tutorAIl#34** — **stays open, and narrower.** §5.1 records per-concept failure counts
+- **belay#34** — **stays open, and narrower.** §5.1 records per-concept failure counts
   because §4.4 needs them. Everything else that issue asks for — hint counts, repeated check
   failures, elapsed time, abandonment, whether remediation improved the next result — is
   untouched, and so is its question about whether a separate append-oriented record is the
   right home. Do not read this design as closing it.
-- **tutorAIl#36** — sections. §6.2 supports three scopes and not "the current section",
+- **belay#36** — sections. §6.2 supports three scopes and not "the current section",
   because the format has no grouping concept. This design does not depend on that issue.
-- **tutorail-authoring#16** — the authoring tools, validation and dry-run scenarios for an
+- **belay-authoring#16** — the authoring tools, validation and dry-run scenarios for an
   assessment. That work follows this format and should not start before it lands.
-- **tutorAIl#22 and tutorAIl#45** — the conversational behaviour in §3, §4 and §6 has the
+- **belay#22 and belay#45** — the conversational behaviour in §3, §4 and §6 has the
   same testability problem those two issues describe: the structure can be validated and the
   conversation cannot. Nothing here closes that, and the worked examples in §7 are
   documentation rather than tests.

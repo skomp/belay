@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Test suite for skills/tutorail/scripts/catalogs.py.
+"""Test suite for skills/belay/scripts/catalogs.py.
 
 Run it with:  python3 tests/test_catalogs.py
 
 No pytest and NO NETWORK - nothing here contacts a host. PyYAML may or
 may not be installed; it makes no difference, because the scripts never
-use it (tutorAIl#29).
+use it (belay#29).
 
 The point of this suite is not to show the script working. Every failure kind
 gets a fixture that makes it fire, with a message a learner could act on, and
@@ -50,7 +50,7 @@ from typing import Any
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent
-SCRIPTS = REPO / "skills" / "tutorail" / "scripts"
+SCRIPTS = REPO / "skills" / "belay" / "scripts"
 
 sys.path.insert(0, str(SCRIPTS))
 import catalogs as cat  # noqa: E402
@@ -88,7 +88,7 @@ FAKE_GIT = """#!/usr/bin/env python3
 import os
 import sys
 
-sys.stderr.write(os.environ.get("TUTORAIL_FAKE_GIT_STDERR", ""))
+sys.stderr.write(os.environ.get("BELAY_FAKE_GIT_STDERR", ""))
 sys.exit(128)
 """
 
@@ -165,17 +165,17 @@ def temp_env():
 def path_prefixed(directory: Path, stderr: str = ""):
     """Put `directory` first on PATH for the duration."""
     old_path = os.environ.get("PATH", "")
-    old_stderr = os.environ.get("TUTORAIL_FAKE_GIT_STDERR")
+    old_stderr = os.environ.get("BELAY_FAKE_GIT_STDERR")
     os.environ["PATH"] = f"{directory}{os.pathsep}{old_path}"
-    os.environ["TUTORAIL_FAKE_GIT_STDERR"] = stderr
+    os.environ["BELAY_FAKE_GIT_STDERR"] = stderr
     try:
         yield
     finally:
         os.environ["PATH"] = old_path
         if old_stderr is None:
-            os.environ.pop("TUTORAIL_FAKE_GIT_STDERR", None)
+            os.environ.pop("BELAY_FAKE_GIT_STDERR", None)
         else:
-            os.environ["TUTORAIL_FAKE_GIT_STDERR"] = old_stderr
+            os.environ["BELAY_FAKE_GIT_STDERR"] = old_stderr
 
 
 @contextmanager
@@ -634,7 +634,7 @@ def test_bundled_catalogue() -> None:
         )
         entry = payload["tutorials"][0]
         expected = str(
-            (REPO / "skills" / "tutorail" / "examples" / "rust-cli-basics").resolve()
+            (REPO / "skills" / "belay" / "examples" / "rust-cli-basics").resolve()
         )
         record(
             entry["resolved_path"] == expected,
@@ -1592,7 +1592,7 @@ def test_validator_catalog_mode() -> None:
             )
         target.write_text(catalog_doc(("a", "bundle")), encoding="utf-8")
 
-    shipped = REPO / "skills" / "tutorail" / "catalog" / "builtin.yaml"
+    shipped = REPO / "skills" / "belay" / "catalog" / "builtin.yaml"
     report = vb.validate_catalog(shipped, portable=False)
     record(
         report.exit_code() == 0,
@@ -1603,7 +1603,7 @@ def test_validator_catalog_mode() -> None:
 
     # The mode is never inferred: a bundle handed to catalogue mode fails,
     # and a catalogue handed to bundle mode fails.
-    example = REPO / "skills" / "tutorail" / "examples" / "rust-cli-basics"
+    example = REPO / "skills" / "belay" / "examples" / "rust-cli-basics"
     quiet = io.StringIO()
     with redirect_stderr(quiet), redirect_stdout(quiet):
         as_bundle = vb.main([str(shipped)])

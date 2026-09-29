@@ -1,12 +1,12 @@
 {
-  "name": "tutorail",
+  "name": "belay",
   "description": "Tutorial runner for coding agents",
   "owner": {
     "name": "skomp"
   },
   "plugins": [
     {
-      "name": "tutorail",
+      "name": "belay",
       "source": "./",
       "version": "0.8.0",
       "description": "Runs interactive, project-driven tutorials inside a coding agent. Discovers courses from a catalogue, keeps progress in the learner's own repository, and loads one lesson at a time.",

@@ -1,13 +1,13 @@
 {
-  "name": "tutorail",
+  "name": "belay",
   "version": "0.8.0",
   "description": "Runs interactive, project-driven tutorials inside a coding agent. Discovers courses from a catalogue, keeps progress in the learner's own repository, and loads one lesson at a time.",
   "author": {
     "name": "skomp",
     "url": "https://github.com/skomp"
   },
-  "homepage": "https://github.com/skomp/tutorAIl",
-  "repository": "https://github.com/skomp/tutorAIl",
+  "homepage": "https://github.com/skomp/belay",
+  "repository": "https://github.com/skomp/belay",
   "license": "MIT",
   "keywords": [
     "tutorial",
@@ -20,7 +20,7 @@
   "skills": "./skills/",
   "hooks": {},
   "interface": {
-    "displayName": "tutorAIl",
+    "displayName": "Belay",
     "shortDescription": "Interactive tutorials that run inside your coding agent",
     "longDescription": "Discovers tutorials from a local catalogue, materializes the course into your own repository, and teaches one task at a time. You write the code; the tutor explains, validates and tracks progress. Progress lives in the repository, so a fresh conversation resumes exactly where you stopped.",
     "developerName": "skomp",
@@ -34,6 +34,6 @@
       "I want to learn Rust.",
       "Continue the tutorial."
     ],
-    "websiteURL": "https://github.com/skomp/tutorAIl"
+    "websiteURL": "https://github.com/skomp/belay"
   }
 }

@@ -22,8 +22,8 @@ The last three fetch nothing either, unless given --refresh.
 
 Options:
     --config PATH       the catalogue of catalogues
-                        (default ~/.config/tutorail/catalogs.yaml)
-    --cache-dir PATH    (default ~/.cache/tutorail)
+                        (default ~/.config/belay/catalogs.yaml)
+    --cache-dir PATH    (default ~/.cache/belay)
     --timeout SECONDS   per git command (default 30)
     --offline           discover without fetching; serve what is on disk
     --json              machine-readable output instead of the report
@@ -87,8 +87,8 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 SKILL_DIR = SCRIPT_DIR.parent
 BUNDLED_CATALOG = SKILL_DIR / "catalog" / "builtin.yaml"
 
-DEFAULT_CONFIG = "~/.config/tutorail/catalogs.yaml"
-DEFAULT_CACHE_DIR = "~/.cache/tutorail"
+DEFAULT_CONFIG = "~/.config/belay/catalogs.yaml"
+DEFAULT_CACHE_DIR = "~/.cache/belay"
 DEFAULT_TIMEOUT = 30
 
 KNOWN_CONFIG_VERSIONS = (1,)
@@ -528,7 +528,7 @@ def implied_default(config_path: Path) -> tuple[list[CatalogSpec], str]:
     """What to do when there is no catalogs.yaml.
 
     The old two-file model is exactly this list, so an existing
-    ~/.config/tutorail/catalog.yaml keeps working with no migration. The user
+    ~/.config/belay/catalog.yaml keeps working with no migration. The user
     file comes FIRST, so a user entry overrides a shipped one - which is the
     same precedence the two-file model had.
 
@@ -2367,7 +2367,7 @@ def render_query(result: QueryResult, heading: str, stream) -> None:
 def render_header(
     command: str, config: Path, note: str | None, cache: Cache, stream
 ) -> None:
-    print(f"tutorAIl catalogues - {command}", file=stream)
+    print(f"Belay catalogues - {command}", file=stream)
     print(f"config:      {config}", file=stream)
     if note:
         print(f"             {note}", file=stream)
@@ -2518,7 +2518,7 @@ def command_resolve(args, stream) -> int:
         if args.json:
             print(json.dumps(payload, indent=2, sort_keys=True), file=stream)
         else:
-            print(f"tutorAIl catalogues - resolve {wanted}", file=stream)
+            print(f"Belay catalogues - resolve {wanted}", file=stream)
             print("", file=stream)
             print(
                 f"No catalogue supplies {wanted!r}. Available: {available}",
@@ -2555,7 +2555,7 @@ def command_resolve(args, stream) -> int:
         print(json.dumps(payload, indent=2, sort_keys=True), file=stream)
         return code
 
-    print(f"tutorAIl catalogues - resolve {wanted}", file=stream)
+    print(f"Belay catalogues - resolve {wanted}", file=stream)
     print("", file=stream)
     print(f"  id:             {match.id}", file=stream)
     print(f"  title:          {match.entry.get('title')}", file=stream)

@@ -2,12 +2,12 @@
 
 **Date:** 2026-09-14
 **Last amended:** 2026-09-21
-**Status:** sections 4 to 7 implemented in `PR: tutorAIl#44`. Sections 5.4 and 5.5 — the
-validator deriving the disclosure block, and its harness — implemented for tutorAIl#45;
+**Status:** sections 4 to 7 implemented in `PR: belay#44`. Sections 5.4 and 5.5 — the
+validator deriving the disclosure block, and its harness — implemented for belay#45;
 section 7's failure path is conversational behaviour and stays open there. Section 2.2 -
-lesson content is data, not instructions - is not built; it belongs with tutorAIl#32.
-**Issue:** tutorAIl#31
-**Supersedes:** the "Proposed direction" section of tutorAIl#31, which was written before
+lesson content is data, not instructions - is not built; it belongs with belay#32.
+**Issue:** belay#31
+**Supersedes:** the "Proposed direction" section of belay#31, which was written before
 the threat model was settled and asks for a capability model this document rejects.
 
 ---
@@ -128,7 +128,7 @@ learner's work — and running it is itself part of learning Rust, so the learne
 it. The *same* command run after the tutor bootstraps a project, purely to confirm the
 setup is sound, teaches nothing. Handing that one to the learner is toil.
 
-The course-quality rubric in `skomp/tutorail-authoring` already scores exactly this at −2:
+The course-quality rubric in `skomp/belay-authoring` already scores exactly this at −2:
 *"deterministic and unambiguous; no decision; a mistake teaches nothing — and the bundle
 could have handed the result over instead of assigning it."* `supplies` carries the same
 idea for files: *"Name it as setup, not as a lesson."* The runner has the concept; it has
@@ -277,7 +277,7 @@ The banner states what happens. It never states that it is safe. This is stateme
 
 ### 5.4 The block is derived by the validator, not by the tutor
 
-**Added 2026-09-16, closing tutorAIl#45's deterministic half. Implemented 2026-09-21** in
+**Added 2026-09-16, closing belay#45's deterministic half. Implemented 2026-09-21** in
 `validate_bundle.py` — `derive_disclosure()` and `render_disclosure()` — with one addition
 this section did not foresee, recorded at the end of it.
 
@@ -394,7 +394,7 @@ reversed is what makes it a test. Same class as building a float test from `0.5`
 
 **What this does not cover.** §7's failure path — the start stopping, the verbatim report,
 the `not-certified` record — is behaviour in a conversation and none of it is reachable
-from this suite. It stays open in tutorAIl#45, alongside tutorAIl#22, which asks for the
+from this suite. It stays open in belay#45, alongside belay#22, which asks for the
 same kind of harness for optional lessons. Those two want one answer, not two.
 
 ---
@@ -405,7 +405,7 @@ same kind of harness for optional lessons. Those two want one answer, not two.
 
 Check 8 already owns the `validators` map: it verifies `kind` is known and that each kind's
 required extra field is present. The loop is presence-only
-(`skills/tutorail/scripts/validate_bundle.py`, `check 8`, the `for extra in
+(`skills/belay/scripts/validate_bundle.py`, `check 8`, the `for extra in
 VALIDATOR_KINDS[kind]` block), which is the measured hole.
 
 **Measured 2026-09-13, repository source at `3b5a6b8`:** a copy of
@@ -480,14 +480,14 @@ warning.
 
 All eight fixture bundles in this repository stay clean — none declares
 `setup_validators` and none should begin failing. The five bundles in
-`skomp/tutorail-bundles` stay clean too, checked with
-`TUTORAIL_SWEEP_SIBLING_REPOS=1` (tutorAIl#43).
+`skomp/belay-bundles` stay clean too, checked with
+`BELAY_SWEEP_SIBLING_REPOS=1` (belay#43).
 
 The bar is one number, and it is the same number on every machine:
 **702 assertions** for `tests/test_validate_bundle.py` and **338** for
 `tests/test_catalogs.py`. Measured in six configurations — default, `HOME` pointed at an
 empty directory, sibling sweep on, and each of those with PyYAML blocked on `PYTHONPATH`.
-All six agree, which is what tutorAIl#29 and tutorAIl#37 together bought.
+All six agree, which is what belay#29 and belay#37 together bought.
 
 ---
 
@@ -552,20 +552,20 @@ This section now follows it as written.
 
 ## 9. Relationship to other issues
 
-- **tutorAIl#31** — this document supersedes its proposed direction. §4 to §7 are
-  implemented in `PR: tutorAIl#44`. §5's disclosure block was a runner behaviour no harness
+- **belay#31** — this document supersedes its proposed direction. §4 to §7 are
+  implemented in `PR: belay#44`. §5's disclosure block was a runner behaviour no harness
   could exercise; §5.4 moved its derivation into the validator and §5.5's suite now covers
-  the content, so what is left of it in tutorAIl#45 is §7's failure path alone — the start
+  the content, so what is left of it in belay#45 is §7's failure path alone — the start
   stopping, the verbatim report and the `not-certified` record, all of which are
   conversational.
-- **tutorAIl#32** — platform guardrails. §2.1 statement 1 and §2.2 belong to the same
+- **belay#32** — platform guardrails. §2.1 statement 1 and §2.2 belong to the same
   question that issue asks: what the protocol carries because no host enforces it. The two
   should agree on which layer holds which rule.
-- **tutorAIl#29** — landed. Validator names are now unique in every environment, which this
+- **belay#29** — landed. Validator names are now unique in every environment, which this
   design assumes when it says a `setup_validators` entry resolves a name in the map.
-- **tutorAIl#37** — closed. The suite's assertion count no longer varies with worktrees or
-  with sibling repositories: the worktree half landed in `PR: tutorAIl#40`, the
-  sibling-repository half in `PR: tutorAIl#43`, which put five sweep sites behind
-  `TUTORAIL_SWEEP_SIBLING_REPOS` and counts them apart from the total. §6.5's regression bar
+- **belay#37** — closed. The suite's assertion count no longer varies with worktrees or
+  with sibling repositories: the worktree half landed in `PR: belay#40`, the
+  sibling-repository half in `PR: belay#43`, which put five sweep sites behind
+  `BELAY_SWEEP_SIBLING_REPOS` and counts them apart from the total. §6.5's regression bar
   is therefore statable as a single number on any machine, which it was not when this
   document was written.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Structural validator for tutorAIl bundles and instances.
+"""Structural validator for Belay bundles and instances.
 
 Two callers, one script. An author runs it over a bundle or a catalogue
 before shipping. A runner runs it over the instance it has just materialized,
@@ -4191,7 +4191,7 @@ def check_manifest_fields(manifest: Any, report: Report) -> None:
     An author who misspells an optional field gets silence from every other
     check in this file. `teaching_methods` is not `teaching_method`, so the
     runner reads no teaching method, draws a banner one sentence shorter,
-    and nothing anywhere says why (tutorAIl#24). The same silence covers
+    and nothing anywhere says why (belay#24). The same silence covers
     `lesson`, `covered`, `assumed`, `tutor_owns` - every field whose absence
     is legal.
 
@@ -4633,7 +4633,7 @@ def unknown_entry_fields(entry: dict) -> list[str]:
     count is (entries carrying the field) + 1 for the comment, so it equals
     the entry count EXACTLY when precisely one entry is missing the field -
     the single case such a check exists to catch is the single case it
-    passes. Measured on the real catalogue in skomp/tutorail-bundles,
+    passes. Measured on the real catalogue in skomp/belay-bundles,
     which has 5 entries and a header comment naming the field:
 
                                                    as it   with one field
@@ -5112,7 +5112,7 @@ def render(report: Report, stream=sys.stdout) -> None:
         )
     else:
         applicable = sorted(report.checks)
-    print(f"tutorAIl validator - mode: {report.mode}", file=stream)
+    print(f"Belay validator - mode: {report.mode}", file=stream)
     print(f"target:      {report.target}", file=stream)
     print(f"yaml reader: {YAML_READER}", file=stream)
     render_disclosure(report.disclosure, stream)
@@ -5180,7 +5180,7 @@ def render(report: Report, stream=sys.stdout) -> None:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="validate_bundle.py",
-        description="Structurally validate a tutorAIl bundle or instance.",
+        description="Structurally validate a Belay bundle or instance.",
     )
     parser.add_argument("path", help="the bundle, instance or catalogue path")
     group = parser.add_mutually_exclusive_group()

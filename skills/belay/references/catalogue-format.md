@@ -36,13 +36,13 @@ has chosen, is the step that is allowed to look.
 
 | File | Ships | Holds |
 |---|---|---|
-| `~/.config/tutorail/catalogs.yaml` | no | the list of catalogues, in priority order |
+| `~/.config/belay/catalogs.yaml` | no | the list of catalogues, in priority order |
 | `catalog/builtin.yaml`, relative to this skill | yes | only tutorials shipped with the plugin |
-| `~/.config/tutorail/catalog.yaml` | no — created on first registration | the user's own registrations |
-| `~/.cache/tutorail/catalogs/<id>/` | no | the last successful copy of each catalogue, and any clone |
+| `~/.config/belay/catalog.yaml` | no — created on first registration | the user's own registrations |
+| `~/.cache/belay/catalogs/<id>/` | no | the last successful copy of each catalogue, and any clone |
 
 **When `catalogs.yaml` is absent**, the runner behaves as though it listed
-`~/.config/tutorail/catalog.yaml` first and the bundled catalogue second. That is exactly
+`~/.config/belay/catalog.yaml` first and the bundled catalogue second. That is exactly
 the two-file model this replaced, so an existing user catalogue keeps working with no
 migration and no action from you. A missing user catalogue is the normal state on a first
 run: it is left out rather than reported as a failure.
@@ -62,7 +62,7 @@ catalogs:
   - id: skomp
     source:
       type: git
-      url: git@github.com:skomp/tutorail-bundles.git
+      url: git@github.com:skomp/belay-bundles.git
       ref: main
       path: catalog.yaml          # repository root, or any subfolder
   - id: builtin
@@ -230,7 +230,7 @@ That one rule is what lets a bundles repository ship a `catalog.yaml` at its roo
 its own bundles by relative path. A learner adds the repository with one entry in
 `catalogs.yaml`, and the bundles arrive with it. For a `git` catalogue the root is inside
 the local cache clone, so `catalogs.py resolve` prints an absolute path under
-`~/.cache/tutorail/` — that is correct, and materialization copies from there.
+`~/.cache/belay/` — that is correct, and materialization copies from there.
 
 An absolute path, or one starting with `~`, is used as written. A catalogue fetched from a
 repository may **not** do that, and may not climb out of its own directory with `..`: such
@@ -274,7 +274,7 @@ catalogue, never about the course. A reader that cannot tell those apart cannot 
 either honestly.
 
 A hand-written catalogue may still omit it; nothing rejects that. A **generator** writes it
-every time, and `catalog.py` in `skomp/tutorail-authoring` does.
+every time, and `catalog.py` in `skomp/belay-authoring` does.
 
 **The name is deliberate.** A bundle's `tutorial.yaml` already has a key called
 `optional_lessons`, and there it is a **mapping of lesson path to offer metadata**. One
@@ -482,7 +482,7 @@ successful fetch did not carry.
 
 1. ask for the repository URL, the branch, and where the catalogue file sits inside it
    (`catalog.yaml` at the root is the convention);
-2. if `~/.config/tutorail/catalogs.yaml` does not exist, run `catalogs.py status` first and
+2. if `~/.config/belay/catalogs.yaml` does not exist, run `catalogs.py status` first and
    write the configuration it prints, so the user's existing catalogue is not dropped;
 3. add the entry **above** `builtin`, and below any catalogue the user said they prefer;
 4. run `catalogs.py discover` and show what arrived, including any entry that was skipped.
@@ -494,7 +494,7 @@ successful fetch did not carry.
    `aliases`, `level`, `style` and `workspace_kind`. Registration is the one operation
    that legitimately opens a bundle without a learner having chosen it, because the
    learner is pointing at that specific bundle;
-3. write the entry into `~/.config/tutorail/catalog.yaml`, creating the file with
+3. write the entry into `~/.config/belay/catalog.yaml`, creating the file with
    `catalog_version: 1` and a `tutorials:` list if it does not exist;
 4. do not add the entry to `catalog/builtin.yaml`. That file ships with the plugin and
    holds only what the plugin ships;

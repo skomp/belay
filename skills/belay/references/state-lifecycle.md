@@ -135,7 +135,7 @@ Steps, in order:
 
    ```yaml
    instance:
-     materialized_from: local:../tutorail-bundles/rust-automaton-db
+     materialized_from: local:../belay-bundles/rust-automaton-db
      materialized_at: 2026-09-11
      runner_version: 1
    ```
@@ -357,7 +357,7 @@ Extend step 5's block with the validation keys:
 
 ```yaml
 instance:
-  materialized_from: local:../tutorail-bundles/rust-automaton-db
+  materialized_from: local:../belay-bundles/rust-automaton-db
   materialized_at: 2026-09-11
   runner_version: 1
   validated: 2026-09-12

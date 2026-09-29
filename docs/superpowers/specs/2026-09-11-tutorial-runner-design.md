@@ -3,7 +3,7 @@
 **Date:** 2026-09-11
 **Last amended:** 2026-09-21
 **Status:** Design approved. Formats and first bundle implemented; runner in progress.
-**Repositories:** `tutorAIl` (runner), `tutorail-bundles` (courses), `automaton-db` (a learner)
+**Repositories:** `Belay` (runner), `belay-bundles` (courses), `automaton-db` (a learner)
 
 ---
 
@@ -25,7 +25,7 @@ context, not a whole course.** Every structural decision below serves that.
 | Concept | Lives | Mutable | Contains a learner? |
 |---|---|---|---|
 | **Runner** | installed plugin, outside learner repos | no | no |
-| **Bundle** | a subfolder of `tutorail-bundles` (or any source) | no | **no** |
+| **Bundle** | a subfolder of `belay-bundles` (or any source) | no | **no** |
 | **Instance** | `<workspace>/tutorial/` | yes | **yes, exactly one** |
 | **Workspace** | the learner's own repository/directory | yes | learner-owned |
 
@@ -184,7 +184,7 @@ where the instance came from. It is absent from every bundle:
 
 ```yaml
 instance:
-  materialized_from: local:../tutorail-bundles/rust-automaton-db
+  materialized_from: local:../belay-bundles/rust-automaton-db
   materialized_at: 2026-09-11
   runner_version: 1
 ```
@@ -571,11 +571,11 @@ default*, so nothing a user already has stops working.
 
 | Layer | File | Ships | Contains |
 |---|---|---|---|
-| catalogue of catalogues | `~/.config/tutorail/catalogs.yaml` | no | which catalogues, in priority order |
-| catalogue | `skills/tutorail/catalog/builtin.yaml` | yes | only bundles shipped with the plugin |
-| catalogue | `~/.config/tutorail/catalog.yaml` | no | the user's registrations |
+| catalogue of catalogues | `~/.config/belay/catalogs.yaml` | no | which catalogues, in priority order |
+| catalogue | `skills/belay/catalog/builtin.yaml` | yes | only bundles shipped with the plugin |
+| catalogue | `~/.config/belay/catalog.yaml` | no | the user's registrations |
 | catalogue | any `catalog.yaml` in a bundles repository | no | that repository's own bundles |
-| cache | `~/.cache/tutorail/catalogs/<id>/` | no | the last successful copy, and any clone |
+| cache | `~/.cache/belay/catalogs/<id>/` | no | the last successful copy, and any clone |
 
 ```yaml
 catalogs_version: 1
@@ -585,7 +585,7 @@ catalogs:
   - id: skomp
     source:
       type: git
-      url: git@github.com:skomp/tutorail-bundles.git
+      url: git@github.com:skomp/belay-bundles.git
       ref: main
       path: catalog.yaml          # repository root, or any subfolder
   - id: builtin
@@ -593,7 +593,7 @@ catalogs:
 ```
 
 Catalogue source types: `bundled`, `file`, `git`. **When `catalogs.yaml` is absent, the
-runner behaves as though it listed `~/.config/tutorail/catalog.yaml` followed by
+runner behaves as though it listed `~/.config/belay/catalog.yaml` followed by
 `bundled`** — which is the old model exactly, so an existing user catalogue needs no
 migration.
 
@@ -628,7 +628,7 @@ remain declared but unimplemented *there*. Remoteness was added one layer up ins
 That rule is what makes a bundles repository install with one entry: it ships a
 `catalog.yaml` at its root naming its own bundles by relative path, and adding the
 repository adds the courses. For a `git` catalogue the root is inside the cache clone, so
-a resolved bundle path is an absolute path under `~/.cache/tutorail/`.
+a resolved bundle path is an absolute path under `~/.cache/belay/`.
 
 A catalogue fetched from a repository may not name a bundle outside its own directory —
 no absolute path, no `..` escape. Such an entry is skipped with a reason. A local
@@ -868,7 +868,7 @@ warning` / `known accepted warning` (matched against `STATE.md`'s `accepted_warn
 
 ## 9. Validator script
 
-`skills/tutorail/scripts/validate_bundle.py` — **written for authors, and run by the runner
+`skills/belay/scripts/validate_bundle.py` — **written for authors, and run by the runner
 too.**
 
 **Corrected 2026-09-12.** This section said "authoring-time only. Never in a learner's
@@ -1016,7 +1016,7 @@ mechanical consumer is this script, and it always parses with the restricted rea
 PyYAML is never used, even where it is importable: it accepts an anchor, silently collapses
 a duplicate key, resolves `no` and `2026-09-13` to a bool and a date, and describes its
 scanner's state where the restricted reader names the cause and the line. Preferring it
-when present made the verdict a property of the machine (tutorAIl#29). (Verified 2026-09-13
+when present made the verdict a property of the machine (belay#29). (Verified 2026-09-13
 on Python 3.11.9 with PyYAML 6.0.3 installed and, as a control, with `import yaml` made to
 fail: both suites green, and the parse identical.)
 
@@ -1028,10 +1028,10 @@ One shared `skills/` directory, sibling per-host manifests. Proven shape: superp
 6.3.0 ships `.claude-plugin/`, `.codex-plugin/` and others over a single `skills/`.
 
 ```
-tutorAIl/
+Belay/
 ├── .claude-plugin/{plugin.json,marketplace.json}
 ├── .codex-plugin/plugin.json          "skills": "./skills/", "hooks": {}
-├── skills/tutorail/
+├── skills/belay/
 │   ├── SKILL.md
 │   ├── references/{bundle-format,catalogue-format,runner-protocol,state-lifecycle}.md
 │   ├── scripts/{validate_bundle.py,catalogs.py,yamlite.py}
@@ -1045,8 +1045,8 @@ tutorAIl/
 Install:
 
 ```
-Claude Code:  /plugin marketplace add skomp/tutorAIl ; /plugin install tutorail@tutorail
-Codex:        codex plugin marketplace add <repo> ; codex plugin add tutorail
+Claude Code:  /plugin marketplace add skomp/belay ; /plugin install belay@belay
+Codex:        codex plugin marketplace add <repo> ; codex plugin add belay
 ```
 
 ### Host-neutrality rules (all verified, see §13)
@@ -1058,11 +1058,11 @@ Codex:        codex plugin marketplace add <repo> ; codex plugin add tutorail
   makes the body portable, and it is the same rule that keeps bundles portable.
 - **No `${CLAUDE_PLUGIN_ROOT}`** — Claude-only. Both hosts resolve skill-body paths
   relative to the skill directory, so everything needed at runtime lives under
-  `skills/tutorail/` and is referenced relatively.
+  `skills/belay/` and is referenced relatively.
 - **Trigger words go at the front of `description`** — Codex truncates descriptions under
   a 2%-of-context / 8,000-char budget, shortest-first, and a truncated description stops
   triggering.
-- **No file-backed slash command on Codex.** Invocation there is `$tutorail` or implicit
+- **No file-backed slash command on Codex.** Invocation there is `$belay` or implicit
   description match. The runner must be discoverable by description, not by command name.
 
 ---
@@ -1071,12 +1071,12 @@ Codex:        codex plugin marketplace add <repo> ; codex plugin add tutorail
 
 Three repositories, deliberately separate.
 
-### `tutorAIl` — the runner
+### `Belay` — the runner
 
 The plugin. Contains no course content. Ships the skill, the reference documents, the
 validator, and a small example bundle.
 
-### `tutorail-bundles` — the courses
+### `belay-bundles` — the courses
 
 Each subfolder is one self-contained bundle. Not shipped with the plugin; registered in a
 user's catalogue. Currently holds `rust-automaton-db/`.
@@ -1164,7 +1164,7 @@ should not re-derive these.
 | Path resolution in skill body | relative to skill directory, **both hosts** |
 | `project_doc_fallback_filenames` | real, but ambient-instructions only — **not** a skills mechanism |
 | Local filesystem | case-insensitive; `lesson.md` resolves as `LESSON.md` |
-| Local toolchain | Python 3.11.9, `jq` 1.8.2, no `yq`, cargo/rustc 1.98.0, PyYAML 6.0.3 (installed 2026-09-13, and unused: `yamlite` always parses with its own reader — tutorAIl#29) |
+| Local toolchain | Python 3.11.9, `jq` 1.8.2, no `yq`, cargo/rustc 1.98.0, PyYAML 6.0.3 (installed 2026-09-13, and unused: `yamlite` always parses with its own reader — belay#29) |
 
 ---
 
@@ -1202,8 +1202,8 @@ caches a *bundle* that a learner has not chosen.
    but is deliberately empty (see decision 1). A `git` catalogue therefore has no real remote to point at
    yet; it is exercised against local repositories over `file://` URLs, which uses the
    same clone, fetch and checkout path.
-6. ~~**`tutorail-bundles` has no `catalog.yaml` of its own.**~~ **Settled 2026-09-12.**
-   It has one, generated by `tutorail-authoring`'s `catalog.py`, which validates its own
+6. ~~**`belay-bundles` has no `catalog.yaml` of its own.**~~ **Settled 2026-09-12.**
+   It has one, generated by `belay-authoring`'s `catalog.py`, which validates its own
    output with `--catalog --portable` before it exits. The repository is installable with
    a single `catalogs.yaml` entry.
 7. ~~**Whether an optional lesson ever needs to warn about one failure and be re-offered
@@ -1283,7 +1283,7 @@ on an optional lesson has declared something load-bearing and then made it skipp
 runner copes, but the course would usually be better with that material on the main path.
 This is not a validator error — the format permits it and the runner handles it — so it
 belongs in a quality checker that scores a bundle rather than in a check that rejects one.
-Recorded as a first scoring signal in `tutorail-authoring`.
+Recorded as a first scoring signal in `belay-authoring`.
 
 ---
 
@@ -1327,7 +1327,7 @@ but not *which version*:
 
 ```yaml
 instance:
-  materialized_from: local:../tutorail-bundles/rust-automaton-db
+  materialized_from: local:../belay-bundles/rust-automaton-db
   materialized_at: 2026-09-11
 ```
 
@@ -1348,7 +1348,7 @@ about: editing the README of a bundles repository changes it while nothing about
 changed.
 
 The replacement is an ordered version the author sets, `version: MAJOR.MINOR` in
-`tutorial.yaml`, stamped into the instance as `materialized_version`. tutorAIl#51 carries
+`tutorial.yaml`, stamped into the instance as `materialized_version`. belay#51 carries
 the field and its semantics; the two parts compare **as integers**, so 2.10 is later than
 2.9 and a float parse is wrong. Nothing else in this entry changes: detection still comes
 first, and the runner still never reconciles on its own.
@@ -1383,7 +1383,7 @@ the command that checks it. Both are fixed here.
 ### The method
 
 ```
-wc -w skills/tutorail/SKILL.md
+wc -w skills/belay/SKILL.md
 ```
 
 **The whole file, frontmatter and tables included. One command, no script, no exclusions.**
@@ -1479,11 +1479,11 @@ supported; and what happens when transmission fails (it must never block a lesso
 ## 17. Known issue: Codex plugin distribution
 
 Claude Code installs cleanly from the GitHub repo: `claude plugin marketplace add
-skomp/tutorAIl` then `claude plugin install tutorail@tutorail`. Measured cost, ~255 tokens
+skomp/belay` then `claude plugin install belay@belay`. Measured cost, ~255 tokens
 always-on and ~3.5k on invoke — the four reference documents are ~11k words and cost
 nothing until loaded, which is the progressive-disclosure design paying off.
 
-Codex is installed via `~/.agents/skills/tutorail`, its documented user scope, verified by
+Codex is installed via `~/.agents/skills/belay`, its documented user scope, verified by
 rendering the model-visible prompt and confirming the skill is injected. The plugin route
 does not work, for two reasons found by probing:
 
@@ -1512,18 +1512,18 @@ real files. One repository cannot satisfy both without duplication.
 |---|---|
 | Bundle format contract (`references/bundle-format.md`) | **done** |
 | Design spec (this document) | **done** |
-| `tutorail-bundles` repository | **done** — holds five bundles and its own `catalog.yaml` |
+| `belay-bundles` repository | **done** — holds five bundles and its own `catalog.yaml` |
 | `rust-automaton-db` bundle | **done** — imported, corrected, verified |
 | `automaton-db/tutorial/` instance + `STATE.md` | **done** — uncommitted |
-| Validator (`skills/tutorail/scripts/validate_bundle.py`) | **done** — 28 bundle checks + 7 catalogue checks |
-| Validator test suite | **done** — 702 assertions on a clean checkout, the same on any machine; every check proven firing or warning. `TUTORAIL_SWEEP_SIBLING_REPOS=1` adds the published bundles, counted separately (tutorAIl#37) |
+| Validator (`skills/belay/scripts/validate_bundle.py`) | **done** — 28 bundle checks + 7 catalogue checks |
+| Validator test suite | **done** — 702 assertions on a clean checkout, the same on any machine; every check proven firing or warning. `BELAY_SWEEP_SIBLING_REPOS=1` adds the published bundles, counted separately (belay#37) |
 | Optional lessons (`optional_lessons`, `failure_modes`) | **done** — 2026-09-12, §6; checks 18-21 |
-| First-load banner + `teaching_method` | **done** — 2026-09-13, released in 0.6.0; `state-lifecycle.md` §3 step 7, check 27; tutorAIl#23 |
-| Offer / defer / re-offer behaviour | **untested** — no harness exercises it; tutorAIl#22 |
-| Multi-catalogue support (`skills/tutorail/scripts/catalogs.py`) | **done** — 2026-09-12, §7 |
+| First-load banner + `teaching_method` | **done** — 2026-09-13, released in 0.6.0; `state-lifecycle.md` §3 step 7, check 27; belay#23 |
+| Offer / defer / re-offer behaviour | **untested** — no harness exercises it; belay#22 |
+| Multi-catalogue support (`skills/belay/scripts/catalogs.py`) | **done** — 2026-09-12, §7 |
 | Catalogue test suite (`tests/test_catalogs.py`) | **done** — 338 assertions; every failure kind proven firing |
-| Shared YAML reader (`skills/tutorail/scripts/yamlite.py`) | **done** — the only reader; the PyYAML preference was removed 2026-09-13, tutorAIl#29 |
-| `catalog.yaml` inside `tutorail-bundles` | **done** — 2026-09-12, §15 item 6; generated by `tutorail-authoring`'s `catalog.py` |
+| Shared YAML reader (`skills/belay/scripts/yamlite.py`) | **done** — the only reader; the PyYAML preference was removed 2026-09-13, belay#29 |
+| `catalog.yaml` inside `belay-bundles` | **done** — 2026-09-12, §15 item 6; generated by `belay-authoring`'s `catalog.py` |
 | `SKILL.md` (the runner control plane) | **done** |
 | `references/catalogue-format.md` | **done** |
 | `references/runner-protocol.md` | **done** |

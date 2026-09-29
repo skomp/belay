@@ -1,21 +1,21 @@
-# TutorAIl
+# Belay
 
 **Structured, adaptive tutorials for coding agents.**
 
 Build real software yourself, with an agent that follows a deliberate curriculum, inspects
 what you actually wrote, and only moves on once the step is genuinely done.
 
-Ask a coding agent for help and it will optimise for finishing the task. TutorAIl gives it
+Ask a coding agent for help and it will optimise for finishing the task. Belay gives it
 a different job: hand you one task at a time, read the code you wrote in your own project,
 teach when it fails, and refuse to write the exercise for you.
 
-| A written tutorial | A general coding agent | TutorAIl |
+| A written tutorial | A general coding agent | Belay |
 |---|---|---|
 | Reliable, but the same route for everyone | Flexible, but inclined to solve the task | An authored curriculum, taught adaptively |
 | Static text you read | Drifts without a learning plan | Authored side trails, and detours it records |
 | Snippets, disconnected from your work | Produces the implementation quickly | You build the project; the tutor inspects it |
 
-The agent you already use — Claude Code or Codex — is the runtime. TutorAIl supplies the
+The agent you already use — Claude Code or Codex — is the runtime. Belay supplies the
 teaching protocol, a portable course format, a validator and a progress lifecycle. There is
 no app, no server, and no model API key.
 
@@ -31,8 +31,8 @@ beyond the standard library — plus whatever toolchain the course you pick requ
 ### Install — Claude Code
 
 ```
-/plugin marketplace add skomp/tutorAIl
-/plugin install tutorail@tutorail
+/plugin marketplace add skomp/belay
+/plugin install belay@belay
 ```
 
 ### Install — Codex
@@ -41,12 +41,12 @@ Codex has no working plugin route (see [Installing on Codex](#installing-on-code
 its documented user skills scope, which follows symlinks:
 
 ```
-git clone git@github.com:skomp/tutorAIl.git ~/.local/share/tutorail
+git clone git@github.com:skomp/belay.git ~/.local/share/belay
 mkdir -p ~/.agents/skills
-ln -s ~/.local/share/tutorail/skills/tutorail ~/.agents/skills/tutorail
+ln -s ~/.local/share/belay/skills/belay ~/.agents/skills/belay
 ```
 
-Update it with `git -C ~/.local/share/tutorail pull`.
+Update it with `git -C ~/.local/share/belay pull`.
 
 ### Start a course
 
@@ -146,7 +146,7 @@ The bounds matter as much as the behaviour:
   against the course's own coverage list; a concept the course already taught gets
   coaching, not a new lesson.
 
-TutorAIl is not a course generator. Adaptation supplements an authored curriculum and is
+Belay is not a course generator. Adaptation supplements an authored curriculum and is
 bounded by its learning objectives.
 
 ---
@@ -154,7 +154,7 @@ bounded by its learning objectives.
 ## Available courses
 
 Six courses exist today. One ships with the plugin; the other five live in
-[`skomp/tutorail-bundles`](https://github.com/skomp/tutorail-bundles) and arrive when you
+[`skomp/belay-bundles`](https://github.com/skomp/belay-bundles) and arrive when you
 register that repository as a catalogue.
 
 `Scope` comes from the catalogue entry, not from the course manifest, which has no field
@@ -164,33 +164,33 @@ none is implied.
 
 | Course | What you build | Language | Level | Scope | Where |
 |---|---|---|---|---|---|
-| Rust Fundamentals Through a Command-Line Tool | A tool that counts the lines or words in a file — arguments, one subcommand, `Result`, a unit test. No crates. | Rust | beginner | 3 lessons; a few hours | [ships with the plugin](skills/tutorail/examples/rust-cli-basics) |
-| Build a Durable Event Broker in Go | A persistent, partitioned event broker from first principles, then batching, retention, observability and a deliberately limited follower. | Go | intermediate-to-advanced | 15 lessons; a few weeks | [`tutorail-bundles`](https://github.com/skomp/tutorail-bundles) |
-| Make Music with Integer Arithmetic | A Bytebeat synthesiser that turns integer expressions into a valid WAV file. | TypeScript, JavaScript, Python, Go or Kotlin | beginner-to-intermediate | 4 lessons; a few days | [`tutorail-bundles`](https://github.com/skomp/tutorail-bundles) |
-| Build a Fixed-Window Rate Limiter | A small in-memory rate limiter with an explicit contract and deterministic time. | your choice | intermediate | 3 lessons; a few hours | [`tutorail-bundles`](https://github.com/skomp/tutorail-bundles) |
-| Learn Rust by Building AutomatonDB | An automaton-native, partitioned database with storage-engine and distributed-systems depth. | Rust | intermediate-to-advanced | 23 lessons; months of work | [`tutorail-bundles`](https://github.com/skomp/tutorail-bundles) |
-| Learn WebGL 2 by Building a 3D Scene | An interactive, lit and textured 3D scene, from the rendering pipeline up to a loaded glTF model. | TypeScript | intermediate | 18 lessons; months of work | [`tutorail-bundles`](https://github.com/skomp/tutorail-bundles) |
+| Rust Fundamentals Through a Command-Line Tool | A tool that counts the lines or words in a file — arguments, one subcommand, `Result`, a unit test. No crates. | Rust | beginner | 3 lessons; a few hours | [ships with the plugin](skills/belay/examples/rust-cli-basics) |
+| Build a Durable Event Broker in Go | A persistent, partitioned event broker from first principles, then batching, retention, observability and a deliberately limited follower. | Go | intermediate-to-advanced | 15 lessons; a few weeks | [`belay-bundles`](https://github.com/skomp/belay-bundles) |
+| Make Music with Integer Arithmetic | A Bytebeat synthesiser that turns integer expressions into a valid WAV file. | TypeScript, JavaScript, Python, Go or Kotlin | beginner-to-intermediate | 4 lessons; a few days | [`belay-bundles`](https://github.com/skomp/belay-bundles) |
+| Build a Fixed-Window Rate Limiter | A small in-memory rate limiter with an explicit contract and deterministic time. | your choice | intermediate | 3 lessons; a few hours | [`belay-bundles`](https://github.com/skomp/belay-bundles) |
+| Learn Rust by Building AutomatonDB | An automaton-native, partitioned database with storage-engine and distributed-systems depth. | Rust | intermediate-to-advanced | 23 lessons; months of work | [`belay-bundles`](https://github.com/skomp/belay-bundles) |
+| Learn WebGL 2 by Building a 3D Scene | An interactive, lit and textured 3D scene, from the rendering pipeline up to a loaded glTF model. | TypeScript | intermediate | 18 lessons; months of work | [`belay-bundles`](https://github.com/skomp/belay-bundles) |
 
 ### Registering the bundles repository
 
 Ask the tutor, in the agent you installed it into:
 
 ```
-Add git@github.com:skomp/tutorail-bundles.git as a tutorial catalogue.
+Add git@github.com:skomp/belay-bundles.git as a tutorial catalogue.
 ```
 
 It follows the procedure in
-[`catalogue-format.md`](skills/tutorail/references/catalogue-format.md) section 10: read
+[`catalogue-format.md`](skills/belay/references/catalogue-format.md) section 10: read
 what is already configured, write the entry above the bundled catalogue, refresh, and show
 you what arrived. A catalogue may also be a plain file on disk, and a private repository
-needs no extra setup — fetching uses the Git credentials you already have. TutorAIl stores
+needs no extra setup — fetching uses the Git credentials you already have. Belay stores
 no tokens and never prompts for one.
 
 The tutor can show you what is registered at any point, and from a checkout of this
 repository you can run the same thing yourself without fetching anything:
 
 ```
-python3 skills/tutorail/scripts/catalogs.py status
+python3 skills/belay/scripts/catalogs.py status
 ```
 
 An installed plugin carries the same scripts inside its own directory rather than at that
@@ -204,7 +204,7 @@ successful copy and reported as cached, and the other catalogues still answer.
 
 ---
 
-## How TutorAIl works
+## How Belay works
 
 Two artefacts, and one mechanical rule separating them.
 
@@ -275,30 +275,30 @@ needs them:
 
 | Document | Covers |
 |---|---|
-| [`SKILL.md`](skills/tutorail/SKILL.md) | the control plane — orient, resume or discover, the teaching contract |
-| [`bundle-format.md`](skills/tutorail/references/bundle-format.md) | the normative bundle contract, for authors |
-| [`catalogue-format.md`](skills/tutorail/references/catalogue-format.md) | catalogues, precedence, failure handling, presenting a choice |
-| [`state-lifecycle.md`](skills/tutorail/references/state-lifecycle.md) | materialisation, what a completed task and lesson record |
-| [`runner-protocol.md`](skills/tutorail/references/runner-protocol.md) | the turn loop, validation outcomes, ownership, detours, offers |
+| [`SKILL.md`](skills/belay/SKILL.md) | the control plane — orient, resume or discover, the teaching contract |
+| [`bundle-format.md`](skills/belay/references/bundle-format.md) | the normative bundle contract, for authors |
+| [`catalogue-format.md`](skills/belay/references/catalogue-format.md) | catalogues, precedence, failure handling, presenting a choice |
+| [`state-lifecycle.md`](skills/belay/references/state-lifecycle.md) | materialisation, what a completed task and lesson record |
+| [`runner-protocol.md`](skills/belay/references/runner-protocol.md) | the turn loop, validation outcomes, ownership, detours, offers |
 | [design specification](docs/superpowers/specs/2026-09-11-tutorial-runner-design.md) | the architecture, the measured host facts, and the designs that were rejected |
 
 ---
 
 ## Write a course
 
-[`bundle-format.md`](skills/tutorail/references/bundle-format.md) is the normative
+[`bundle-format.md`](skills/belay/references/bundle-format.md) is the normative
 contract. It is self-contained: hand it to a person, or paste it into another model, and it
 is enough on its own.
 
-[`skills/tutorail/examples/rust-cli-basics/`](skills/tutorail/examples/rust-cli-basics) is
+[`skills/belay/examples/rust-cli-basics/`](skills/belay/examples/rust-cli-basics) is
 a small worked example carrying both lesson forms and two optional lessons.
 
 Check your work before you ship it:
 
 ```
-python3 skills/tutorail/scripts/validate_bundle.py path/to/bundle
-python3 skills/tutorail/scripts/validate_bundle.py --instance path/to/project/tutorial
-python3 skills/tutorail/scripts/validate_bundle.py --catalog path/to/catalog.yaml
+python3 skills/belay/scripts/validate_bundle.py path/to/bundle
+python3 skills/belay/scripts/validate_bundle.py --instance path/to/project/tutorial
+python3 skills/belay/scripts/validate_bundle.py --catalog path/to/catalog.yaml
 ```
 
 29 bundle checks and 7 catalogue checks. Your run and the runner's run are the same checks
@@ -311,7 +311,7 @@ lessons must still be finishable by someone who declines every offer. Nothing en
 that, and section 13 of `bundle-format.md` explains why it is the invariant that keeps an
 older runner — which ignores the offers entirely — from teaching a broken course.
 
-[`skomp/tutorail-authoring`](https://github.com/skomp/tutorail-authoring) holds an
+[`skomp/belay-authoring`](https://github.com/skomp/belay-authoring) holds an
 interview-driven skill and toolkit for writing and maintaining bundles, and a course-quality
 checker. It calls this repository's validator, so install the runner first.
 
@@ -336,7 +336,7 @@ Assumed-concept review, and follow-up recommendations at the end of a course.
 
 - **The offer / defer / re-offer behaviour for optional lessons is specified and
   implemented, but no harness exercises it**
-  ([tutorAIl#22](https://github.com/skomp/tutorAIl/issues/22)). The structural checks on
+  ([belay#22](https://github.com/skomp/belay/issues/22)). The structural checks on
   `optional_lessons` and `failure_modes` are tested; the conversational behaviour around
   them is not.
 - **Bundle updates after a learner has started are not solved.** An instance is a copy, and
@@ -369,12 +369,12 @@ the supported route until that is resolved.
 
 **The two hosts do not run the same copy.** Claude Code installs a published version from
 the marketplace: it changes only when you update it, and it never contains uncommitted
-work. Updating takes both commands — `claude plugin marketplace update tutorail && claude
-plugin update tutorail@tutorail` — because the second alone compares manifest *versions*,
+work. Updating takes both commands — `claude plugin marketplace update belay && claude
+plugin update belay@belay` — because the second alone compares manifest *versions*,
 not commits, and will report you are already current while the new work sits unreachable
 behind the old version number. Codex follows the symlink into a checkout, so it
 runs whatever is currently checked out there — including a half-finished edit mid-save.
-That is why the Codex instructions above clone to `~/.local/share/tutorail` rather than to
+That is why the Codex instructions above clone to `~/.local/share/belay` rather than to
 a directory you work in. If you *are* developing the runner, point the symlink at your
 working checkout deliberately.
 
@@ -395,12 +395,12 @@ default, so a number you see that differs from a number printed here is a defect
 not a missing directory.
 
 The deeper sweep is still available and still finds real defects. Setting
-`TUTORAIL_SWEEP_SIBLING_REPOS=1` also validates the published bundles in
-[`skomp/tutorail-bundles`](https://github.com/skomp/tutorail-bundles) and the learner
+`BELAY_SWEEP_SIBLING_REPOS=1` also validates the published bundles in
+[`skomp/belay-bundles`](https://github.com/skomp/belay-bundles) and the learner
 workspace in `skomp/automaton-db`, when the machine holds them:
 
 ```
-TUTORAIL_SWEEP_SIBLING_REPOS=1 python3 tests/test_validate_bundle.py
+BELAY_SWEEP_SIBLING_REPOS=1 python3 tests/test_validate_bundle.py
 ```
 
 Those are separate checkouts at their own revisions, so what they contribute is
@@ -424,10 +424,10 @@ one of them with `import yaml` made to fail — and comparing the answers.
 ### Contributing
 
 There is no `CONTRIBUTING.md` yet. Work is tracked as
-[GitHub issues](https://github.com/skomp/tutorAIl/issues). This repository holds the runner,
+[GitHub issues](https://github.com/skomp/belay/issues). This repository holds the runner,
 the bundle format, the validator and discovery; courses belong in
-[`skomp/tutorail-bundles`](https://github.com/skomp/tutorail-bundles) and authoring tools in
-[`skomp/tutorail-authoring`](https://github.com/skomp/tutorail-authoring).
+[`skomp/belay-bundles`](https://github.com/skomp/belay-bundles) and authoring tools in
+[`skomp/belay-authoring`](https://github.com/skomp/belay-authoring).
 
 ### Licence
 
