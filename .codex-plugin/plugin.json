@@ -1,7 +1,7 @@
 {
   "name": "belay",
-  "version": "0.8.0",
-  "description": "Runs interactive, project-driven tutorials inside a coding agent. Discovers courses from a catalogue, keeps progress in the learner's own repository, and loads one lesson at a time.",
+  "version": "0.9.0",
+  "description": "Runs interactive, project-driven courses inside a coding agent. Discovers courses from a catalogue, keeps progress in the learner's own repository, and loads one lesson at a time.",
   "author": {
     "name": "skomp",
     "url": "https://github.com/skomp"
@@ -21,7 +21,7 @@
   "hooks": {},
   "interface": {
     "displayName": "Belay",
-    "shortDescription": "Interactive tutorials that run inside your coding agent",
+    "shortDescription": "Interactive courses that run inside your coding agent",
     "longDescription": "Discovers tutorials from a local catalogue, materializes the course into your own repository, and teaches one task at a time. You write the code; the tutor explains, validates and tracks progress. Progress lives in the repository, so a fresh conversation resumes exactly where you stopped.",
     "developerName": "skomp",
     "category": "Developer Tools",
