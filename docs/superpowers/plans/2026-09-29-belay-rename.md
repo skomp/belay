@@ -34,9 +34,9 @@ Every number here was produced by running the command against a `git archive HEA
 | Distinct brand spellings in the tree | exactly **4**: `tutorail`, `tutorAIl`, `TutorAIl`, `TUTORAIL` | Enumerated, not assumed. No `Tutorail` or `TUTORAIl` exists. |
 | Brand occurrences to remove | **263** | Excludes the design doc. |
 | Brand occurrences in the design doc | **54** | These stay. |
-| Brand occurrences in the plan doc (this file) | **63** | These stay. |
-| Brand occurrences in all tracked files today | **380** | 263 + 54 + 63. A count of 380 is not a bug. |
-| `tutorial` repo-wide | **865** | Must be **865** after. Unchanged. |
+| Brand occurrences in the plan doc (this file) | not fixed | These stay, and the count drifts every time this file is edited. Never assert on it. |
+| Brand occurrences in all tracked files today | ~380 | 263 to remove, plus the two documents. A tree-wide count well above 263 is not a bug. |
+| `tutorial` repo-wide | **captured, not fixed** | Capture it before the substitution and require the same value after. Do not hardcode it: editing this plan changes it. |
 | `tutorial` in `references/` + `tests/` | **543** | Must be **543** after. This is the invariant that catches a bad substitution. |
 | Files the substitution edits | **23** | `git grep -liI` with both documents excluded. |
 | `tutorAIl` occurrences by context | 60 issue refs `tutorAIl#NN`, 13 `skomp/tutorAIl`, ~7 prose | Issue refs dominate; only ~7 need the capitalised `Belay`. |
@@ -103,11 +103,15 @@ Rule order matters and each rule earns its place:
 D=docs/superpowers/specs/2026-09-29-belay-rename-design.md
 P=docs/superpowers/plans/2026-09-29-belay-rename.md
 git grep -hoiI 'tutorail' -- . ":(exclude)$D" ":(exclude)$P" | wc -l   # expect 263
-git grep -hoiI 'tutorial' | wc -l                                      # expect 865
 git grep -hoiI 'tutorial' -- skills/tutorail/references/ tests/ | wc -l # expect 543
+
+# Capture the repo-wide domain-word count. Do NOT compare it to a number in
+# this plan -- editing this plan changes it. Compare before against after.
+git grep -hoiI 'tutorial' | wc -l > /tmp/belay-tutorial-before
+cat /tmp/belay-tutorial-before
 ```
 
-Expected: `263`, `865`, `543`. If any differs, STOP and report — the tree moved since this plan was measured.
+Expected: `263` and `543`. If either differs, STOP and report — the tree moved since this plan was measured. The third value is whatever it is; only its stability matters.
 
 - [ ] **Step 3: Apply the substitution**
 
@@ -127,13 +131,19 @@ worktree's `.git` file or any untracked scratch.
 ```bash
 git grep -niI 'tutorail' -- . ":(exclude)$D" ":(exclude)$P" | grep -vi 'tutorails' | wc -l  # 0
 git grep -hoiI 'tutorails' -- . ":(exclude)$D" ":(exclude)$P" | wc -l                        # 10
-git grep -hoiI 'tutorial' | wc -l                                                            # 865
+git grep -hoiI 'tutorial' | wc -l                        # must equal /tmp/belay-tutorial-before
 git grep -hoiI 'tutorial' -- skills/belay/references/ tests/ | wc -l                         # 543
 git ls-files | grep -ci 'tutorail' || true                                                   # 0
 git grep -hoI '__belay_decoy__' | wc -l                                                      # 2
 ```
 
-Expected, in order: `0`, `10`, `865`, `543`, `0`, `2`. **Any deviation stops the task.** In particular a `tutorial` count other than 865 or 543 means the format contract was damaged — revert with `git checkout -- . && git reset` and report.
+Expected, in order: `0`, `10`, *the captured before-value*, `543`, `0`, `2`. **Any deviation stops the task.**
+
+```bash
+diff <(git grep -hoiI 'tutorial' | wc -l) /tmp/belay-tutorial-before && echo "domain word unchanged"
+```
+
+A repo-wide `tutorial` count that moved, or a `references/`+`tests/` count that is not 543, means the format contract was damaged — revert with `git checkout -- . && git reset` and report.
 
 - [ ] **Step 5: Run both suites**
 
