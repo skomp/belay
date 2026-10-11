@@ -1,4 +1,4 @@
-# tutorAIl
+# Belay
 
 ## Scope — one session per repository
 
@@ -6,9 +6,9 @@ Three sessions run in parallel, one per repository. **This repository is the run
 
 | Repository | Session owns | Holds |
 |---|---|---|
-| `skomp/tutorAIl` | **this one** | the runner plugin, the bundle format contract, the validator, the catalogue and discovery |
-| `skomp/tutorail-authoring` | the authoring-tools session | the authoring skill, the toolkit, the course-quality checker, the dry-run harness |
-| `skomp/tutorail-bundles` | the bundles session | the courses themselves, and the repository catalogue |
+| `skomp/belay` | **this one** | the runner plugin, the bundle format contract, the validator, the catalogue and discovery |
+| `skomp/belay-authoring` | the authoring-tools session | the authoring skill, the toolkit, the course-quality checker, the dry-run harness |
+| `skomp/belay-bundles` | the bundles session | the courses themselves, and the repository catalogue |
 
 Work that belongs to another repository goes to that repository as an issue. Do not build
 it here because it is adjacent.
@@ -102,17 +102,17 @@ ignore it.
 
 Releasing is: bump all four, run both suites (`python3 tests/test_validate_bundle.py` and
 `python3 tests/test_catalogs.py` — there is no pytest here), commit, **push**, then
-`claude plugin marketplace update tutorail && claude plugin update tutorail@tutorail`.
+`claude plugin marketplace update belay && claude plugin update belay@belay`.
 The push is not optional: the marketplace source is the GitHub repository, so an unpushed
 bump is invisible to it.
 
-Run the validator suite once more with `TUTORAIL_SWEEP_SIBLING_REPOS=1` before you push a
-release. The plain run validates only this commit, by design (tutorAIl#37); that run also
-validates the published bundles in `skomp/tutorail-bundles`, which is the only place a
+Run the validator suite once more with `BELAY_SWEEP_SIBLING_REPOS=1` before you push a
+release. The plain run validates only this commit, by design (belay#37); that run also
+validates the published bundles in `skomp/belay-bundles`, which is the only place a
 format change is seen against real courses. It reports what it added on its own line and
 never folds it into the total.
 
 Minor for added format surface, patch for a fix. Verify by diffing the installed cache
-under `~/.claude/plugins/cache/tutorail/tutorail/<version>/` against the working tree —
+under `~/.claude/plugins/cache/belay/belay/<version>/` against the working tree —
 and probe for something the previous version lacks, so a silent no-op cannot pass as a
 success.

@@ -1,7 +1,7 @@
-# Tutorials that ship with the tutorAIl plugin.
+# Tutorials that ship with the Belay plugin.
 #
 # This file lists only bundles that are part of the plugin itself. A user registers
-# their own tutorials in ~/.config/tutorail/catalog.yaml, which the runner creates on
+# their own tutorials in ~/.config/belay/catalog.yaml, which the runner creates on
 # first use; entries there have the same shape as the entries here.
 #
 # `source.path` is relative to THIS FILE'S OWN DIRECTORY, which is the rule for every

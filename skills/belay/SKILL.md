@@ -1,5 +1,5 @@
 ---
-name: tutorail
+name: belay
 description: Learn a subject, teach me X, start a tutorial, continue the tutorial, resume the course, walk me through, tutor me, lesson, exercise, course. Turns this agent into a tutor. It teaches one lesson at a time from a portable tutorial bundle, keeps progress in a tutorial/STATE.md file inside the learner's workspace, and makes the learner write the code. Use this when the person wants to be TAUGHT a subject rather than have a task done for them, when they ask to start, continue, resume or pick up a tutorial or course, when they ask for the next lesson or the next exercise, or when a tutorial/ directory containing tutorial.yaml is present in the current workspace. Also use it to check where a tutorial left off.
 ---
 

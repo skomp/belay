@@ -1,9 +1,9 @@
 # Bundle Relationships and Concept-Based Prerequisites — Design
 
 **Date:** 2026-09-12
-**Last amended:** 2026-09-21
+**Last amended:** 2026-09-29
 **Status:** Approved, not started. **Blocked on the `supplies` branch merging.**
-**Repository:** `tutorAIl`
+**Repository:** `belay`
 
 ---
 
@@ -23,14 +23,14 @@ this one.
 Seven of the file groups this feature needs are held by the live `supplies` branch:
 
 ```
-skills/tutorail/references/bundle-format.md      skills/tutorail/SKILL.md
-skills/tutorail/references/runner-protocol.md    skills/tutorail/scripts/validate_bundle.py
-skills/tutorail/references/state-lifecycle.md    tests/test_validate_bundle.py
+skills/belay/references/bundle-format.md      skills/belay/SKILL.md
+skills/belay/references/runner-protocol.md    skills/belay/scripts/validate_bundle.py
+skills/belay/references/state-lifecycle.md    tests/test_validate_bundle.py
 the three plugin manifests
 ```
 
 Free: `references/catalogue-format.md`, `scripts/catalogs.py`, `tests/test_catalogs.py`,
-`skills/tutorail/examples/`.
+`skills/belay/examples/`.
 
 **Merge `supplies` first, then build on the merged main.** Both features edit the same
 normative documents, and a conflict resolved inside a contract is the worst place to

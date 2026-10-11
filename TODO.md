@@ -1,7 +1,7 @@
 # TODO
 
 **Work is tracked as GitHub issues.** See
-[open issues](https://github.com/skomp/tutorAIl/issues), labelled `created-by-claude`
+[open issues](https://github.com/skomp/belay/issues), labelled `created-by-claude`
 where Claude filed them.
 
 This file records only what an issue cannot: a decision that is settled and must not be

