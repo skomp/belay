@@ -303,7 +303,7 @@ python3 skills/belay/scripts/validate_bundle.py --instance path/to/project/tutor
 python3 skills/belay/scripts/validate_bundle.py --catalog path/to/catalog.yaml
 ```
 
-29 bundle checks and 7 catalogue checks. Your run and the runner's run are the same checks
+30 bundle checks and 7 catalogue checks. Your run and the runner's run are the same checks
 over the same files, which is the point: a bundle that passes here starts cleanly there. It
 checks structure — that references resolve, that no progress leaked into the course, that
 every lesson is reachable. It says nothing about whether the course is any good.
@@ -387,7 +387,7 @@ One skill body serves both hosts.
 No pytest; two plain scripts, run from a checkout of this repository.
 
 ```
-python3 tests/test_validate_bundle.py     # 702 assertions
+python3 tests/test_validate_bundle.py     # 750 assertions
 python3 tests/test_catalogs.py            # 338 assertions
 ```
 

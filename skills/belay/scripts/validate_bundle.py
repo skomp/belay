@@ -121,6 +121,8 @@ CHECKS: dict[int, str] = {
         "an unrecognised one WARNS",
     29: "setup_validators entries are well-formed, name a declared validator, "
         "and carry a describe line the banner can print",
+    30: "version, when declared, is a quoted \"MAJOR.MINOR\" string; so is the "
+        "instance stamp's materialized_version",
 }
 
 BUNDLE_ONLY = {12, 13, 26}
@@ -247,6 +249,7 @@ KNOWN_MANIFEST_FIELDS = (
     "title",
     "tutor_owned",
     "validators",
+    "version",
     "workspace_kind",
 )
 
@@ -673,7 +676,28 @@ LIMITATIONS = """What a pass does and does not mean
       structures, and check 28 does not reach down into them.
     `instance` is a DEFINED field and check 28 never warns about it, in
       either mode. A bundle carrying the stamp is check 7's finding, and one
-      key deserves one report."""
+      key deserves one report.
+
+  The content version (check 30):
+    an ABSENT `version` is silent, reports "n/a", and is read as "1.0". The
+      format REQUIRES the field of every new bundle, but a validator that
+      required it would make every bundle published before it invalid on the
+      day it shipped. The same holds for an instance's
+      `materialized_version`: an instance made before the field existed has
+      none, and that is not reported.
+    the value MUST be a quoted string. An unquoted `version: 2.10` reaches
+      this validator as the number 2.1 - the reader has already dropped the
+      digit, and nothing downstream can recover it - so any number is a
+      finding that tells the author to add the quotes.
+    a part with a leading zero ("02.1") is refused: it compares equal to
+      "2.1" and looks different, and a version is read by people as well as
+      by programs.
+    check 30 proves the SHAPE of one value. It sees one bundle, so it cannot
+      say whether the version moved when the course did, or whether it moved
+      forwards; that needs two versions side by side, which is the
+      catalogue generator's view and not this one's. It does not compare
+      `version` against `materialized_version` either: an instance behind
+      its bundle is a fact to report to the learner, not a defect."""
 
 
 @dataclass(frozen=True)
@@ -710,6 +734,26 @@ class Disclosure:
 
 
 @dataclass
+class VersionReport:
+    """The content version the run read - a fact in the report header.
+
+    `bundle` is the manifest's `version` as "MAJOR.MINOR", "1.0" when the key
+    is absent (`bundle_declared` is then False), and None when the value is
+    malformed or tutorial.yaml did not yield a mapping - check 30 says why.
+    `materialized` is the instance stamp's `materialized_version` with the
+    same convention, and is meaningful in instance mode only; an absent one
+    stays None, because no default stands in for a stamp that predates the
+    field.
+    """
+
+    bundle: str | None = None
+    bundle_declared: bool = False
+    materialized: str | None = None
+    materialized_declared: bool = False
+    unreadable: str = ""
+
+
+@dataclass
 class Report:
     mode: str
     target: Path
@@ -741,6 +785,9 @@ class Report:
     # only by ABSENCE cannot be told from an older validator that never
     # emitted it.
     disclosure: Disclosure | None = None
+    # The content version (check 30), reported beside `target:` as a fact,
+    # in BOTH modes. None for a catalogue, which carries no version.
+    version: VersionReport | None = None
 
     def add(self, check: int, where: str, message: str) -> None:
         self.findings.append(Finding(check, where, message))
@@ -4164,6 +4211,116 @@ def check_teaching_method(manifest: Any, report: Report) -> None:
     report.ran(27, f"declared, {words} word{'' if words == 1 else 's'}")
 
 
+# Two non-negative integers joined by one period, with no leading zero in
+# either part. [0-9] rather than \d, because \d also matches non-ASCII digits.
+_VERSION_RE = re.compile(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)")
+VERSION_ABSENT = "1.0"
+
+
+def parse_version(value: Any) -> tuple[int, int] | str:
+    """(MAJOR, MINOR) for a well-formed version, or the reason it is not one.
+
+    The parts are returned as integers because that is how they compare:
+    "2.10" is later than "2.9". A string or float comparison gets that wrong,
+    and gets it wrong silently for every version below x.10.
+    """
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return (
+            f"it is the number {value!r}, not a string. An unquoted "
+            f"MAJOR.MINOR is read as a number and loses digits - "
+            f"version: 2.10 reads as 2.1 - so quote it exactly as you mean "
+            f'it, e.g. version: "2.10"'
+        )
+    if not isinstance(value, str):
+        actual = (
+            "nothing at all - the key is written with no value under it"
+            if value is None
+            else f"{type(value).__name__}: {value!r}"
+        )
+        return (
+            f'it is {actual}. Write it as a quoted string, e.g. '
+            f'version: "2.1"'
+        )
+    match = _VERSION_RE.fullmatch(value)
+    if match is None:
+        if re.fullmatch(r"[0-9]+\.[0-9]+", value):
+            return (
+                f"it is {value!r}, and a part has a leading zero. "
+                f'"02.1" and "2.1" compare equal while looking different, '
+                f"so write each part without one"
+            )
+        return (
+            f"it is {value!r}. It must be two non-negative integers joined "
+            f'by one period, MAJOR.MINOR, e.g. "2.1"'
+        )
+    return int(match.group(1)), int(match.group(2))
+
+
+def check_version(manifest: Any, mode: str, report: Report) -> None:
+    """Check 30 - both modes.
+
+    `version` is the author-set content version, MAJOR.MINOR. The format
+    requires it of every new bundle; this check does not, and reads an
+    absent one as "1.0", so every bundle published before the field stays
+    valid unedited. What it does check is the SHAPE of a value that is
+    there: a quoted string of two non-negative integers. A number is a
+    finding of its own, because the reader has already turned `2.10` into
+    2.1 by the time anything here sees it.
+
+    In instance mode it also checks the stamp's `materialized_version` with
+    the same rule. An absent one is silent: the instance was made before the
+    field existed. A stamp that is not a mapping is not this check's to
+    report.
+
+    The value is reported in the header, in both modes, beside `target:`.
+    """
+    info = VersionReport()
+    report.version = info
+    if not isinstance(manifest, dict):
+        info.unreadable = "tutorial.yaml did not yield a mapping"
+        report.blocked(
+            30,
+            "tutorial.yaml did not parse into a mapping, so it has no "
+            "version to read",
+        )
+        return
+
+    seen: list[str] = []
+    if "version" not in manifest:
+        info.bundle = VERSION_ABSENT
+    else:
+        info.bundle_declared = True
+        parsed = parse_version(manifest["version"])
+        if isinstance(parsed, str):
+            report.add(30, "tutorial.yaml", f"'version' is malformed: {parsed}.")
+        else:
+            info.bundle = f"{parsed[0]}.{parsed[1]}"
+            seen.append(f'version "{info.bundle}"')
+
+    stamp = manifest.get("instance")
+    if mode == "instance" and isinstance(stamp, dict):
+        if "materialized_version" in stamp:
+            info.materialized_declared = True
+            parsed = parse_version(stamp["materialized_version"])
+            if isinstance(parsed, str):
+                report.add(
+                    30,
+                    "tutorial.yaml (instance.materialized_version)",
+                    f"'materialized_version' is malformed: {parsed}. The "
+                    f"runner copies it from the bundle's 'version' when it "
+                    f"materializes, or writes \"1.0\" when the bundle "
+                    f"declares none.",
+                )
+            else:
+                info.materialized = f"{parsed[0]}.{parsed[1]}"
+                seen.append(f'materialized_version "{info.materialized}"')
+
+    if not info.bundle_declared and not info.materialized_declared:
+        report.na(30, f'no version declared; read as "{VERSION_ABSENT}"')
+        return
+    report.ran(30, ", ".join(seen) if seen else "declared, malformed")
+
+
 def unknown_manifest_fields(manifest: dict) -> list[str]:
     """The top-level keys of a parsed tutorial.yaml the format does not define.
 
@@ -4400,6 +4557,8 @@ def validate(target: Path, mode: str) -> Report:
     # check certifying a file it never saw. It blocks instead, exactly as
     # check 8 does two steps above, and for the same reason.
     check_manifest_fields(manifest, report)
+    # Check 30, both modes, and given the RAW manifest for check 28's reason.
+    check_version(manifest, mode, report)
     if mode == "bundle":
         check_no_generated_dir(target, report)
         template_fm = check_state_template(target, manifest_dict, report)
@@ -5100,6 +5259,30 @@ def render_disclosure(disclosure: Disclosure | None, stream) -> None:
         print(f"{label} {entry}", file=stream)
 
 
+def render_version(info: VersionReport | None, mode: str, stream) -> None:
+    """The `version:` line, beside `target:`. A fact, not a check."""
+    if info is None:
+        return
+    if info.unreadable:
+        print(f"version:     not read - {info.unreadable}", file=stream)
+        return
+    if info.bundle is None:
+        line = "malformed - check 30 says why"
+    elif info.bundle_declared:
+        line = info.bundle
+    else:
+        line = f"{info.bundle} (not declared)"
+    if mode == "instance":
+        if not info.materialized_declared:
+            stamped = "not recorded"
+        elif info.materialized is None:
+            stamped = "malformed"
+        else:
+            stamped = info.materialized
+        line += f"; materialized_version: {stamped}"
+    print(f"version:     {line}", file=stream)
+
+
 def render(report: Report, stream=sys.stdout) -> None:
     if report.checks is CHECKS:
         applicable = sorted(
@@ -5115,6 +5298,7 @@ def render(report: Report, stream=sys.stdout) -> None:
     print(f"Belay validator - mode: {report.mode}", file=stream)
     print(f"target:      {report.target}", file=stream)
     print(f"yaml reader: {YAML_READER}", file=stream)
+    render_version(report.version, report.mode, stream)
     render_disclosure(report.disclosure, stream)
     print("", file=stream)
     print("checks:", file=stream)

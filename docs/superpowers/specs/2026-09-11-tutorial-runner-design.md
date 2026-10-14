@@ -1,7 +1,7 @@
 # Generic Tutorial Runner + Portable Tutorial Bundles — Design
 
 **Date:** 2026-09-11
-**Last amended:** 2026-09-29
+**Last amended:** 2026-10-14
 **Status:** Design approved. Formats and first bundle implemented; runner in progress.
 **Repositories:** `belay` (runner), `belay-bundles` (courses), `automaton-db` (a learner)
 
@@ -185,12 +185,14 @@ where the instance came from. It is absent from every bundle:
 ```yaml
 instance:
   materialized_from: local:../belay-bundles/rust-automaton-db
+  materialized_version: "2.1"
   materialized_at: 2026-09-11
   runner_version: 1
 ```
 
 Provenance only. Nothing in the teaching loop reads it; it exists so a learner, or a
-future update mechanism, can tell which bundle an instance came from.
+future update mechanism, can tell which bundle an instance came from, and which version of
+it (`materialized_version`, §15c).
 
 ---
 
@@ -1322,8 +1324,8 @@ is not the paths but deciding which instance "continue the tutorial" means.
 **Decided 2026-09-12.** A runner detects that the bundle an instance came from has changed,
 reports it, and stops. It never reconciles on its own.
 
-**Why detection has to come first.** The instance stamp records where an instance came from
-but not *which version*:
+**Why detection has to come first.** Until 2026-10-14 the instance stamp recorded where an
+instance came from but not *which version*:
 
 ```yaml
 instance:
@@ -1331,7 +1333,7 @@ instance:
   materialized_at: 2026-09-11
 ```
 
-So today a runner cannot tell that an update exists at all.
+So a runner could not tell that an update existed at all.
 
 **Superseded 2026-09-19, and the original proposal was wrong.** This entry first proposed
 stamping a revision and a content hash:
@@ -1347,11 +1349,36 @@ says only *different*, never *behind*. A sha is also noisy in a way a course doe
 about: editing the README of a bundles repository changes it while nothing about the course
 changed.
 
-The replacement is an ordered version the author sets, `version: MAJOR.MINOR` in
+The replacement is an ordered version the author sets, `version: "MAJOR.MINOR"` in
 `tutorial.yaml`, stamped into the instance as `materialized_version`. belay#51 carries
 the field and its semantics; the two parts compare **as integers**, so 2.10 is later than
 2.9 and a float parse is wrong. Nothing else in this entry changes: detection still comes
 first, and the runner still never reconciles on its own.
+
+**Shipped 2026-10-14 (belay#51), in this shape:**
+
+- **The value is a quoted string**, `version: "2.1"` and `materialized_version: "2.1"`.
+  The issue first wrote it unquoted. Measured on 2026-10-14, both `yamlite` and PyYAML
+  6.0.2 read `version: 2.10` and `version: 2.1` as the same float 2.1, so the unquoted
+  form loses the digit before any comparison runs — the 2.10-against-2.9 trap one layer
+  earlier. Neither part may have a leading zero: `"02.1"` would compare equal to `"2.1"`.
+- **REQUIRED in the contract, optional in the validator.** `bundle-format.md` section 2
+  requires it of every new bundle; validator check 30 reads an absent `version` as `"1.0"`
+  and stays quiet, so every bundle published before the field stays valid. Check 30 refuses
+  any other string and any number, and reports the value it read in the header of both
+  modes. In instance mode it checks `materialized_version` with the same rule and is quiet
+  when the stamp has none.
+- **MINOR means a live instance accepts the change without review; MAJOR means it stops and
+  asks the learner.** The table is in `bundle-format.md` section 2, **Content version**. A
+  MAJOR bump resets MINOR to `0`.
+- **The materialization step writes it** (`state-lifecycle.md` section 3 step 5): the
+  bundle's `version`, or `"1.0"` when the bundle declares none. An instance is behind its
+  bundle when the bundle's `version` is greater than `materialized_version`, compared as
+  integer pairs.
+- **What it does not do.** Nothing yet reads the two values side by side; the update
+  operation is belay#50. The validator sees one bundle and cannot check that a version
+  increases; that belongs where two versions are visible at once, in the authoring toolkit
+  and the catalogue generator (belay-authoring#24, belay-authoring#25).
 
 **Why it must not apply automatically.** `DESIGN.md` and `lessons/` are not purely bundle
 content once materialized. The tutor appends durable decisions to `DESIGN.md` as the learner
@@ -1359,7 +1386,8 @@ makes them, and generated lessons accumulate beside the authored ones. An overwr
 the learner's own design history — the record of what *they* decided — which no upstream
 revision can reconstruct.
 
-**What a resume does.** Name what changed and stop:
+**What a resume does.** Name what changed and stop. The instance is behind when the bundle's
+`version` is greater than the stamp's `materialized_version`, compared as integer pairs:
 
 > This course was revised upstream since you started. Two lessons you have not reached
 > changed (`04`, `07`), and `DESIGN.md` gained a section. Your `DESIGN.md` has three local
@@ -1371,7 +1399,8 @@ ones. That is the correct end state and considerably more to build and test. Det
 what has to exist before any policy can be chosen, and reporting is useful on its own.
 
 **Implementation note.** The stamp is defined in `state-lifecycle.md` and the resume path in
-`runner-protocol.md`. Neither is changed by this entry; this records the decision only.
+`runner-protocol.md`. belay#51 added `materialized_version` to the stamp; the resume path is
+unchanged, and the detection this entry describes is not built yet.
 
 ---
 
@@ -1516,7 +1545,7 @@ real files. One repository cannot satisfy both without duplication.
 | `rust-automaton-db` bundle | **done** — imported, corrected, verified |
 | `automaton-db/tutorial/` instance + `STATE.md` | **done** — uncommitted |
 | Validator (`skills/belay/scripts/validate_bundle.py`) | **done** — 28 bundle checks + 7 catalogue checks |
-| Validator test suite | **done** — 702 assertions on a clean checkout, the same on any machine; every check proven firing or warning. `BELAY_SWEEP_SIBLING_REPOS=1` adds the published bundles, counted separately (belay#37) |
+| Validator test suite | **done** — 750 assertions on a clean checkout, the same on any machine; every check proven firing or warning. `BELAY_SWEEP_SIBLING_REPOS=1` adds the published bundles, counted separately (belay#37) |
 | Optional lessons (`optional_lessons`, `failure_modes`) | **done** — 2026-09-12, §6; checks 18-21 |
 | First-load banner + `teaching_method` | **done** — 2026-09-13, released in 0.6.0; `state-lifecycle.md` §3 step 7, check 27; belay#23 |
 | Offer / defer / re-offer behaviour | **untested** — no harness exercises it; belay#22 |
