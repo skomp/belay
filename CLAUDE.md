@@ -91,9 +91,14 @@ installed. It was found by grepping the old version string across the repository
 afterwards — which is now a step rather than an accident:
 
 ```bash
-grep -rn '0\.7\.0' --include='*.json' --include='*.md' --exclude=CLAUDE.md . \
-  | grep -v worktrees        # expect none
+grep -rn '0\.7\.0' --include='*.json' --include='*.md' --exclude=CLAUDE.md \
+  --exclude-dir=superpowers . | grep -v worktrees        # expect none
 ```
+
+`--exclude-dir=superpowers` is load-bearing for the same reason: the specs and plans under
+`docs/superpowers/` are dated records, and one of them describes the release it planned,
+version number included. Found at the 0.9.1 bump, when the grep for `0.9.0` hit 13 lines of
+the rename's spec and plan, all correct as history.
 
 Run it with the version you are leaving, after the bump, and expect zero hits.
 `--exclude=CLAUDE.md` is load-bearing: the paragraph above names real version numbers, so
