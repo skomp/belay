@@ -79,6 +79,32 @@ four or fewer candidates, never narrowing to zero, and always leaving an option 
 shows everything. `catalogue-format.md` section 9 is normative and carries the procedure;
 it is the document a discovery loads, so that is where the detail lives.
 
+### A resume may say the course has moved on
+
+**Once, at the start of a resumed session, you MAY check whether the instance is behind its
+bundle.** The instance is behind when the source's `version` is greater than the stamp's
+`materialized_version`. Compare the two as pairs of integers, MAJOR first, and read an
+absent value as `"1.0"` (`bundle-format.md` section 2, **Content version**).
+
+This is the one read of the bundle source that a resume makes, and it reads only the
+`version` key of the source's `tutorial.yaml`. It does not break the rule that teaching
+never reaches back into the bundle source (`state-lifecycle.md` section 3 step 2). No lesson,
+`COURSE.md` or `DESIGN.md` is read from the source, and nothing is copied. The read happens
+only for a `local:` source in the stamp's `materialized_from`, with a relative path resolved
+from the workspace root. Any other kind of source would mean contacting a host, and a resume
+never does that.
+
+When the source cannot be read, or either value is malformed, **say nothing and continue.**
+When the instance is behind, say so in one sentence before the first task, give both
+versions, and say that nothing changes until the learner asks:
+
+> This course has a newer version (1.0, now 1.1). Ask me to update it whenever you like;
+> nothing changes until you do.
+
+Then teach. Do not repeat it in the same session, and do not plan or apply anything because
+of it. The update is the learner's to start, and `state-lifecycle.md` section 3.2 is the
+procedure when they do.
+
 ---
 
 ## 2. One turn
@@ -1416,7 +1442,7 @@ breaks that rule to re-check a directory that almost never changes. The files th
 read are the bundle's, and the bundle's copy in an instance is written once.
 
 **Never re-checking is the opposite mistake**, because an instance whose files were edited
-would never be looked at again. So the check runs at four further moments, each one a
+would never be looked at again. So the check runs at five further moments, each one a
 moment where something changed or something is already wrong:
 
 1. **The stamp carries no `validated` key.** The instance was materialized by a runner
@@ -1431,6 +1457,9 @@ moment where something changed or something is already wrong:
    report the whole list. A defect rarely travels alone, and one run answers "what else is
    wrong in here" for no context at all.
 4. **Somebody asks for it**, or the learner says they changed something inside `tutorial/`.
+5. **An update has just been applied** (`state-lifecycle.md` section 3.2). The update
+   removed the old record. Validate before the next task, and record the outcome exactly
+   as at materialization.
 
 A `validated` key that is present is not re-checked on a resume. It records that the check
 ran on the day it says; it is not a claim that nothing has changed since. Moment 3 is what

@@ -100,8 +100,9 @@ Run it with the version you are leaving, after the bump, and expect zero hits.
 without it this check reports a hit on its own documentation every time and teaches you to
 ignore it.
 
-Releasing is: bump all four, run both suites (`python3 tests/test_validate_bundle.py` and
-`python3 tests/test_catalogs.py` — there is no pytest here), commit, **push**, then
+Releasing is: bump all four, run the three suites (`python3 tests/test_validate_bundle.py`,
+`python3 tests/test_catalogs.py` and `python3 tests/test_plan_update.py` — there is no
+pytest here), commit, **push**, then
 `claude plugin marketplace update belay && claude plugin update belay@belay`.
 The push is not optional: the marketplace source is the GitHub repository, so an unpushed
 bump is invisible to it.

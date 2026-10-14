@@ -332,7 +332,9 @@ Version 0.9.0. Early, in active use, and honest about its edges.
 and per-source failure reporting. Materialising a course into a workspace and validating it
 before teaching. The teaching loop, ownership enforcement, validation outcomes and progress
 recording. Authored optional lessons and failure modes. Generated detours with provenance.
-Assumed-concept review, and follow-up recommendations at the end of a course.
+Assumed-concept review, and follow-up recommendations at the end of a course. Updating a
+course you have started to its newer version, when you ask for it: a plan you review, which
+keeps your progress, your `DESIGN.md` decisions and your generated lessons.
 
 **Known gaps.**
 
@@ -341,8 +343,9 @@ Assumed-concept review, and follow-up recommendations at the end of a course.
   ([belay#22](https://github.com/skomp/belay/issues/22)). The structural checks on
   `optional_lessons` and `failure_modes` are tested; the conversational behaviour around
   them is not.
-- **Bundle updates after a learner has started are not solved.** An instance is a copy, and
-  nothing refreshes it.
+- **An update cannot tell who changed a file.** The instance keeps no copy of the course as
+  it was when you started, so a lesson you worked in, or a `DESIGN.md`, that differs from
+  the newer course is shown to you as a difference, and you decide what to keep.
 - **Remote trust and signing are not solved.** A catalogue you register is a repository you
   have decided to trust. A course's validators are programs, and **nothing here checks what
   they do**: the validator checks that a `command` is a well-formed argument list, the
@@ -384,14 +387,15 @@ One skill body serves both hosts.
 
 ### Tests
 
-No pytest; two plain scripts, run from a checkout of this repository.
+No pytest; three plain scripts, run from a checkout of this repository.
 
 ```
-python3 tests/test_validate_bundle.py     # 750 assertions
+python3 tests/test_validate_bundle.py     # 753 assertions
 python3 tests/test_catalogs.py            # 338 assertions
+python3 tests/test_plan_update.py         # 60 assertions
 ```
 
-**Those two numbers are properties of this commit, not of your machine.** A clean
+**Those numbers are properties of this commit, not of your machine.** A clean
 checkout reports them on any machine. Nothing outside the checkout is validated by
 default, so a number you see that differs from a number printed here is a defect and
 not a missing directory.
