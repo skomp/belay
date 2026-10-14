@@ -34,6 +34,7 @@ import contextlib
 import io
 import json
 import os
+import random
 import re
 import shutil
 import subprocess
@@ -90,6 +91,12 @@ def skip_reason(path: Path, outside: bool) -> str | None:
 
 sys.path.insert(0, str(SCRIPT.parent))
 import validate_bundle as vb  # noqa: E402
+import yamlite  # noqa: E402
+
+try:  # the reference parser: tests compare yamlite with it; the scripts never use it
+    import yaml as _pyyaml
+except ImportError:  # pragma: no cover - depends on the machine
+    _pyyaml = None
 
 # --------------------------------------------------------------------------
 # Baselines
@@ -271,6 +278,25 @@ def m_no_title(root: Path) -> None:
         root / "lessons" / "03-first-refactor.md",
         "title: The first deliberate refactor\n",
         "",
+    )
+
+
+def m_title_with_unquoted_colon(root: Path) -> None:
+    # belay#53, verbatim: the title a standard YAML parser refuses ("mapping
+    # values are not allowed here") and check 3 used to pass.
+    edit(
+        root / "lessons" / "03-first-refactor.md",
+        "title: The first deliberate refactor\n",
+        "title: Events to state: joining the two halves\n",
+    )
+
+
+def m_title_with_quoted_colon(root: Path) -> None:
+    # The control for the case above: the same title, quoted, is valid YAML.
+    edit(
+        root / "lessons" / "03-first-refactor.md",
+        "title: The first deliberate refactor\n",
+        'title: "Events to state: joining the two halves"\n',
     )
 
 
@@ -3158,6 +3184,12 @@ CASES: list[Case] = [
          "has no 'title'"),
     Case("3: lesson has no frontmatter at all", 3, "automaton", "bundle",
          m_no_frontmatter, "there is no YAML frontmatter"),
+    Case("3: a title holding an unquoted ': ' is refused (belay#53)", 3,
+         "automaton", "bundle", m_title_with_unquoted_colon,
+         "contains ': ', which YAML reads as a mapping, not as text; quote "
+         "the value", where="lessons/03-first-refactor.md"),
+    Case("3: the same title, quoted, is accepted (belay#53 control)", 3,
+         "automaton", "bundle", m_title_with_quoted_colon, kind="silent"),
     Case("3: foldered lesson id copies the filename, not the folder", 3, "cli",
          "bundle", m_foldered_id_is_file_stem,
          "id is 'LESSON' but the lesson slug is '01-subcommands'"),
@@ -3894,6 +3926,10 @@ _passed = 0
 # from the commit under test alone whether or not the sweep is opted into.
 # The two are never added together (belay#37).
 _sibling_passed = 0
+# Assertions that compare yamlite with PyYAML, counted apart for the same
+# reason: whether PyYAML is importable is a property of the machine, and the
+# total must not move with it.
+_pyyaml_passed = 0
 _fired_checks: set[int] = set()
 # Checks demonstrated producing a WARNING. A warning-only check can never
 # appear in _fired_checks, so the coverage meta-test tracks the two
@@ -3922,6 +3958,19 @@ def sibling_assertions(active: bool = True):
             moved = _passed - before
             _passed -= moved
             _sibling_passed += moved
+
+
+@contextlib.contextmanager
+def pyyaml_assertions():
+    """Count what this block asserts against the PyYAML total, not the total."""
+    global _passed, _pyyaml_passed
+    before = _passed
+    try:
+        yield
+    finally:
+        moved = _passed - before
+        _passed -= moved
+        _pyyaml_passed += moved
 
 
 def record(ok: bool, label: str, detail: str = "") -> None:
@@ -4697,6 +4746,368 @@ def test_yaml_reader() -> None:
             )
 
 
+# --------------------------------------------------------------------------
+# The reader never reads a value differently from a standard YAML parser
+# --------------------------------------------------------------------------
+#
+# yamlite reads a subset of YAML. Refusing something a standard parser
+# accepts is allowed - that is what "restricted" means. Returning a value a
+# standard parser would not is the defect class: every check downstream then
+# certifies a document nobody else reads the same way. belay#57 found it in
+# comment stripping (an escaped quote, an apostrophe inside a plain scalar),
+# belay#49 and belay#53 in a plain scalar holding ': ', which YAML reads as a
+# mapping.
+#
+# The named cases below carry values measured with PyYAML 6.0.2 and asserted
+# as literals, so they run - and count - on every machine. The differential
+# property test needs PyYAML itself, so what it asserts is counted apart from
+# the total, the way the sibling sweep is (belay#37): the total stays a
+# property of the commit, and a machine without PyYAML prints a SKIP line
+# instead of passing quietly.
+
+_REFUSE = object()
+
+# (label, document, what yamlite returns or a substring of its refusal,
+#  what PyYAML returns or _REFUSE). A refusal is spelled ("refuse", text).
+_NAMED_YAML_CASES: list[tuple[str, str, object, object]] = [
+    # belay#57 - the two defects, and the even-count line that hid the first.
+    ("belay#57: an escaped double quote does not close the string",
+     'title: "say \\"hi # there"\n',
+     {"title": 'say "hi # there'}, {"title": 'say "hi # there'}),
+    ("belay#57: an odd number of escaped quotes before ' #'",
+     'title: "a \\" # b"\n', {"title": 'a " # b'}, {"title": 'a " # b'}),
+    ("belay#57: an even number of escaped quotes before ' #'",
+     'title: "a \\" b \\" # c"\n',
+     {"title": 'a " b " # c'}, {"title": 'a " b " # c'}),
+    ("belay#57: an apostrophe inside a plain scalar opens no string",
+     "title: N'? # 1\n", {"title": "N'?"}, {"title": "N'?"}),
+    # belay#57 - the lines that keep their values.
+    ("belay#57 keeps: '#' inside double quotes", 'title: "a # b"\n',
+     {"title": "a # b"}, {"title": "a # b"}),
+    ("belay#57 keeps: '#' inside single quotes", "title: 'a # b'\n",
+     {"title": "a # b"}, {"title": "a # b"}),
+    ("belay#57 keeps: '' inside single quotes", "title: 'it''s # x'\n",
+     {"title": "it's # x"}, {"title": "it's # x"}),
+    ("belay#57 keeps: a comment after a plain scalar", "title: a # b\n",
+     {"title": "a"}, {"title": "a"}),
+    # belay#49 and belay#53 - the refusal, and its controls.
+    ("belay#49: a plain scalar holding ': ' is refused, naming the line",
+     "title: Storage engine I: durability\n",
+     ("refuse", "line 1: the unquoted value 'Storage engine I: durability' "
+      "contains ': ', which YAML reads as a mapping, not as text; quote the "
+      "value"), _REFUSE),
+    ("belay#53: the lesson title from the report is refused",
+     "id: 14-events-to-state\ntitle: Events to state: joining the two halves\n",
+     ("refuse", "line 2: the unquoted value"), _REFUSE),
+    ("belay#49 control: the same value, quoted, parses",
+     'title: "Storage engine I: durability"\n',
+     {"title": "Storage engine I: durability"},
+     {"title": "Storage engine I: durability"}),
+    ("belay#49 control: a flow mapping is unaffected",
+     "go-build: { kind: command, command: [go, build] }\n",
+     {"go-build": {"kind": "command", "command": ["go", "build"]}},
+     {"go-build": {"kind": "command", "command": ["go", "build"]}}),
+    ("belay#49 control: ': ' inside a '|' block scalar is content",
+     "d: |\n  Storage engine I: durability\n",
+     {"d": "Storage engine I: durability\n"},
+     {"d": "Storage engine I: durability\n"}),
+    ("belay#49 control: ': ' inside a '>' block scalar is content",
+     "d: >\n  Storage engine I: durability\n",
+     {"d": "Storage engine I: durability\n"},
+     {"d": "Storage engine I: durability\n"}),
+    # The neighbouring shapes, each decided against PyYAML.
+    ("a plain scalar ending in ':' is refused", "title: Part one:\n",
+     ("refuse", "ends with ':'"), _REFUSE),
+    ("': ' in a flow sequence item is refused (YAML reads a mapping)",
+     "tags: [a: b]\n", ("refuse", "contains ': '"), {"tags": [{"a": "b"}]}),
+    ("a flow sequence item ending in ':' is refused", "tags: [a:]\n",
+     ("refuse", "ends with ':'"), {"tags": [{"a": None}]}),
+    ("':' with no space stays accepted", "v: a:b\n", {"v": "a:b"}, {"v": "a:b"}),
+    ("a URL stays accepted", "v: http://x\n", {"v": "http://x"},
+     {"v": "http://x"}),
+    ("':' with no space stays accepted in a flow sequence",
+     "tags: [a:b, http://x]\n", {"tags": ["a:b", "http://x"]},
+     {"tags": ["a:b", "http://x"]}),
+    ("'- a: b' is still a mapping inside a sequence", "- a: b\n",
+     [{"a": "b"}], [{"a": "b"}]),
+    ("'- a:b' is still a scalar", "- a:b\n", ["a:b"], ["a:b"]),
+    ("a quoted sequence item holding ': ' is a scalar, not a mapping",
+     '- "a: b"\n', ["a: b"], ["a: b"]),
+    ("a flow mapping key with no space after ':' is refused",
+     "k: {a:b}\n", ("refuse", "expected a space after ':'"),
+     {"k": {"a:b": None}}),
+    ("a quoted key decodes ''", "'it''s': 1\n", {"it's": 1}, {"it's": 1}),
+    ('a quoted key decodes \\"', '"a\\"b": 1\n', {'a"b': 1}, {'a"b': 1}),
+    ("a value starting with '- ' is refused", "k: - a\n",
+     ("refuse", "cannot start with '-'"), _REFUSE),
+    ("a value starting with ']' is refused", "k: ]a\n",
+     ("refuse", "cannot start with ']'"), _REFUSE),
+    ("a value starting with '-' and no space stays accepted", "k: -a\n",
+     {"k": "-a"}, {"k": "-a"}),
+    ("a tab between tokens is refused", "k: a\tb\n",
+     ("refuse", "a tab outside quotes"), _REFUSE),
+    ("a tab inside quotes stays accepted", 'k: "a\tb"\n', {"k": "a\tb"},
+     {"k": "a\tb"}),
+]
+
+
+def _yamlite_outcome(text: str):
+    try:
+        return ("value", yamlite.load_yaml(text, "<named>"))
+    except yamlite.YamlError as exc:
+        return ("refuse", str(exc))
+
+
+def test_yaml_reader_reads_as_yaml_does() -> None:
+    print("\nthe restricted YAML reader gives YAML's value or refuses (named lines):")
+    for label, text, expected, _ in _NAMED_YAML_CASES:
+        kind, got = _yamlite_outcome(text)
+        if isinstance(expected, tuple):
+            record(
+                kind == "refuse" and expected[1] in got,
+                label,
+                f"expected a refusal containing {expected[1]!r}; got {kind} "
+                f"{got!r}",
+            )
+        else:
+            record(
+                kind == "value" and got == expected,
+                label,
+                f"expected {expected!r}; got {kind} {got!r}",
+            )
+
+
+# The differential property test. Generated documents of the shapes yamlite
+# supports - 'key: <scalar>', '- <scalar>', '- key: <scalar>', flow sequences,
+# nested mappings in sequences - each scalar plain, double- or single-quoted,
+# with and without a comment, built from an alphabet of the characters that
+# drive the tokenizer. Seeded, so every run checks the same documents.
+
+_FUZZ_SEED = 57
+_FUZZ_COUNT = 3000
+_FUZZ_TOKENS = ['"', "'", "\\", "#", " #", ": ", ":", ",", "[", "]", "{", "}",
+                "-", "?", "a", "b", "N", "x", "0", "1", " ", "''", '\\"']
+
+
+def _fuzz_documents(seed: int, count: int) -> list[str]:
+    rng = random.Random(seed)
+
+    def chunk(lo: int, hi: int) -> str:
+        return "".join(rng.choice(_FUZZ_TOKENS) for _ in range(rng.randint(lo, hi)))
+
+    def plain() -> str:
+        return chunk(1, 7).strip() or "a"
+
+    def dq() -> str:
+        body = chunk(0, 6)
+        if rng.random() < 0.8:  # mostly well-escaped, sometimes not
+            body = "".join(
+                rng.choice(["\\\\", '\\"', "\\"]) if c == "\\"
+                else '\\"' if c == '"' else c
+                for c in body
+            )
+        return '"' + body + '"'
+
+    def sq() -> str:
+        body = chunk(0, 6)
+        if rng.random() < 0.8:
+            body = body.replace("'", "''")
+        return "'" + body + "'"
+
+    def scalar() -> str:
+        r = rng.random()
+        value = plain() if r < 0.5 else dq() if r < 0.75 else sq()
+        if rng.random() < 0.4:
+            value += rng.choice([" # ", " #", "#", "  # "]) + chunk(0, 4)
+        return value
+
+    def key() -> str:
+        r = rng.random()
+        return "key" if r < 0.7 else plain() if r < 0.8 else dq() if r < 0.9 else sq()
+
+    def flow_seq() -> str:
+        items = []
+        for _ in range(rng.randint(1, 3)):
+            r = rng.random()
+            items.append((chunk(1, 5).strip() or "a") if r < 0.6
+                         else dq() if r < 0.8 else sq())
+        text = "[" + ", ".join(items) + "]"
+        if rng.random() < 0.3:
+            text += " # " + chunk(0, 3)
+        return text
+
+    shapes = {
+        "map": lambda: f"{key()}: {scalar()}\n",
+        "seq": lambda: f"- {scalar()}\n",
+        "seqmap": lambda: f"- {key()}: {scalar()}\n",
+        "flowseq": lambda: f"{key()}: {flow_seq()}\n",
+        "seqflow": lambda: f"- {flow_seq()}\n",
+        "nested": lambda: f"top:\n  - {key()}: {scalar()}\n    other: {scalar()}\n",
+    }
+    names = sorted(shapes)
+    return [shapes[rng.choice(names)]() for _ in range(count)]
+
+
+def _untyped(value):
+    """Scalar typing aside: None as '', as PyYAML's BaseLoader reads it."""
+    if value is None:
+        return ""
+    if isinstance(value, list):
+        return [_untyped(v) for v in value]
+    if isinstance(value, dict):
+        return {_untyped(k): _untyped(v) for k, v in value.items()}
+    return value
+
+
+def _differential(text: str) -> str:
+    """Classify one document: 'agree', 'refused', 'typing' or a mismatch.
+
+    'typing' is a pair whose structure and strings agree but whose scalar
+    resolution differs (yamlite keeps '0x10' and the key 1 as strings, and
+    reads 010 as 10 where YAML 1.1 reads 8). That difference is deliberate,
+    documented in yamlite's docstring and pinned by
+    test_yaml_reader_ignores_the_environment, so it is classified rather
+    than counted as a mismatch.
+    """
+    try:
+        theirs = _pyyaml.safe_load(text)
+        they_refuse = False
+    except _pyyaml.YAMLError:
+        theirs, they_refuse = None, True
+    try:
+        ours = yamlite.load_yaml(text, "<fuzz>")
+    except yamlite.YamlError:
+        return "refused"
+    if they_refuse:
+        return "MISMATCH: yamlite accepted what YAML refuses"
+    if ours == theirs:
+        return "agree"
+    saved = yamlite._plain_to_python
+    yamlite._plain_to_python = lambda t: t
+    try:
+        ours_untyped = yamlite.load_yaml(text, "<fuzz>")
+    finally:
+        yamlite._plain_to_python = saved
+    base = _pyyaml.load(text, Loader=_pyyaml.BaseLoader)
+    if _untyped(ours_untyped) == _untyped(base):
+        return "typing"
+    return "MISMATCH: a different value"
+
+
+# The comment stripping as it was before belay#57, verbatim, for the
+# positive control: the property test must be able to see that defect.
+def _pre_57_strip_comment(line: str) -> str:
+    out: list[str] = []
+    quote = ""
+    for idx, c in enumerate(line):
+        if quote:
+            out.append(c)
+            if c == quote:
+                quote = ""
+            continue
+        if c in ('"', "'"):
+            quote = c
+            out.append(c)
+            continue
+        if c == "#" and (idx == 0 or line[idx - 1] in " \t"):
+            break
+        out.append(c)
+    return "".join(out)
+
+
+@contextlib.contextmanager
+def _patched(name: str, replacement):
+    saved = getattr(yamlite, name)
+    setattr(yamlite, name, replacement)
+    try:
+        yield
+    finally:
+        setattr(yamlite, name, saved)
+
+
+def _first_mismatch(documents: list[str]) -> str | None:
+    for text in documents:
+        if _differential(text).startswith("MISMATCH"):
+            return text
+    return None
+
+
+def test_yaml_reader_differential() -> None:
+    print("\nthe restricted YAML reader against PyYAML (differential):")
+    if _pyyaml is None:
+        print("  SKIP PyYAML is not importable, so yamlite was not compared with it")
+        note(
+            "  SKIPPED: the differential test of yamlite against PyYAML - "
+            "PyYAML is not importable here. Install it to run that comparison; "
+            "the scripts never use it."
+        )
+        return
+    with pyyaml_assertions():
+        # The named lines, against PyYAML itself: the literals above are
+        # what PyYAML says, not what yamlite says.
+        for label, text, _, theirs in _NAMED_YAML_CASES:
+            try:
+                got = _pyyaml.safe_load(text)
+            except _pyyaml.YAMLError as exc:
+                got = _REFUSE
+                shown = f"refused: {str(exc).splitlines()[0]}"
+            else:
+                shown = repr(got)
+            record(
+                got == theirs if theirs is not _REFUSE else got is _REFUSE,
+                f"PyYAML agrees with the literal for: {label}",
+                f"PyYAML gave {shown}",
+            )
+
+        documents = _fuzz_documents(_FUZZ_SEED, _FUZZ_COUNT)
+        tally: dict[str, list[str]] = {}
+        for text in documents:
+            tally.setdefault(_differential(text), []).append(text)
+        mismatches = [
+            (kind, text) for kind, texts in tally.items()
+            if kind.startswith("MISMATCH") for text in texts
+        ]
+        summary = ", ".join(f"{k} {len(v)}" for k, v in sorted(tally.items()))
+        record(
+            not mismatches,
+            f"{_FUZZ_COUNT} generated documents (seed {_FUZZ_SEED}): yamlite "
+            f"never gives a value PyYAML does not ({summary})",
+            "; ".join(f"{k}: {t!r}" for k, t in mismatches[:5]),
+        )
+        # Non-vacuity: a generator whose every document both readers refuse
+        # would pass the line above while comparing nothing.
+        agreed = len(tally.get("agree", []))
+        record(
+            agreed >= _FUZZ_COUNT // 4,
+            f"the generated documents exercise real values ({agreed} parsed "
+            f"identically by both readers)",
+            f"only {agreed} of {_FUZZ_COUNT} documents parsed in both readers",
+        )
+
+        # Positive controls: put each defect back, and the same test sees it.
+        def pre_57_scan(line: str):
+            return _pre_57_strip_comment(line), None
+
+        with _patched("_scan_line", pre_57_scan):
+            known = _differential("title: N'? # 1\n")
+            found = _first_mismatch(documents)
+        record(
+            known.startswith("MISMATCH") and found is not None,
+            "control: with the pre-belay#57 comment stripping restored, the "
+            "comparison flags \"title: N'? # 1\" and the generated documents",
+            f"the known line classified as {known!r}; first generated "
+            f"mismatch: {found!r}",
+        )
+        with _patched("_plain_problem", lambda *a, **k: None):
+            known = _differential("title: Storage engine I: durability\n")
+            found = _first_mismatch(documents)
+        record(
+            known.startswith("MISMATCH") and found is not None,
+            "control: with the belay#49 refusal removed, the comparison flags "
+            "\"title: Storage engine I: durability\" and the generated documents",
+            f"the known line classified as {known!r}; first generated "
+            f"mismatch: {found!r}",
+        )
 
 
 # --------------------------------------------------------------------------
@@ -7601,6 +8012,8 @@ def main() -> int:
     test_mode_is_never_inferred()
     test_cli()
     test_yaml_reader()
+    test_yaml_reader_reads_as_yaml_does()
+    test_yaml_reader_differential()
     test_yaml_reader_ignores_the_environment()
     test_names_file()
     test_supplies_helpers()
@@ -7651,6 +8064,11 @@ def main() -> int:
             f"{_sibling_passed} further assertions passed against sibling "
             f"repositories outside this commit, because "
             f"{SIBLING_SWEEP_ENV} is set. They are not in the count below."
+        )
+    if _pyyaml_passed:
+        print(
+            f"{_pyyaml_passed} further assertions compared yamlite with "
+            f"PyYAML, which is importable here. They are not in the count below."
         )
     if _failures:
         print(f"FAILED - {len(_failures)} of {_passed + len(_failures)} assertions:")
