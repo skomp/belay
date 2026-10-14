@@ -1523,6 +1523,12 @@ moment where something changed or something is already wrong:
    wrong in here" for no context at all.
 4. **Somebody asks for it**, or the learner says they changed something inside `tutorial/`.
 
+At every one of these moments the command is the one materialization runs,
+`scripts/validate_bundle.py --instance <workspace>/tutorial` (`state-lifecycle.md`
+section 3.1). Without `--instance` the script checks the directory as a bundle and reports
+findings against what every correct instance has — `STATE.md`, no `STATE.template.md`, the
+`instance:` stamp — so a sound course reads as defective.
+
 A `validated` key that is present is not re-checked on a resume. It records that the check
 ran on the day it says; it is not a claim that nothing has changed since. Moment 3 is what
 covers a changed instance, and it covers it at the point where the change actually matters.

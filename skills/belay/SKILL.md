@@ -256,9 +256,12 @@ not before.
 
 Two scripts, and a learner's session runs both — each at one moment, never per turn.
 `scripts/catalogs.py` belongs to discovery; a resume never runs it.
-`scripts/validate_bundle.py` checks the instance materialization has just created, before
-the first task: a finding stops the course from starting, a warning never does, and an
-indeterminate run is not a pass. `references/state-lifecycle.md` section 3.1 has the step,
+`scripts/validate_bundle.py --instance <workspace>/tutorial` checks the instance
+materialization has just created, before the first task: a finding stops the course from
+starting, a warning never does, and an indeterminate run is not a pass. Always pass
+`--instance` when the target is an instance. Without it the script checks the directory as
+a bundle, fails it on the properties every correct instance has — `STATE.md` present,
+`STATE.template.md` absent, the `instance:` stamp — and stops a sound course. `references/state-lifecycle.md` section 3.1 has the step,
 `references/runner-protocol.md` section 13 the outcomes and the report. It is the same
 script an author checks a bundle or a catalogue with.
 
