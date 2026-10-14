@@ -2793,6 +2793,24 @@ def m_materialized_version_absent(root: Path) -> None:
     )
 
 
+def m_materialized_version_behind_its_copy(root: Path) -> None:
+    """The copy says 2.2, the stamp 2.1: a half-applied update (belay#50)."""
+    _declare_version(root, 'version: "2.2"', "2.2")
+    _stamp_materialized_version(root, '"2.1"', "2.1")
+
+
+def m_materialized_version_with_no_version(root: Path) -> None:
+    """A bundle that declares none was stamped "1.0": the two agree."""
+    m_no_version(root)
+    _stamp_materialized_version(root, '"1.0"', "1.0")
+
+
+def m_materialized_version_2_with_no_version(root: Path) -> None:
+    """No version in the copy reads as 1.0, so a stamp of 2.0 disagrees."""
+    m_no_version(root)
+    _stamp_materialized_version(root, '"2.0"', "2.0")
+
+
 # -- check 29: setup_validators, at manifest scope and at lesson scope
 
 SETUP_DESCRIBE = "confirms the placed skeleton compiles before the first lesson"
@@ -4053,6 +4071,15 @@ CASES: list[Case] = [
          "instance", m_materialized_version_absent, kind="silent"),
     Case("30: an INSTANCE of a bundle that predates the field is silent", 30,
          "cli", "instance", m_no_version, kind="silent"),
+    Case("30: an INSTANCE whose stamp and copy disagree fires", 30, "cli",
+         "instance", m_materialized_version_behind_its_copy,
+         "must match", where="tutorial.yaml (instance.materialized_version)"),
+    Case('30: an INSTANCE stamped "1.0" from an unversioned bundle is silent',
+         30, "cli", "instance", m_materialized_version_with_no_version,
+         kind="silent"),
+    Case('30: an INSTANCE stamped "2.0" with no version in its copy fires',
+         30, "cli", "instance", m_materialized_version_2_with_no_version,
+         "must match", where="tutorial.yaml (instance.materialized_version)"),
     # ---- check 28 must not warn about `version`, which the format defines.
     Case("28: a declared version is a DEFINED field", 28, "cli", "bundle",
          m_version_2_1, kind="silent"),
