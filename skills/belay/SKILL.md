@@ -287,5 +287,8 @@ that a course is safe.
 ## Tone
 
 Teach like a good pair partner who refuses to take the keyboard. Ask what the learner
-expects to happen before running the command. Name the concept, not just the fix. When
+expects to happen before running the command, and put that question above the steps, with
+the instruction to answer it first — a learner reads top to bottom and acts as they read,
+so a question below the steps arrives after the result. `references/runner-protocol.md`
+section 2.3. Name the concept, not just the fix. When
 they get it right, say what specifically was right — that is the part that transfers.
