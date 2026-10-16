@@ -29,6 +29,15 @@ mis-parses an anchor, a tag or a multi-line plain scalar turns a structural
 error into a wrong value, and every check downstream then certifies the wrong
 document. Every construct outside the supported subset raises YamlError with
 the line number and the reason.
+
+The same rule holds at the edge of the subset: for any line, this reader
+either returns the value a standard YAML parser returns, or raises. Refusing
+something YAML accepts is allowed; returning a different value is the defect.
+A comment is found only outside a quoted scalar as YAML delimits it
+(belay#57), and a plain scalar that YAML reads as structure - 'a: b' is a
+mapping, '- a' a sequence item - is refused, not returned as text (belay#49).
+The one deliberate exception is scalar typing, described above.
+tests/test_validate_bundle.py compares the two readers on generated lines.
 """
 
 from __future__ import annotations
@@ -132,6 +141,9 @@ class _FlowParser:
         text = self.s[start : self.i].strip()
         if in_flow and text == "":
             raise self.fail("empty value in a flow collection")
+        problem = _plain_problem(text, in_flow)
+        if problem:
+            raise self.fail(problem)
         return _plain_to_python(text)
 
     def quoted(self) -> str:
@@ -259,36 +271,202 @@ class _FlowParser:
                 f"{_UNSUPPORTED_INDICATORS[text[0]]} are not supported by the "
                 f"restricted YAML reader"
             )
+        problem = _plain_problem(text, in_flow=True, what="key")
+        if problem:
+            raise self.fail(problem)
+        nxt = self.s[self.i + 1 : self.i + 2]
+        if self.peek() == ":" and nxt not in ("", " ", "\t", ",", "]", "}"):
+            # YAML reads {a:b} as the single key 'a:b', not as a: b.
+            raise self.fail(
+                f"expected a space after ':' following the key {text!r} in a "
+                f"flow mapping; quote the key if the ':' belongs to it"
+            )
         return _plain_to_python(text)
 
 
-def _strip_comment(line: str) -> str:
-    """Remove a trailing '# ...' comment, respecting quotes.
+def _quoted_end(line: str, start: int) -> int | None:
+    """Index just past the quoted scalar opening at `start`, or None.
 
-    A '#' only starts a comment at the start of the line or after a space.
+    Follows the quoting rules of the scalar itself: inside double quotes a
+    backslash makes the next character literal, and inside single quotes ''
+    is an escaped apostrophe (belay#57). None means the quote never closes on
+    this line, which _FlowParser.quoted reports.
     """
-    out: list[str] = []
-    quote = ""
-    for idx, c in enumerate(line):
-        if quote:
-            out.append(c)
-            if c == quote:
-                quote = ""
+    quote = line[start]
+    i = start + 1
+    while i < len(line):
+        c = line[i]
+        if quote == '"' and c == "\\":
+            i += 2
             continue
-        if c in ('"', "'"):
-            quote = c
-            out.append(c)
-            continue
-        if c == "#" and (idx == 0 or line[idx - 1] in " \t"):
-            break
-        out.append(c)
-    return "".join(out)
+        if c == quote:
+            if quote == "'" and line[i + 1 : i + 2] == "'":
+                i += 2
+                continue
+            return i + 1
+        i += 1
+    return None
 
 
-_KEY_RE = re.compile(
-    r"""^(?P<key>"[^"]*"|'[^']*'|[^:#]+?)\s*:(?:[ \t]+(?P<val>.*))?$"""
-)
-_SEQ_KEY_RE = re.compile(r"""^("[^"]*"|'[^']*'|[^:#\[\]{},]+?)\s*:([ \t]|$)""")
+def _scan_line(line: str) -> tuple[str, int | None]:
+    """Split one line into its content and the column of a stray tab.
+
+    Returns the line without its trailing '# ...' comment, and the index of
+    the first tab outside a quoted scalar (or None). YAML allows a tab
+    between tokens almost nowhere, and the reference parser refuses one, so
+    the caller refuses it too.
+
+    A '#' starts a comment at the start of the line or after a space or tab,
+    outside a quoted scalar. A quote character opens a quoted scalar only
+    where a scalar can begin - at the start of the line, after '- ', after
+    a mapping ':', and after '[', '{' or ',' in a flow collection. In the
+    middle of a plain scalar it is an ordinary character: `title: N'? # 1`
+    is the plain scalar N'? followed by a comment (belay#57).
+    """
+    n = len(line)
+    i = 0
+    depth = 0  # flow-collection nesting
+    at_node = True  # a scalar may begin here
+    tab: int | None = None
+    while i < n:
+        c = line[i]
+        if c in " \t":
+            if c == "\t" and tab is None:
+                tab = i
+            i += 1
+            continue
+        if c == "#" and (i == 0 or line[i - 1] in " \t"):
+            return line[:i], tab
+        nxt = line[i + 1 : i + 2]
+        if at_node and c in "\"'":
+            end = _quoted_end(line, i)
+            if end is None:
+                return line, tab
+            i = end
+            at_node = False
+            continue
+        if c in "[{" and (at_node or depth):
+            depth += 1
+            at_node = True
+            i += 1
+            continue
+        if depth and c in "]}":
+            depth -= 1
+            at_node = False
+            i += 1
+            continue
+        if depth and c == ",":
+            at_node = True
+            i += 1
+            continue
+        if c == ":" and (
+            nxt in ("", " ", "\t") or (depth and (nxt in ",[]{}" or not at_node))
+        ):
+            # A value indicator: ': ', or a ':' that ends the token before it
+            # inside a flow collection ({"a":"b"}).
+            at_node = True
+            i += 1
+            continue
+        if at_node and c in "-?" and nxt in ("", " ", "\t"):
+            # '- ' (a sequence entry) or '? ' (an explicit key): a node
+            # follows, so a quote after it still opens a scalar.
+            i += 1
+            continue
+        # A run of plain-scalar characters, up to the next space or tab, the
+        # next ': ', or (inside a flow collection) the next flow indicator.
+        at_node = False
+        while i < n:
+            c = line[i]
+            if c in " \t":
+                break
+            nxt = line[i + 1 : i + 2]
+            if c == ":" and (nxt in ("", " ", "\t") or (depth and nxt in ",[]{}")):
+                break
+            if depth and c in ",[]{}":
+                break
+            i += 1
+    return line, tab
+
+
+def _strip_comment(line: str) -> str:
+    """Remove a trailing '# ...' comment, respecting quoted scalars."""
+    return _scan_line(line)[0]
+
+
+# Characters that cannot begin a plain (unquoted) scalar in YAML. '-', '?'
+# and ':' may, when the next character is not a space ('-1', ':x', '?x').
+_PLAIN_START_INDICATORS = "-?:,[]{}#&*!|>'\"%@`"
+
+
+def _plain_problem(text: str, in_flow: bool, what: str = "value") -> str | None:
+    """Why YAML would not read `text` as one plain scalar, or None.
+
+    yamlite reads a subset of YAML, and must never give a value a standard
+    YAML parser would not. A plain scalar that YAML would read as structure -
+    'a: b' is a mapping, '- a' a sequence, ']' the end of a flow collection -
+    is refused here rather than returned as a string (belay#49).
+    """
+    if text == "":
+        return None
+    first, second = text[0], text[1:2]
+    if first in _PLAIN_START_INDICATORS:
+        safe = first in "-?:" and second not in ("", " ", "\t")
+        if in_flow:
+            safe = safe and first == "-" and second not in ",[]{}"
+        if not safe:
+            return (
+                f"an unquoted {what} cannot start with {first!r}, which YAML "
+                f"reads as structure; quote the {what}"
+            )
+    if in_flow:
+        for c in "[{?":
+            if c in text:
+                return (
+                    f"the unquoted {what} {text!r} contains {c!r}, which YAML "
+                    f"reads as structure inside a flow collection; quote the "
+                    f"{what}"
+                )
+    if text.endswith(":") or ": " in text or ":\t" in text:
+        where = "ends with ':'" if text.endswith(":") else "contains ': '"
+        return (
+            f"the unquoted {what} {text!r} {where}, which YAML reads as a "
+            f"mapping, not as text; quote the {what}"
+        )
+    return None
+
+
+_KEY_TAIL_RE = re.compile(r"""^[ \t]*:(?:[ \t]+(?P<val>.*))?$""")
+_PLAIN_KEY_RE = re.compile(r"""^(?P<key>[^:#]+?)[ \t]*:(?:[ \t]+(?P<val>.*))?$""")
+
+
+def _split_key(text: str, where: str, lineno: int) -> tuple[str, bool, str] | None:
+    """Split 'key: value' into (key text, quoted?, value text), or None.
+
+    A quoted key is decoded with the same rules as a quoted value, so
+    'it''s': 1 has the key it's and "a\\"b": 1 the key a"b. An unterminated
+    quoted key raises.
+    """
+    if text[:1] in ('"', "'"):
+        parser = _FlowParser(text, where, lineno)
+        key = parser.quoted()
+        tail = _KEY_TAIL_RE.match(text[parser.i :])
+        if not tail:
+            return None
+        return key, True, tail.group("val") or ""
+    match = _PLAIN_KEY_RE.match(text)
+    if not match:
+        return None
+    return match.group("key").strip(), False, match.group("val") or ""
+
+
+def _starts_a_mapping(text: str, where: str, lineno: int) -> bool:
+    """Whether a '- ' item's text is 'key: value' rather than a scalar."""
+    if text[:1] in "[{":
+        return False
+    try:
+        return _split_key(text, where, lineno) is not None
+    except YamlError:
+        return False  # an unterminated quote; the value parser reports it
 
 
 class _RestrictedYaml:
@@ -299,9 +477,11 @@ class _RestrictedYaml:
     scalars with '-'/'+' chomping, comments, one leading '---'.
 
     Rejected with an explicit message: anchors, aliases, tags, directives,
-    multiple documents, tabs in indentation, duplicate keys, explicit
-    indentation indicators on block scalars, plain multi-line scalars, and
-    any line that is not 'key: value' or '- item'.
+    multiple documents, tabs in indentation or between tokens, duplicate
+    keys, explicit indentation indicators on block scalars, plain multi-line
+    scalars, plain scalars YAML reads as structure (holding ': ', ending in
+    ':', starting with an indicator), and any line that is not 'key: value'
+    or '- item'.
     """
 
     def __init__(self, text: str, where: str) -> None:
@@ -328,10 +508,18 @@ class _RestrictedYaml:
                     self.n + 1,
                     "a tab is used for indentation; YAML forbids this, use spaces",
                 )
-            content = _strip_comment(raw).strip()
+            content, tab = _scan_line(raw)
+            content = content.strip()
             if content == "":
                 self.n += 1
                 continue
+            if tab is not None:
+                raise self.fail(
+                    self.n + 1,
+                    "a tab outside quotes; YAML does not allow a tab between "
+                    "the parts of a line, use spaces (or quote the value if "
+                    "the tab belongs to it)",
+                )
             if content == "...":
                 raise self.fail(
                     self.n + 1,
@@ -397,29 +585,29 @@ class _RestrictedYaml:
                 raise self.fail(
                     idx + 1, "expected 'key: value' but found a sequence item"
                 )
-            match = _KEY_RE.match(text)
-            if not match:
+            split = _split_key(text, self.where, idx + 1)
+            if split is None:
                 raise self.fail(
                     idx + 1,
                     f"expected 'key: value' (with a space after the colon); "
                     f"found {text!r}",
                 )
-            raw_key = match.group("key").strip()
-            if raw_key[:1] in _UNSUPPORTED_INDICATORS:
-                raise self.fail(
-                    idx + 1,
-                    f"{_UNSUPPORTED_INDICATORS[raw_key[0]]} are not supported "
-                    f"by the restricted YAML reader",
-                )
-            if raw_key == "<<":
-                raise self.fail(idx + 1, "merge keys ('<<') are not supported")
-            if raw_key[:1] in ('"', "'"):
-                key = raw_key[1:-1]
-            else:
-                key = raw_key
+            key, quoted, rest = split
+            if not quoted:
+                if key[:1] in _UNSUPPORTED_INDICATORS:
+                    raise self.fail(
+                        idx + 1,
+                        f"{_UNSUPPORTED_INDICATORS[key[0]]} are not supported "
+                        f"by the restricted YAML reader",
+                    )
+                if key == "<<":
+                    raise self.fail(idx + 1, "merge keys ('<<') are not supported")
+                problem = _plain_problem(key, in_flow=False, what="key")
+                if problem:
+                    raise self.fail(idx + 1, problem)
             if key in out:
                 raise self.fail(idx + 1, f"duplicate key {key!r}")
-            rest = (match.group("val") or "").strip()
+            rest = rest.strip()
             self.n = idx + 1
             if rest == "":
                 nxt = self.peek()
@@ -462,7 +650,7 @@ class _RestrictedYaml:
                 else:
                     out.append(None)
                 continue
-            if _SEQ_KEY_RE.match(rest):
+            if _starts_a_mapping(rest, self.where, idx + 1):
                 # A mapping that starts on the '-' line. Rewrite the line so
                 # the mapping's own column is its indentation, then reparse.
                 gap = len(text) - 1 - len(text[1:].lstrip(" "))
