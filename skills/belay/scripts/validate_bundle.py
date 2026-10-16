@@ -138,9 +138,12 @@ CHECKS: dict[int, str] = {
     31: "assesses, where a lesson declares it, is a non-empty list of concept "
         "ids, and every id resolves in covers",
     32: "[instance] STATE.md's '## Assessments' record is well-formed: known "
-        "states, lessons that exist, concept ids and counts",
+        "states, lessons and sections that exist, concept ids and counts",
     33: "[instance] the learning record EVENTS.jsonl, when present, holds only "
         "declared events in seq order; a malformed one WARNS",
+    34: "sections, when declared, are well-formed: unique ids, titles, "
+        "lessons that exist, each lesson in at most one section, and each "
+        "section's main-path lessons one contiguous run in 'lessons' order",
 }
 
 BUNDLE_ONLY = {12, 13, 26}
@@ -264,6 +267,7 @@ KNOWN_MANIFEST_FIELDS = (
     "ownership_policy",
     "recommended_follow_ups",
     "recommended_previous_bundles",
+    "sections",
     "setup_validators",
     "solution_code",
     "style",
@@ -297,6 +301,20 @@ GENERATED_KINDS = ("side-lesson", "main-path-draft", "practice")
 # the string "2026-09-11" on every machine, so a pattern assertion would now be
 # well-defined - it is simply not one this validator makes.
 GENERATED_REQUIRED_FIELDS = ("generated", "generated_at", "kind", "reason", "after")
+
+# Course sections (check 34, belay#36).
+#
+# `sections` groups lessons for a reader - a progress report, a learner asking
+# what a stretch of the course covers, an assessment scoped to a section. It
+# is a list rather than a map keyed by id because a duplicate id must be
+# reportable: the reader refuses a duplicate mapping key outright, which would
+# turn an authoring slip into an unreadable manifest. `lessons` stays the one
+# order; check 34 proves a section cannot disagree with it.
+SECTIONS_KEY = "sections"
+_SECTION_ID_RE = re.compile(r"[a-z0-9-]+")
+# A learner-requested assessment scoped to a section is recorded as
+# `_scope:_ `section:<id>``, so check 32 can tell it from a scope in words.
+SECTION_SCOPE_PREFIX = "section:"
 
 # Optional lessons (checks 18-21).
 #
@@ -772,9 +790,22 @@ LIMITATIONS = """What a pass does and does not mean
       concept the course mentions without declaring - and it cannot tell
       whether any question was really asked.
     a `_scope:_` value is checked against the instance's lessons only when
-      it reads as a path (it holds a '/' or ends in '.md'). A scope written
+      it reads as a path (it holds a '/' or ends in '.md'), and against the
+      manifest's `sections` only when it starts 'section:'. A scope written
       in words - "the course so far", a topic - is free text and is not
-      checked."""
+      checked.
+
+  Course sections (`sections`, check 34):
+    the ABSENCE of the key is normal, reports "n/a", and changes nothing:
+      a bundle that declares no sections validates exactly as it did before
+      the key existed.
+    check 34 proves a section cannot DISAGREE with `lessons` - one
+      contiguous run, the same order, sections in `lessons` order - because
+      that is what keeps it from being a second ordering. It does not judge
+      whether a grouping is sensible, whether a title describes its lessons,
+      or whether the objectives match what those lessons teach.
+    a section holding only optional lessons has no place in the order, so
+      it is exempt from the ordering rules; every other rule applies."""
 
 
 @dataclass(frozen=True)
@@ -1976,6 +2007,219 @@ def check_optional_lessons(
         report.ran(18, f"{len(raw)} optional lesson(s)")
 
 
+def section_ids(manifest: Any) -> set[str]:
+    """The ids declared under `sections`, for check 32's `section:` scopes.
+
+    A malformed `sections` yields what can be read, or nothing. Check 34
+    reports the malformation; check 32 then judges a `section:` scope against
+    whatever ids are really there, which is the strict direction.
+    """
+    if not isinstance(manifest, dict):
+        return set()
+    raw = as_list(manifest.get(SECTIONS_KEY))
+    if raw is None:
+        return set()
+    return {
+        entry["id"]
+        for entry in raw
+        if isinstance(entry, dict) and isinstance(entry.get("id"), str)
+    }
+
+
+def check_sections(manifest: Any, optional_keys: set[str], report: Report) -> None:
+    """Check 34 - both modes (belay#36).
+
+    `sections` groups lessons for a reader: a title, optionally a description
+    and objectives, and the lessons that belong together. It never decides
+    what comes next - `lessons` is the order, and nothing reads a section to
+    advance. So the rules below exist to make a section unable to DISAGREE
+    with `lessons`: its main-path lessons are one contiguous run of `lessons`
+    in the same order, and the sections follow `lessons` order. A section
+    that would reorder the course is an error, never something to reconcile,
+    for the reason `optional: true` and the optional_lessons list are held
+    to (2026-09-11 spec, section 15 item 10).
+
+    The ABSENCE of `sections` is normal and reports n/a. Lessons in no
+    section are allowed, and an optional lesson may belong to one: it
+    describes the course without being part of its order.
+    """
+    if not isinstance(manifest, dict) or manifest.get(SECTIONS_KEY) is None:
+        report.na(
+            34, f"the manifest declares no {SECTIONS_KEY}, which is the normal case"
+        )
+        return
+    raw = manifest[SECTIONS_KEY]
+    if not isinstance(raw, list):
+        report.add(
+            34,
+            "tutorial.yaml",
+            f"{SECTIONS_KEY} must be a list of sections, each a mapping with "
+            f"'id', 'title' and 'lessons', not {type(raw).__name__}",
+        )
+        report.ran(34, f"{SECTIONS_KEY} is not a list")
+        return
+
+    listed_raw = as_list(manifest.get("lessons"))
+    listed: list[str] | None = (
+        [entry for entry in listed_raw if isinstance(entry, str)]
+        if listed_raw is not None
+        else None
+    )
+    position = {entry: index for index, entry in enumerate(listed or [])}
+
+    ids_seen: dict[str, int] = {}
+    owner: dict[str, str] = {}
+    # (label, first main-path index) per section, in declaration order.
+    placed: list[tuple[str, int]] = []
+    for number, entry in enumerate(raw, start=1):
+        sid = entry.get("id") if isinstance(entry, dict) else None
+        label = sid if isinstance(sid, str) and sid else f"#{number}"
+        where = f"tutorial.yaml ({SECTIONS_KEY}: {label})"
+        if not isinstance(entry, dict):
+            report.add(
+                34,
+                where,
+                f"a section must be a mapping with 'id', 'title' and 'lessons', "
+                f"not {type(entry).__name__}",
+            )
+            continue
+
+        if not isinstance(sid, str) or not _SECTION_ID_RE.fullmatch(sid):
+            report.add(
+                34,
+                where,
+                f"'id' is {sid!r}. A section id is required and matches "
+                f"[a-z0-9-]+, the syntax of every other id in this format; an "
+                f"assessment record names the section by it.",
+            )
+        elif sid in ids_seen:
+            report.add(
+                34,
+                where,
+                f"the id {sid!r} is also section #{ids_seen[sid]}'s. A section "
+                f"id is unique, because a learner and an assessment record "
+                f"name the section by it.",
+            )
+        else:
+            ids_seen[sid] = number
+
+        if not _is_text(entry.get("title")):
+            report.add(
+                34,
+                where,
+                f"'title' is required and must be a non-empty string. It is "
+                f"{entry.get('title')!r}. The title is what the tutor says when "
+                f"it tells the learner where they are.",
+            )
+        if "description" in entry and not _is_text(entry.get("description")):
+            report.add(
+                34,
+                where,
+                f"'description', when declared, must be a non-empty string, not "
+                f"{entry.get('description')!r}",
+            )
+        if "objectives" in entry:
+            objectives = as_list(entry.get("objectives"))
+            if not objectives or not _is_text_list(objectives):
+                report.add(
+                    34,
+                    where,
+                    f"'objectives', when declared, must be a non-empty list of "
+                    f"non-empty strings, not {entry.get('objectives')!r}",
+                )
+
+        members_raw = entry.get("lessons")
+        members = as_list(members_raw)
+        if members is None:
+            report.add(
+                34,
+                where,
+                f"'lessons' is required and must be a list of lesson paths, not "
+                f"{members_raw!r}",
+            )
+            continue
+        if not members:
+            report.add(
+                34,
+                where,
+                "'lessons' is empty. A section groups lessons, so an empty one "
+                "describes nothing; remove it or name its lessons.",
+            )
+            continue
+
+        main_indices: list[int] = []
+        for path in members:
+            if not isinstance(path, str):
+                report.add(34, where, f"'lessons' names {path!r}, which is not a path string")
+                continue
+            if path in owner:
+                already = (
+                    "is named twice in this section"
+                    if owner[path] == label
+                    else f"is already in section {owner[path]!r}"
+                )
+                report.add(
+                    34,
+                    where,
+                    f"{path!r} {already}. A lesson belongs to at most one "
+                    f"section, once.",
+                )
+                continue
+            owner[path] = label
+            if path in position:
+                main_indices.append(position[path])
+            elif path not in optional_keys and listed is not None:
+                report.add(
+                    34,
+                    where,
+                    f"{path!r} is neither an entry in tutorial.yaml's 'lessons' "
+                    f"nor a key in its '{OPTIONAL_KEY}'. A section names lessons "
+                    f"the course already has, in the form those lists use.",
+                )
+        if not main_indices or listed is None:
+            continue
+        if main_indices != sorted(main_indices):
+            report.add(
+                34,
+                where,
+                f"its lessons are listed in a different order from 'lessons' "
+                f"({', '.join(listed[i] for i in sorted(main_indices))}). "
+                f"'lessons' is the order and a section cannot change it; list "
+                f"them in the order 'lessons' does.",
+            )
+        low, high = min(main_indices), max(main_indices)
+        gaps = [listed[i] for i in range(low, high + 1) if i not in main_indices]
+        if gaps:
+            report.add(
+                34,
+                where,
+                f"its main-path lessons are not one contiguous run of 'lessons': "
+                f"{', '.join(gaps)} sits between them and is not in this "
+                f"section. A section is a stretch of the course, so move the "
+                f"section boundary rather than the lesson.",
+            )
+        placed.append((label, low))
+
+    for (before, before_at), (after, after_at) in zip(placed, placed[1:]):
+        if after_at < before_at:
+            report.add(
+                34,
+                f"tutorial.yaml ({SECTIONS_KEY}: {after})",
+                f"section {after!r} is listed after section {before!r}, but its "
+                f"lessons come first in 'lessons'. Sections are listed in the "
+                f"order of 'lessons', which a section can never change.",
+            )
+
+    if listed is None:
+        report.blocked(
+            34,
+            "tutorial.yaml has no usable 'lessons' list, so section lessons "
+            "could not be resolved or ordered",
+        )
+    else:
+        report.ran(34, f"{len(raw)} section(s), {len(owner)} lesson(s) grouped")
+
+
 def check_failure_modes(
     manifest: Any,
     declared_validators: set[str] | None,
@@ -2541,6 +2785,7 @@ def check_assessment_state(
     listed = {e for e in listed_raw or [] if isinstance(e, str)}
     authored = listed | optional_keys
     lessons_known = authored | {lesson.rel for lesson in generated}
+    sections = section_ids(manifest)
 
     seen: dict[tuple[bool, str], str] = {}
     records = 0
@@ -2593,6 +2838,17 @@ def check_assessment_state(
                     f"{path!r} is a lesson, but it declares no 'assesses', so it "
                     f"is not an assessment. A quiz the learner asked for is "
                     f"recorded in the '_scope:_' form.",
+                )
+        elif path.startswith(SECTION_SCOPE_PREFIX):
+            sid = path[len(SECTION_SCOPE_PREFIX):]
+            if sid not in sections:
+                report.add(
+                    32,
+                    where,
+                    f"the scope {path!r} names a section, and tutorial.yaml "
+                    f"declares no section with the id {sid!r} under "
+                    f"'{SECTIONS_KEY}'. Name a declared section id, or "
+                    f"describe the scope in words.",
                 )
         elif ("/" in path or path.endswith(".md")) and path not in lessons_known:
             report.add(
@@ -4941,6 +5197,9 @@ def validate(target: Path, mode: str) -> Report:
         target, manifest_dict, lessons_dir_exists, lessons, optional_keys, report
     )
     check_optional_lessons(target, manifest_dict, lessons, report)
+    # Check 34, both modes: `sections` is copied into the instance with the
+    # rest of tutorial.yaml, and the tutor reads the instance's copy.
+    check_sections(manifest_dict, optional_keys, report)
     check_failure_modes(
         manifest_dict, declared, anticipated_failure_modes(manifest_dict), report
     )

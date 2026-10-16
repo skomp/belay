@@ -3461,6 +3461,174 @@ def m_assessment_optional_lesson(root: Path) -> None:
     )
 
 
+# -- check 34: course sections (belay#36)
+#
+# The automaton baseline declares seven sections over its 23 lessons, grouped
+# by the parts COURSE.md's course map names (its M0..M20 milestones are one per
+# lesson, so they group nothing). Each mutator below breaks one rule in a copy.
+
+AUTOMATON_YAML = "tutorial.yaml"
+SECTIONS_START = "sections:\n"
+SECTIONS_END = "\nworkspace_kind:"
+
+
+def _sections_text(root: Path) -> str:
+    text = (root / AUTOMATON_YAML).read_text()
+    start = text.index(SECTIONS_START)
+    end = text.index(SECTIONS_END, start)
+    return text[start:end]
+
+
+def strip_sections(root: Path) -> None:
+    """Remove the whole `sections` block, leaving the manifest otherwise as is."""
+    block = _sections_text(root)
+    edit(root / AUTOMATON_YAML, block, "")
+    assert "sections:" not in (root / AUTOMATON_YAML).read_text()
+
+
+def m_section_names_a_missing_lesson(root: Path) -> None:
+    edit(
+        root / AUTOMATON_YAML,
+        "      - lessons/09-automaton-native-key-queries.md\n",
+        "      - lessons/09-automaton-native-key-queries.md\n"
+        "      - lessons/09b-automaton-benchmarks.md\n",
+    )
+
+
+def m_lesson_in_two_sections(root: Path) -> None:
+    edit(
+        root / AUTOMATON_YAML,
+        "      - lessons/08-automaton-machinery.md\n",
+        "      - lessons/07-ordered-querying.md\n"
+        "      - lessons/08-automaton-machinery.md\n",
+    )
+
+
+def m_section_is_empty(root: Path) -> None:
+    edit(
+        root / AUTOMATON_YAML,
+        "    title: Automata\n    lessons:\n"
+        "      - lessons/08-automaton-machinery.md\n"
+        "      - lessons/09-automaton-native-key-queries.md\n",
+        "    title: Automata\n    lessons: []\n",
+    )
+
+
+def m_section_not_contiguous(root: Path) -> None:
+    """Lesson 21 moves to the distribution section, skipping over lesson 20."""
+    edit(root / AUTOMATON_YAML, "      - lessons/21-strong-consistency.md\n", "")
+    edit(
+        root / AUTOMATON_YAML,
+        "      - lessons/19-live-reconfiguration.md\n",
+        "      - lessons/19-live-reconfiguration.md\n"
+        "      - lessons/21-strong-consistency.md\n",
+    )
+
+
+def m_section_lessons_out_of_order(root: Path) -> None:
+    """The same two lessons, the same run, listed backwards."""
+    edit(
+        root / AUTOMATON_YAML,
+        "      - lessons/10-storage-durability.md\n"
+        "      - lessons/11-automaton-aware-segments.md\n",
+        "      - lessons/11-automaton-aware-segments.md\n"
+        "      - lessons/10-storage-durability.md\n",
+    )
+
+
+AUTOMATA_SECTION = (
+    "  - id: automata\n"
+    "    title: Automata\n"
+    "    lessons:\n"
+    "      - lessons/08-automaton-machinery.md\n"
+    "      - lessons/09-automaton-native-key-queries.md\n"
+)
+
+
+def m_sections_out_of_order(root: Path) -> None:
+    """The automata section moved to the end of the list."""
+    edit(root / AUTOMATON_YAML, AUTOMATA_SECTION, "")
+    edit(root / AUTOMATON_YAML, SECTIONS_END, "\n" + AUTOMATA_SECTION.rstrip("\n") + SECTIONS_END)
+    assert _sections_text(root).rstrip().endswith("09-automaton-native-key-queries.md")
+
+
+def m_section_duplicate_id(root: Path) -> None:
+    edit(root / AUTOMATON_YAML, "  - id: storage-engine\n", "  - id: automata\n")
+
+
+def m_section_missing_title(root: Path) -> None:
+    edit(root / AUTOMATON_YAML, "    title: Automata\n", "")
+
+
+def m_section_id_malformed(root: Path) -> None:
+    edit(root / AUTOMATON_YAML, "  - id: storage-engine\n", "  - id: Storage Engine\n")
+
+
+def m_sections_is_a_mapping(root: Path) -> None:
+    strip_sections(root)
+    edit(
+        root / AUTOMATON_YAML,
+        SECTIONS_END,
+        "sections:\n  automata: [lessons/08-automaton-machinery.md]\n" + SECTIONS_END,
+    )
+
+
+def m_section_objectives_empty(root: Path) -> None:
+    edit(
+        root / AUTOMATON_YAML,
+        "    objectives:\n"
+        "      - Recover a crashed node to its last acknowledged write.\n"
+        "      - Justify each unsafe block by the invariant it relies on.\n",
+        "    objectives: []\n",
+    )
+
+
+def m_sections_partial(root: Path) -> None:
+    """Valid: lessons in no section are allowed. Only one section remains."""
+    strip_sections(root)
+    edit(
+        root / AUTOMATON_YAML,
+        SECTIONS_END,
+        "sections:\n" + AUTOMATA_SECTION + SECTIONS_END,
+    )
+
+
+def m_section_singular_near_miss(root: Path) -> None:
+    edit(root / AUTOMATON_YAML, "sections:\n", "section:\n")
+
+
+def m_section_holds_an_optional_lesson(root: Path) -> None:
+    """Valid: the cli bundle's optional lesson grouped with the lesson that offers it."""
+    append(
+        root / "tutorial.yaml",
+        "\nsections:\n"
+        "  - id: arguments\n"
+        "    title: Arguments and characters\n"
+        "    lessons:\n"
+        "      - lessons/00-hello-args.md\n"
+        "      - lessons/what-is-a-character.md\n",
+    )
+
+
+def m_section_scope_row(root: Path) -> None:
+    """A learner-requested quiz on a declared section, keyed by its id."""
+    append(
+        root / "STATE.md",
+        "\n## Assessments\n\n"
+        "- _scope:_ `section:storage-engine` \u2014 partial \u2014 last taken "
+        "2026-10-16, attempt 1; not demonstrated: crash-recovery\n",
+    )
+
+
+def m_section_scope_row_unknown(root: Path) -> None:
+    append(
+        root / "STATE.md",
+        "\n## Assessments\n\n"
+        "- _scope:_ `section:durability` \u2014 passed \u2014 last taken "
+        "2026-10-16, attempt 1\n",
+    )
+
+
 # -- check 33: the learning record, EVENTS.jsonl (warning only)
 
 # A record of two well-formed events. Every check-33 mutator starts from it,
@@ -4451,6 +4619,70 @@ CASES: list[Case] = [
     Case("32: a scope that reads as a path and names no lesson", 32, "broker",
          "instance", m_assessment_scope_path_missing,
          "'lessons/03-replication.md'"),
+    # ---- check 34: course sections (belay#36)
+    Case("34 (control): the automaton baseline's seven sections are NOT "
+         "reported", 34, "automaton", "bundle", lambda root: None, kind="silent"),
+    Case("34 (control): and NOT in the instance either", 34, "automaton",
+         "instance", lambda root: None, kind="silent"),
+    Case("34 (control): lessons in no section are allowed", 34, "automaton",
+         "bundle", m_sections_partial, kind="silent"),
+    Case("34 (control): an optional lesson may belong to a section", 34, "cli",
+         "bundle", m_section_holds_an_optional_lesson, kind="silent"),
+    Case("34 (control): a bundle with no sections is NOT reported", 34, "cli",
+         "bundle", lambda root: None, kind="silent"),
+    Case("34: a section names a lesson the course does not have", 34,
+         "automaton", "bundle", m_section_names_a_missing_lesson,
+         "'lessons/09b-automaton-benchmarks.md' is neither",
+         where="tutorial.yaml (sections: automata)"),
+    Case("34: a lesson in two sections", 34, "automaton", "bundle",
+         m_lesson_in_two_sections,
+         "'lessons/07-ordered-querying.md' is already in section "
+         "'ordered-keys-and-queries'",
+         where="tutorial.yaml (sections: automata)"),
+    Case("34: an empty section", 34, "automaton", "bundle", m_section_is_empty,
+         "'lessons' is empty", where="tutorial.yaml (sections: automata)"),
+    Case("34: a section whose lessons are not contiguous", 34, "automaton",
+         "bundle", m_section_not_contiguous,
+         "lessons/20-online-schema-evolution.md sits between them",
+         where="tutorial.yaml (sections: distribution)"),
+    Case("34: a section listing its lessons out of order", 34, "automaton",
+         "bundle", m_section_lessons_out_of_order,
+         "listed in a different order from 'lessons'",
+         where="tutorial.yaml (sections: storage-engine)"),
+    Case("34: sections listed out of 'lessons' order", 34, "automaton",
+         "bundle", m_sections_out_of_order,
+         "section 'automata' is listed after section 'evolution-and-hardening'",
+         where="tutorial.yaml (sections: automata)"),
+    Case("34: two sections share an id", 34, "automaton", "bundle",
+         m_section_duplicate_id, "the id 'automata' is also section #3's",
+         where="tutorial.yaml (sections: automata)"),
+    Case("34: a section with no title", 34, "automaton", "bundle",
+         m_section_missing_title, "'title' is required",
+         where="tutorial.yaml (sections: automata)"),
+    Case("34: a section id outside the id syntax", 34, "automaton", "bundle",
+         m_section_id_malformed, "'Storage Engine'"),
+    Case("34: sections written as a mapping", 34, "automaton", "bundle",
+         m_sections_is_a_mapping, "must be a list of sections",
+         where="tutorial.yaml"),
+    Case("34: an empty objectives list", 34, "automaton", "bundle",
+         m_section_objectives_empty, "'objectives', when declared",
+         where="tutorial.yaml (sections: storage-engine)"),
+    Case("34: a malformed sections block fails the instance too", 34,
+         "automaton", "instance", m_section_lessons_out_of_order,
+         "listed in a different order from 'lessons'",
+         where="tutorial.yaml (sections: storage-engine)"),
+    Case("28: 'section' - the singular near miss - still WARNS", 28,
+         "automaton", "bundle", m_section_singular_near_miss,
+         "'section', which is a near miss for 'sections'",
+         kind="warns", where="tutorial.yaml"),
+    Case("28: 'sections' spelled correctly is silent", 28, "automaton",
+         "bundle", lambda root: None, kind="silent"),
+    # ---- check 32 and section scopes
+    Case("32: a scope row naming a declared section is NOT reported", 32,
+         "automaton", "instance", m_section_scope_row, kind="silent"),
+    Case("32: a scope row naming a section the manifest does not declare", 32,
+         "automaton", "instance", m_section_scope_row_unknown,
+         "declares no section with the id 'durability'"),
     # ---- check 33 (warning only: the record is evidence, never progress)
     Case("33 (control): a well-formed learning record is quiet", 33, "cli",
          "instance", m_events_valid, kind="silent"),
@@ -8788,6 +9020,162 @@ def test_learning_record_check_status() -> None:
     )
 
 
+def test_sections_absent_changes_nothing() -> None:
+    """A bundle without `sections` validates exactly as it did before the key.
+
+    The automaton baseline is run twice, as declared and with its sections
+    block removed, in both modes: every finding, every warning and every
+    other check's status must be identical, and check 34 alone moves from
+    ran to n/a. Every other baseline declares no sections and must report
+    check 34 as n/a, never as ran.
+    """
+    print("\na bundle without sections validates exactly as before:")
+    for mode in ("bundle", "instance"):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with_root = fresh("automaton", Path(tmpdir) / "with")
+            without_root = fresh("automaton", Path(tmpdir) / "without")
+            strip_sections(without_root)
+            if mode == "instance":
+                to_instance(with_root)
+                to_instance(without_root)
+            with_report = vb.validate(with_root, mode)
+            without_report = vb.validate(without_root, mode)
+        same_findings = [str(f) for f in with_report.findings] == [
+            str(f) for f in without_report.findings
+        ]
+        same_warnings = [str(w) for w in with_report.warnings] == [
+            str(w) for w in without_report.warnings
+        ]
+        # Check 28's detail counts the top-level fields, and `sections` is
+        # one of them, so for 28 the state is compared and the count is
+        # asserted to differ by exactly that one field.
+        def comparable(report: vb.Report) -> dict:
+            return {
+                c: (v[0] if c == 28 else v)
+                for c, v in report.status.items()
+                if c != 34
+            }
+
+        others = comparable(with_report) == comparable(without_report)
+        counts = (
+            with_report.status.get(28, ("", ""))[1].split(" ")[0],
+            without_report.status.get(28, ("", ""))[1].split(" ")[0],
+        )
+        others = others and counts[0].isdigit() and counts[1].isdigit() and (
+            int(counts[0]) == int(counts[1]) + 1
+        )
+        record(
+            same_findings and same_warnings and others
+            and with_report.exit_code() == without_report.exit_code() == 0,
+            f"automaton ({mode}): removing sections changes no finding, "
+            f"warning, exit code or other check's status",
+            f"findings equal = {same_findings}, warnings equal = "
+            f"{same_warnings}, statuses equal = {others}",
+        )
+        record(
+            with_report.status.get(34, ("", ""))[0] == vb.RAN
+            and without_report.status.get(34, ("", ""))[0] == vb.NOT_APPLICABLE,
+            f"automaton ({mode}): check 34 ran with sections and is n/a "
+            f"without them",
+            f"with = {with_report.status.get(34)!r}, without = "
+            f"{without_report.status.get(34)!r}",
+        )
+    for name, path in ALL_BASELINES.items():
+        if name == "automaton":
+            continue
+        mode = "instance" if name in INSTANCE_BASELINES else "bundle"
+        report = vb.validate(path, mode)
+        record(
+            report.status.get(34, ("missing", ""))[0] == vb.NOT_APPLICABLE,
+            f"{name}: check 34 is n/a on a bundle that declares no sections",
+            f"status = {report.status.get(34)!r}",
+        )
+    record(
+        not {34} & (vb.INSTANCE_ONLY | vb.BUNDLE_ONLY | vb.WARNING_ONLY),
+        "check 34 runs in both modes and can produce a finding",
+        f"INSTANCE_ONLY = {vb.INSTANCE_ONLY}, BUNDLE_ONLY = {vb.BUNDLE_ONLY}",
+    )
+
+
+def test_sections_cannot_change_the_next_lesson() -> None:
+    """`lessons` is the order, and a section can neither change it nor disagree.
+
+    Nothing in code computes "the next lesson" for the tutor: runner-protocol
+    section 6 step 4 tells it to take the next entry in `lessons`. The one
+    function that reads lesson order is plan_update.lesson_status(), which
+    decides what a learner has started. So this proves three things: that
+    function gives the same answer for every lesson at every position with
+    and without sections; in the valid baseline, the sections concatenated
+    are exactly `lessons`; and any section order that differs from `lessons`
+    - the sections reversed, or `lessons` reversed under them - is refused.
+    """
+    print("\nsections cannot change the next lesson:")
+    import plan_update  # noqa: E402 - the scripts directory is on sys.path
+
+    manifest = yamlite.load_yaml(
+        (ALL_BASELINES["automaton"] / "tutorial.yaml").read_text(), "tutorial.yaml"
+    )
+    lessons = manifest["lessons"]
+    bare = {k: v for k, v in manifest.items() if k != "sections"}
+    record(
+        "sections" in manifest and "sections" not in bare,
+        "the baseline declares sections, and the comparison manifest does not",
+    )
+    differ = []
+    for active in lessons:
+        state = {"status": "in-progress", "active_lesson": active}
+        for lesson in lessons:
+            if plan_update.lesson_status(lesson, manifest, state) != (
+                plan_update.lesson_status(lesson, bare, state)
+            ):
+                differ.append((lesson, active))
+    record(
+        not differ,
+        f"lesson_status agrees with and without sections for all "
+        f"{len(lessons) ** 2} (lesson, active lesson) pairs",
+        f"differs at {differ[:3]}",
+    )
+    grouped = [path for section in manifest["sections"] for path in section["lessons"]]
+    record(
+        grouped == lessons,
+        "the baseline's sections, read in order, are exactly its lessons list",
+        f"first difference at "
+        f"{next((i for i, (a, b) in enumerate(zip(grouped, lessons)) if a != b), None)}",
+    )
+
+    def reverse_sections(root: Path) -> None:
+        block = _sections_text(root)
+        entries = block[len(SECTIONS_START):].split("  - id: ")[1:]
+        assert len(entries) == 7, f"expected seven sections, found {len(entries)}"
+        reordered = SECTIONS_START + "".join(
+            "  - id: " + entry.rstrip("\n") + "\n" for entry in reversed(entries)
+        )
+        edit(root / AUTOMATON_YAML, block, reordered.rstrip("\n"))
+
+    def reverse_lessons(root: Path) -> None:
+        text = (root / AUTOMATON_YAML).read_text()
+        listing = "".join(f"  - {path}\n" for path in lessons)
+        backwards = "".join(f"  - {path}\n" for path in reversed(lessons))
+        edit(root / AUTOMATON_YAML, listing, backwards)
+        assert text != (root / AUTOMATON_YAML).read_text()
+
+    for label, mutate, needle in (
+        ("the sections listed in reverse", reverse_sections, "is listed after section"),
+        ("`lessons` reversed under unchanged sections", reverse_lessons,
+         "in a different order from 'lessons'"),
+    ):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = fresh("automaton", Path(tmpdir))
+            mutate(root)
+            report = vb.validate(root, "bundle")
+        hits = [f for f in report.findings if f.check == 34]
+        record(
+            any(needle in f.message for f in hits) and report.exit_code() == 1,
+            f"{label}: check 34 refuses it",
+            f"check 34 findings = {[f.message[:80] for f in hits]}",
+        )
+
+
 def test_the_total_is_reproducible_from_this_commit() -> None:
     """The reported total must not depend on what else the machine holds.
 
@@ -8912,6 +9300,8 @@ def main() -> int:
     test_skipped_and_passed_are_distinguishable()
     test_assessment_checks_status()
     test_learning_record_check_status()
+    test_sections_absent_changes_nothing()
+    test_sections_cannot_change_the_next_lesson()
     test_the_total_is_reproducible_from_this_commit()
     test_check_coverage()
 

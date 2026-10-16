@@ -34,6 +34,57 @@ lessons:
   - lessons/21-strong-consistency.md
   - lessons/22-hardening-performance.md
 
+sections:
+  - id: single-node-model
+    title: The single-node data model
+    lessons:
+      - lessons/00-foundations.md
+      - lessons/01-rows-cells-temporal.md
+      - lessons/02-typed-keys-table-hierarchy.md
+      - lessons/03-first-refactor.md
+      - lessons/04-richer-typed-schemas.md
+  - id: ordered-keys-and-queries
+    title: Ordered keys and queries
+    lessons:
+      - lessons/05-canonical-ordered-keys.md
+      - lessons/06-data-query-algebra.md
+      - lessons/07-ordered-querying.md
+  - id: automata
+    title: Automata
+    lessons:
+      - lessons/08-automaton-machinery.md
+      - lessons/09-automaton-native-key-queries.md
+  - id: storage-engine
+    title: The storage engine
+    description: >
+      Durable local storage, then immutable segments the automata read in place.
+    objectives:
+      - Recover a crashed node to its last acknowledged write.
+      - Justify each unsafe block by the invariant it relies on.
+    lessons:
+      - lessons/10-storage-durability.md
+      - lessons/11-automaton-aware-segments.md
+  - id: concurrency-and-service
+    title: Concurrency and the network service
+    lessons:
+      - lessons/12-concurrency-async.md
+      - lessons/13-grpc-driver.md
+  - id: distribution
+    title: The distributed cluster
+    lessons:
+      - lessons/14-static-cluster-placement.md
+      - lessons/15-eventual-replication.md
+      - lessons/16-general-quorums.md
+      - lessons/17-repair-convergence.md
+      - lessons/18-gossip-membership.md
+      - lessons/19-live-reconfiguration.md
+  - id: evolution-and-hardening
+    title: Evolution, strong consistency and hardening
+    lessons:
+      - lessons/20-online-schema-evolution.md
+      - lessons/21-strong-consistency.md
+      - lessons/22-hardening-performance.md
+
 workspace_kind: existing-or-new-repository
 tutor_owned: [tutorial/STATE.md, tutorial/DESIGN.md, tutorial/lessons/**]
 learner_owned: [src/**, tests/**, Cargo.toml, Cargo.lock]
