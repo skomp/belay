@@ -1,0 +1,17 @@
+{
+  "description": "Belay ownership guard: applies a running course's ownership rules to file edits. Silent outside a course; fails open.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}\"/skills/belay/scripts/ownership_guard.py 2>/dev/null || true",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

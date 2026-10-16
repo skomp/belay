@@ -436,7 +436,7 @@ prose tells you to put it in place. It is create-only, it is transitional, and s
 Everything in the workspace that is neither listed is the learner's by default. When in
 doubt, treat a path as learner-owned.
 
-Two paths are settled by the runner rather than by the manifest, because a bundle cannot
+Four paths are settled by the runner rather than by the manifest, because a bundle cannot
 describe an instance that does not exist yet:
 
 - `tutorial/lessons.generated/**` is **tutor-owned in every instance**, whether or not
@@ -445,7 +445,33 @@ describe an instance that does not exist yet:
   the same reason (section 16). The learner may read or delete it;
 - `tutorial/lessons/**` is **read-only in every instance**, whether or not `tutor_owned`
   lists it. Those are the author's lessons, copied in at materialization. Correct a
-  defective one by reporting it, never by editing the copy.
+  defective one by reporting it, never by editing the copy. An update the learner asked
+  for (`state-lifecycle.md` section 3.2) replaces them from the bundle, and is the only
+  write there;
+- the rest of `tutorial/` — `tutorial.yaml`, `COURSE.md`, `STATE.md`, `DESIGN.md` — is
+  the instance, not the learner's workspace (`bundle-format.md` section 2, `to`), and
+  is not learner-owned by default. You write it only where this protocol and
+  `state-lifecycle.md` say to.
+
+When a rule here and a manifest list disagree, the rule here wins, and then in this
+order: a declared `supplies` target, `tutor_owned`, `learner_owned`, and an unlisted path
+is the learner's. `scripts/ownership.py` resolves a path by exactly this order and the
+glob dialect in `bundle-format.md` section 2.
+
+### What each host enforces
+
+This section is the rule on every host. Where a host can intercept a file edit, the
+plugin adds a check underneath it, as a second line and never the first:
+
+| Host | File-edit tools | Shell commands | Keeping the tutor active, one actionable step per turn |
+|---|---|---|---|
+| Claude Code | guarded by the plugin's hook: a write the rules forbid is denied, an `on-request` learner-owned write and a lesson copy ask the learner | not guarded | protocol only |
+| Codex | not guarded | not guarded | protocol only |
+
+The hook cannot see a write a shell command makes — `sed -i`, a redirect, a generator — and
+cannot read the conversation, so whether the learner asked for an `on-request` change is
+the learner's answer to the host's prompt. A denied write is not a puzzle to route around:
+everything the table marks unguarded holds exactly as written above.
 
 ### What "not editing" actually means
 
