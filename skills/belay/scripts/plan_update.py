@@ -15,9 +15,9 @@ of it that a session classifying files by eye would get wrong.
 
 What it compares is exactly what materialization copies (state-lifecycle.md
 section 3 step 2): tutorial.yaml (without the instance stamp), COURSE.md,
-DESIGN.md and every file under lessons/. STATE.md, lessons.generated/ and
-everything outside the instance are never classified, because the update
-never touches them.
+DESIGN.md and every file under lessons/. STATE.md, the learning record
+EVENTS.jsonl, lessons.generated/ and everything outside the instance are never
+classified, because the update never touches them.
 
 There is no common ancestor. The instance does not keep a copy of the bundle
 as it was when the course began, so when a file differs this script cannot
@@ -472,8 +472,10 @@ def make_plan(instance: Path, bundle: Path) -> Plan:
                 f"applying, and say so."
             )
 
-    plan.kept = ["STATE.md"] + (
-        [vb.GENERATED_DIR + "/"] if (instance / vb.GENERATED_DIR).is_dir() else []
+    plan.kept = (
+        ["STATE.md"]
+        + (["EVENTS.jsonl"] if (instance / "EVENTS.jsonl").is_file() else [])
+        + ([vb.GENERATED_DIR + "/"] if (instance / vb.GENERATED_DIR).is_dir() else [])
     )
     return plan
 

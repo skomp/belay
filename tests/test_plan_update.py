@@ -282,6 +282,32 @@ def test_generated_lessons_are_untouched(tmp: Path) -> None:
 
 
 @tmpcase
+def test_learning_record_is_untouched(tmp: Path) -> None:
+    """EVENTS.jsonl is the learner's evidence: never classified, kept, unchanged."""
+    inst, bundle = make_pair(tmp)
+    plan = pu.make_plan(inst, bundle)
+    record("EVENTS.jsonl" not in plan.kept,
+           "learning record: control - not reported kept when there is none",
+           repr(plan.kept))
+    events = inst / "EVENTS.jsonl"
+    events.write_text(
+        '{"seq":1,"date":"2026-10-14","lesson":"lessons/00-hello-args.md",'
+        '"type":"lesson_started"}\n'
+    )
+    before = events.read_bytes()
+    set_version(bundle, "1.1")
+    append(bundle / L02, "\nA corrected sentence.\n")
+    plan = pu.make_plan(inst, bundle)
+    record("EVENTS.jsonl" not in plan.classes,
+           "learning record: never classified", repr(sorted(plan.classes)))
+    record("EVENTS.jsonl" in plan.kept, "learning record: reported as kept",
+           repr(plan.kept))
+    code = run_cli(inst, bundle)
+    record(code == pu.EXIT_PLAN and events.read_bytes() == before,
+           "learning record: byte for byte the same after a planning run", str(code))
+
+
+@tmpcase
 def test_generated_after_removed_is_refused(tmp: Path) -> None:
     inst = tmp / "tutorial"
     shutil.copytree(GENERATED_FIXTURE, inst)
@@ -446,6 +472,7 @@ def main() -> int:
         test_lesson_removed_upstream_not_active,
         test_lesson_added_upstream,
         test_generated_lessons_are_untouched,
+        test_learning_record_is_untouched,
         test_generated_after_removed_is_refused,
         test_optional_lesson_change_is_decide,
         test_assessment_row_for_a_removed_assessment_is_noted,
