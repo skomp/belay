@@ -306,6 +306,42 @@ def test_optional_lesson_change_is_decide(tmp: Path) -> None:
 
 
 @tmpcase
+def test_assessment_row_for_a_removed_assessment_is_noted(tmp: Path) -> None:
+    """An Assessments row the new bundle would invalidate gets a note (belay#33).
+
+    The positive control comes first: while the new bundle still declares the
+    lesson an assessment, the row is left alone and no note is printed.
+    """
+    inst, bundle = make_pair(tmp)
+    line = "assesses: [grapheme-clusters]\n"
+    for root in (inst, bundle):
+        edit(root / OPT, "optional: true\n", "optional: true\n" + line)
+    append(
+        inst / "STATE.md",
+        "\n## Assessments\n\n- `" + OPT + "` \u2014 partial \u2014 attempt 1; "
+        "not demonstrated: grapheme-clusters\n"
+        "- _scope:_ `" + L02 + "` \u2014 passed \u2014 attempt 1\n",
+    )
+    append(bundle / L00, "\nA corrected sentence.\n")
+    plan = pu.make_plan(inst, bundle)
+    noted = [n for n in plan.notes if "Assessments" in n]
+    record(not noted, "assessment kept upstream: no note", repr(noted))
+    edit(bundle / OPT, line, "")
+    plan = pu.make_plan(inst, bundle)
+    noted = [n for n in plan.notes if "Assessments" in n and OPT in n]
+    record(len(noted) == 1,
+           "assessment no longer declared upstream: one note names the row",
+           repr(plan.notes))
+    (bundle / L02).unlink()
+    edit(bundle / "tutorial.yaml", f"  - {L02}\n", "")
+    plan = pu.make_plan(inst, bundle)
+    noted = [n for n in plan.notes if "Assessments" in n and L02 in n]
+    record(len(noted) == 1,
+           "a quiz scoped to a lesson removed upstream: one note names it",
+           repr(plan.notes))
+
+
+@tmpcase
 def test_status_not_started_and_complete(tmp: Path) -> None:
     inst, bundle = make_pair(tmp, active=L00, status="not-started")
     append(bundle / L00, "\nA corrected sentence.\n")
@@ -412,6 +448,7 @@ def main() -> int:
         test_generated_lessons_are_untouched,
         test_generated_after_removed_is_refused,
         test_optional_lesson_change_is_decide,
+        test_assessment_row_for_a_removed_assessment_is_noted,
         test_status_not_started_and_complete,
         test_version_ordering,
         test_absent_version_reads_as_1_0,
