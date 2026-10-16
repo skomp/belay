@@ -24,8 +24,8 @@ Load, every turn:
 - the instance `tutorial.yaml` — the manifest, including `lessons`, `validators`,
   `learner_owned`, `tutor_owned`, `ownership_policy`, the teaching switches,
   `optional_lessons` and `failure_modes` where the bundle declares them (section 8),
-  `supplies` where it declares that (section 10), and `assumes` where it declares that
-  (section 11);
+  `supplies` where it declares that (section 10), `assumes` where it declares that
+  (section 11), and `sections` where it declares that (section 17);
 - `tutorial/STATE.md` — where the learner is;
 - the single lesson file named by `STATE.md`'s `active_lesson` — which is normally an
   entry in `lessons`, and may be a key in `optional_lessons` (section 8) or a file under
@@ -2043,13 +2043,19 @@ offer is the guard, not a count running out.
 
 "Quiz me on the previous lesson." "Test what I have learned so far."
 
-The learner names the **scope**: the previous lesson, a named lesson or topic, or the
-course so far. "The current section" is not a scope this runner supports; the format has
-no grouping of lessons (belay#36). Derive the questions from that scope's objectives and
-content and from *Concepts demonstrated*, and never ask about something the course did not
-set out to teach. To read a named lesson's objectives you may open that one lesson file
-for the assessment, which is the one exception to section 1's rule against loading a lesson
-other than `active_lesson`; close it from your working context when the quiz ends.
+The learner names the **scope**: the previous lesson, a named lesson or topic, a section,
+or the course so far. A section is one the manifest declares under `sections`, named by its
+title or its id; "this section" is the one holding `active_lesson` (section 17), and a
+course that declares no sections has no section to quiz on, so ask the learner to name
+lessons or a topic instead. Derive the questions from that scope's objectives and content
+and from *Concepts demonstrated*, and never ask about something the course did not set out
+to teach. For a section, that is its `objectives` and `description`, the `covers` concepts
+they name, and *Concepts demonstrated*; you open no lesson file to widen it. A section that
+declares no `objectives` gives a quiz nothing to stand on but its title, so say so and offer
+to quiz on one of its lessons instead. To read a named lesson's objectives you may open that
+one lesson file for the assessment, which is the one exception to section 1's rule against
+loading a lesson other than `active_lesson`; close it from your working context when the
+quiz ends.
 
 The loop, the outcomes, the rung-3 ceiling and the reveal rule are 15.3 to 15.5,
 unchanged. What differs:
@@ -2058,8 +2064,9 @@ unchanged. What differs:
   list is never mutated (`state-lifecycle.md` section 8.6), and `active_lesson` does not
   move;
 - **it leaves a row**, keyed by scope rather than by lesson path (`state-lifecycle.md`
-  section 11.1). Repeated self-quizzing on one weak concept is the clearest case for 15.8's
-  change of offer, and that change needs the count;
+  section 11.1); a section scope is keyed `section:<id>`, by id even when the learner
+  named the title. Repeated self-quizzing on one weak concept is the clearest case for
+  15.8's change of offer, and that change needs the count;
 - concepts genuinely demonstrated go to *Concepts demonstrated*, and a practice lesson it
   leads to is recorded under *Generated lessons* like any other.
 
@@ -2191,3 +2198,37 @@ When the summary says the record is missing, or lists lines it could not read, s
 sentence what you cannot know — "I have no record of how many attempts the earlier lessons
 took" — and carry on from `STATE.md`. A missing or broken record never stops a course and
 never needs the learner to do anything.
+
+---
+
+## 17. Course sections
+
+A manifest may group its lessons into `sections` (`bundle-format.md` section 2), each with
+a `title` and optionally a `description` and `objectives`. They describe the course. They
+never run it.
+
+### 17.1 What you do with them
+
+- **Report progress with the title.** When you tell the learner where they are — on a
+  resume, when a lesson completes, when they ask — say the section the active lesson is
+  in: "lesson 14 of 23, in *The distributed cluster*". Count from `lessons`, as always. A
+  lesson in no section, and a generated lesson, has no section to name; say the count
+  alone. An active optional lesson is named by its section when it has one, with no count.
+- **Use `description` and `objectives` only when they are asked for**: the learner asks
+  what a section covers, or asks to be quizzed on one (section 15.9). Do not read them out
+  at a section boundary, and do not recite a section's objectives as a plan.
+- **Never advance by section.** Section 6 step 4 takes the next entry in `lessons`, and a
+  section changes nothing about it. Validator check 34 refuses a section that would
+  disagree with that order, so the two cannot conflict in a valid course.
+
+Nothing about a section is recorded in `STATE.md`: where the learner is follows from
+`active_lesson`, and a section-scoped assessment is the one row (section 15.9).
+
+### 17.2 What it costs
+
+You already hold the manifest every turn (section 1), so the whole `sections` block —
+titles, descriptions and objectives — is in your context from the start of the session.
+It costs no file open and no extra read; the new cost is the block itself, which in the
+largest course here is 1.8 KB beside a 2.0 KB manifest. What section 1 keeps out of
+context is unchanged: `COURSE.md` is still not loaded routinely, and a section never
+licenses opening a lesson other than `active_lesson`.
