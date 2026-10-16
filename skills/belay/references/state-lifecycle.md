@@ -4,8 +4,8 @@
 first time in a session you are about to change `STATE.md`, when a task completes, when a
 lesson completes, when an offer of an optional lesson is accepted or deferred, when the
 learner acknowledges the assumed-concept review, when you need to advance
-`active_lesson`, or when the learner asks to update the course to a newer version
-(section 3.2).
+`active_lesson`, when an assessment ends or is interrupted (section 11), or when the
+learner asks to update the course to a newer version (section 3.2).
 
 `STATE.md` is the only place a learner's progress is recorded. Nothing in the bundle
 records progress; nothing outside `STATE.md` in the instance records it either. If you
@@ -83,10 +83,10 @@ work.
 
 ### Body sections
 
-All seven headings are always present, even when a section says "None". Two further
+All seven headings are always present, even when a section says "None". Three further
 sections appear only once the instance needs them: *Generated lessons*, once a lesson has
-been written into this instance (section 8.5), and *Optional lessons*, once one has been
-offered (section 9.1).
+been written into this instance (section 8.5), *Optional lessons*, once one has been
+offered (section 9.1), and *Assessments*, once one has been taken (section 11.1).
 
 | Section | Holds | Does not hold |
 |---|---|---|
@@ -589,7 +589,10 @@ Only what the learner accepted, in this order, while the bundle source is still 
    already in place.
 5. **Update `STATE.md`, and nothing else in it.** Set `updated` to today. When the plan
    printed a `note:` about an *Optional lessons* entry for a lesson the bundle no longer
-   offers, remove that entry and say so. For each differing file the learner kept, add one
+   offers, remove that entry and say so. Do the same for each `note:` about an
+   *Assessments* row: remove a row whose lesson is no longer an assessment, rewrite a
+   scope that names a lesson the bundle no longer has in words, and say so. For each
+   differing file the learner kept, add one
    line under *Known intentional or incomplete state*, for example "`lessons/00-hello-args.md`
    kept at its 1.0 text when the course moved to 1.1 on 2026-10-14, by the learner's
    choice". The next plan reports that file as different again, and this line explains
@@ -732,6 +735,9 @@ started lets the tutor assume it exists.
   something else. One of the two is wrong and nothing in the file says which;
 - a file under `lessons.generated/` whose `after:` is not an entry in `lessons`, or which
   is missing any of the five provenance fields;
+- an *Assessments* row names a path that is not a lesson declaring `assesses`, holds a
+  state other than the four of section 11.2, appears twice, or records something other
+  than concept ids under "not demonstrated";
 - `tutorial_id` does not match the manifest's `id`;
 - `STATE.template.md` is present in the instance;
 - the manifest names a lesson file that does not exist.
@@ -807,7 +813,7 @@ id: lifetimes-and-borrows
 title: Lifetimes, just enough to unblock the borrow
 generated: true
 generated_at: 2026-09-11
-kind: side-lesson            # | main-path-draft
+kind: side-lesson            # | main-path-draft | practice
 reason: "The borrow in Table::get_cell_at cannot be explained without lifetimes"
 after: lessons/03-first-refactor.md
 design_refs: [row-cell-model]
@@ -821,7 +827,7 @@ validators: [cargo-check]
 | `title` | MUST | Human-facing lesson name. |
 | `generated` | MUST | Always `true`. Marks the file as an overlay rather than an authored lesson. |
 | `generated_at` | MUST | The date it was written. Orders two detours that share one `after:`. |
-| `kind` | MUST | `side-lesson` or `main-path-draft`. |
+| `kind` | MUST | `side-lesson`, `main-path-draft`, or `practice` — written after an assessment, on the concepts it found not demonstrated (section 11.5). |
 | `reason` | MUST | One sentence, written for a bundle author who was not in the room. When the learner asked for this lesson rather than you judging it necessary, `reason` MUST say so and say what they asked for — the two mean different things about the course. This is the evidence `bundle-format.md` section 8 depends on. |
 | `after` | MUST | Where this lesson belongs in the course sequence: the authored lesson it follows. MUST be an entry in the manifest's `lessons` list — an authored lesson, never another generated one. |
 | `design_refs` | SHOULD | Anchors that already exist in the instance's `DESIGN.md`. |
@@ -1056,7 +1062,8 @@ The four that are written:
   are in the frontmatter already. The record exists so that a cold session answers "what
   has this learner been offered" from one section, rather than by reasoning about which of
   three kinds of path `active_lesson` currently holds.
-- **`complete`** — the lesson is finished. This is the state that stops it ever being
+- **`complete`** — the lesson is finished. For an optional **assessment**, finished means
+  passed: section 11.3. This is the state that stops it ever being
   offered again (`runner-protocol.md` section 8.8), so it MUST be written the moment the
   lesson completes, in the same step that records the completion.
 
@@ -1230,3 +1237,124 @@ Add these to section 7's list:
 Both are structural, both mean a record says something nobody can act on, and neither is
 repaired by guessing. Say what is wrong and let the learner decide. Do not silently delete
 the stamp: deleting it re-shows a review the learner may well have answered.
+
+---
+
+## 11. Assessments
+
+An assessment is a lesson whose evidence is answers: its frontmatter declares `assesses`
+(`bundle-format.md` section 6). A learner may also ask to be quizzed without one. How to
+ask, judge and respond is in `runner-protocol.md` section 15; this section is what
+`STATE.md` records. No second file is introduced: `STATE.md` stays the only place progress
+is recorded.
+
+### 11.1 What `STATE.md` records
+
+One extra body section, present only once an assessment has been taken in this instance. A
+fresh instance does not have it, and `STATE.template.md` never does:
+
+```markdown
+## Assessments
+
+- `lessons/03-durability-check.md` — partial — last taken 2026-09-19,
+  attempt 2; not demonstrated: fsync-boundaries ×2, crash-recovery
+- _scope:_ `lessons/02-segments.md` — passed — last taken 2026-09-20, attempt 1
+- _scope:_ `the course so far` — stopped — last taken 2026-09-21, attempt 1
+```
+
+**One row per assessment, updated in place.** Never append a row per attempt: that would
+turn a section read every turn into a transcript.
+
+- **The key.** An authored assessment is keyed by its lesson path, which MUST name a lesson
+  in `lessons` or `optional_lessons` that declares `assesses`. A quiz the learner asked for
+  has no lesson, so it is keyed by its scope after `_scope:_`: a lesson path when the scope
+  is one lesson, otherwise the scope in words.
+- **The state** — one of the four in 11.2.
+- **The clause** — when it was last taken, the attempt number, and `not demonstrated:`
+  followed by the concept ids the last attempt did not show. A `partial` row MUST name at
+  least one.
+- **The count.** `×N` after a concept counts the attempts in a row in which it was not
+  demonstrated. Write it from the second such attempt on, as an integer greater than one;
+  a concept that failed once carries no count. A concept the last attempt demonstrated is
+  not listed, so a later failure of it starts again without a count.
+  `runner-protocol.md` section 15.8 reads it, and it has to be recorded rather than
+  derived: `assesses` lives in a lesson's frontmatter, and you load only the active
+  lesson's, so for any other assessment this row is the only record.
+
+**Concept ids, never answers.** The row records what was demonstrated, not what was said —
+the signal kept apart from the content, as the design spec's section 16 requires. It also
+keeps the every-turn read cheap.
+
+Validator check 32 checks the shape of this section in an instance.
+
+### 11.2 The four states
+
+**Not yet taken is the absence of a row.**
+
+- **`passed`** — the lesson's completion conditions were met.
+- **`partial`** — at least one assessed concept was not demonstrated. A misconception is an
+  answer outcome, not a state of the assessment; it appears as a concept under "not
+  demonstrated", which is where practice reads it.
+- **`stopped`** — the learner stopped before the end. **Never written as `passed`**, however
+  much was demonstrated first.
+- **`skipped`** — the learner declined a main-path assessment without taking it.
+
+**`skipped` and `passed` are different states, and must never be written as each other.**
+A skipped assessment read as a passed one is a record claiming evidence nobody gave.
+
+Declining the offer of an optional assessment is *not* `skipped`. It is a deferral in
+*Optional lessons* (section 9.2), and it writes no row here, because nothing was taken.
+
+### 11.3 An assessment's completion is not terminal
+
+An assessment can be retaken, so its row moves between the four states for as long as the
+learner keeps returning to it. This is the one place an assessment diverges from other
+lessons.
+
+**On the main path**, leaving an assessment — whatever the result — completes it in
+section 5's sense: write the row, then advance `active_lesson`. A weak result never holds
+the learner back (`runner-protocol.md` section 15.7).
+
+**In `optional_lessons`**, section 9.2 makes `complete` terminal, and that stays true here
+by writing `complete` **only when the assessment is passed**. Leaving it at any other
+result records the *Optional lessons* entry `deferred`, with a clause naming the result:
+
+```markdown
+- `lessons/retention-check.md` — deferred — left partial at
+  `lessons/06-retention.md` on 2026-09-21
+```
+
+Returning to the main path is section 9.4 otherwise unchanged.
+
+### 11.4 An interrupted assessment
+
+An assessment in progress has no state of its own. Its row holds the result of the last
+**finished** attempt, or is absent before the first, and is not touched until the current
+attempt ends. The attempt in progress lives where any lesson's progress lives:
+
+- *Last completed task* — the attempt number and what it has shown so far, by concept:
+  "Assessment attempt 1: write-ahead-log demonstrated; fsync-boundaries partial, narrower
+  question pending";
+- *Next task* — the next question to ask;
+- *Concepts demonstrated* — each concept as it is demonstrated, as for any lesson.
+
+A session that ends here has interrupted the assessment, not stopped it. A cold session
+opens `active_lesson`, reads those two sections, does not present the Theory again, and
+asks the next question. Only the learner choosing to stop writes `stopped`.
+
+### 11.5 A practice lesson
+
+A practice lesson is a generated lesson (section 8) with `kind: practice`, written only when
+the learner accepts practice after a weak result (`runner-protocol.md` section 15.7). Its
+`reason:` names the assessment row and the concepts, for example "Practice on
+crash-recovery after `lessons/03-durability-check.md`, attempt 1, partial".
+
+- **`after:`** is the assessment, when it is in `lessons`. Otherwise — an optional
+  assessment, or a quiz the learner asked for — it is the `lessons` entry the learner is
+  standing in: `resume_at` while an optional lesson is active, else `active_lesson`.
+- **`resume_at`** follows section 8.3. From a main-path assessment it is the assessment
+  itself, so the detour returns into it for the retake. From an optional assessment the
+  practice lesson takes over `active_lesson` and `resume_at` keeps its value, the main-path
+  lesson the learner left; the *Optional lessons* entry becomes `deferred` first (11.3).
+  From a quiz the learner asked for, it is the lesson they are standing in.
+- It is recorded under *Generated lessons* with its kind, like any other.
