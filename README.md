@@ -326,7 +326,7 @@ course that walks a learner through building it themselves.
 
 ## Project status
 
-Version 0.9.0. Early, in active use, and honest about its edges.
+Version 0.9.1. Early, in active use, and honest about its edges.
 
 **What works today.** Discovery across many catalogues, local or Git-hosted, with caching
 and per-source failure reporting. Materialising a course into a workspace and validating it
@@ -352,7 +352,9 @@ keeps your progress, your `DESIGN.md` decisions and your generated lessons.
   runner tells you which programs a course will run before it runs one, and every call goes
   through your own agent host's permission prompt — which is the only boundary there is.
   Nothing in this project executes a bundle's command itself, and nothing here will ever
-  tell you a course is safe.
+  tell you a course is safe. A course's prose reaches your agent too: the tutor treats it
+  as material to teach from, never as instructions, and tells you when a course's text asks
+  it to act. That removes the easy case and does not stop a determined injection.
 - **Only catalogues are cached, not bundles.** A course you have not chosen is not on your
   machine.
 - **The three repositories are currently private.** The install commands above need access
@@ -390,7 +392,7 @@ One skill body serves both hosts.
 No pytest; three plain scripts, run from a checkout of this repository.
 
 ```
-python3 tests/test_validate_bundle.py     # 753 assertions
+python3 tests/test_validate_bundle.py     # 786 assertions
 python3 tests/test_catalogs.py            # 338 assertions
 python3 tests/test_plan_update.py         # 60 assertions
 ```
@@ -412,7 +414,7 @@ BELAY_SWEEP_SIBLING_REPOS=1 python3 tests/test_validate_bundle.py
 Those are separate checkouts at their own revisions, so what they contribute is
 reported on its own line and never added to the total above — `and 22 more against
 sibling repositories outside this commit` on the machine this was measured on. The
-headline stays 608 either way. Run it before publishing a bundle; a plain `python3
+headline stays 786 either way. Run it before publishing a bundle; a plain `python3
 tests/test_validate_bundle.py` is the check that a commit of *this* repository is
 sound.
 
@@ -426,6 +428,13 @@ importable, so the verdict a bundle gets is a property of the bundle and not of 
 machine. `test_yaml_reader_ignores_the_environment` asserts that, by parsing an anchor, a
 duplicate key, a tab used for indentation and six ambiguous scalars in two subprocesses —
 one of them with `import yaml` made to fail — and comparing the answers.
+
+PyYAML is still the reference for what the reader returns. Where PyYAML is importable,
+`test_yaml_reader_differential` compares the two readers on a seeded set of generated
+lines and asserts that the restricted reader never returns a value PyYAML would not — it
+returns the same value, or refuses the line. Those assertions are reported on their own
+line and, like the sibling sweep, never added to the total; without PyYAML the test prints
+a `SKIP` line instead.
 
 ### Contributing
 
