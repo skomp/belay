@@ -394,17 +394,23 @@ how large the change feels:
 
 | Bump | Meaning | Examples |
 |---|---|---|
-| MINOR | A live instance accepts the change. No review. | A correction to lesson prose. A fix to a check script. A new optional lesson. A new `supplies` entry. A new lesson added after the last lesson. |
-| MAJOR | A live instance stops and asks the learner. | The `lessons` list changes order. A lesson is removed. A lesson `id` changes. The completion conditions of a lesson change. |
+| MINOR | A live instance can take the change as one set. The learner still asks for the update, and accepts it with one answer. | A correction to lesson prose. A fix to a check script. A new optional lesson. A new `supplies` entry. A new lesson added after the last lesson. |
+| MAJOR | A live instance cannot take the change as one set. The learner reviews the update file by file. | The `lessons` list changes order. A lesson is removed. A lesson `id` changes. The completion conditions of a lesson change. |
 
 A MAJOR bump resets MINOR to `0`: `"2.4"` becomes `"3.0"`. Two authors who apply the table
 to the same change reach the same answer, because the test is what happens to an instance
 that already exists.
 
+Either way, nothing reaches an instance until its learner asks for the update. A file the
+learner has already worked in, and `DESIGN.md`, are never replaced without the learner's own
+answer (`state-lifecycle.md` section 3.2).
+
 **A bundle with no `version` is read as `"1.0"`.** The field is REQUIRED for every bundle
 you write, but a bundle published before it existed declares none, and the validator stays
 quiet about it rather than making every older bundle invalid. Check 30 checks the shape of
-a value that is there, and reports the value it read, in both modes.
+a value that is there, and reports the value it read, in both modes. In an instance it also
+requires the stamp's `materialized_version` to equal the instance's own `version`, because
+materialization and an update write both from one value.
 
 `version` is not a format version. Four other fields carry the word, and all four version a
 *schema*; none of them moves when the course does:

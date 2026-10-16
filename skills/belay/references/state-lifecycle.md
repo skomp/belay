@@ -3,8 +3,9 @@
 **Status:** normative for the runner. Load this when materializing a new instance, the
 first time in a session you are about to change `STATE.md`, when a task completes, when a
 lesson completes, when an offer of an optional lesson is accepted or deferred, when the
-learner acknowledges the assumed-concept review, or when you need to advance
-`active_lesson`.
+learner acknowledges the assumed-concept review, when you need to advance
+`active_lesson`, or when the learner asks to update the course to a newer version
+(section 3.2).
 
 `STATE.md` is the only place a learner's progress is recorded. Nothing in the bundle
 records progress; nothing outside `STATE.md` in the instance records it either. If you
@@ -114,14 +115,20 @@ Preconditions:
 - the entry's `source` has been resolved to a readable bundle directory;
 - the workspace root is known, and satisfies the bundle's `workspace_kind`;
 - there is no existing `tutorial/` in that workspace. If there is, stop — `tutorial/` is
-  singular, and overwriting it destroys a learner's progress. Ask.
+  singular, and materializing over it destroys a learner's progress. When the existing
+  instance is this course and the learner wants its newer version, that is an update, and
+  section 3.2 is the procedure. Otherwise ask.
 
 Steps, in order:
 
 1. **Create the instance directory** `tutorial/` at the workspace root.
 2. **Copy the bundle's files into it**: `tutorial.yaml`, `COURSE.md`, `DESIGN.md`, and
    `lessons/` in full, including lesson folders and their material. The instance is
-   self-contained; teaching never reaches back into the bundle source afterwards.
+   self-contained; teaching never reaches back into the bundle source afterwards. Two
+   moments are outside teaching and read the source, and neither one changes this rule.
+   A resume may read the source manifest's `version` and nothing else
+   (`runner-protocol.md` section 1). An update the learner asked for reads the whole
+   source (section 3.2).
 3. **Convert the state file.** Copy `STATE.template.md` to `STATE.md` **in the instance**,
    then delete `STATE.template.md` from the instance. Both steps matter: an instance that
    still holds `STATE.template.md` is indistinguishable from a half-materialized bundle,
@@ -142,7 +149,9 @@ Steps, in order:
    ```
 
    `materialized_from` records the resolved source in provider-qualified form
-   (`local:` plus the path, and for future provider types the equivalent locator).
+   (`local:` plus the path, and for future provider types the equivalent locator). A
+   relative `local:` path is relative to the workspace root, which is how the example
+   reaches a `belay-bundles` checkout beside the workspace.
    `materialized_version` records *which version* of that source this instance holds:
    copy the bundle's `version` exactly, in quotes, or write `"1.0"` when the bundle
    declares none (`bundle-format.md` section 2, **Content version**). A path has no
@@ -151,8 +160,8 @@ Steps, in order:
    `version` is greater than `materialized_version`, the two compared as pairs of
    integers, MAJOR first — `"2.10"` is later than `"2.9"`.
    This block is **provenance only**. Nothing in the teaching loop reads it. It exists so
-   a learner, or a future update mechanism, can tell where the instance came from and
-   which version of it. It never appears in a bundle. Section 3.1 adds three validation keys to this same
+   a learner, a resume, or an update (section 3.2) can tell where the instance came from
+   and which version of it. It never appears in a bundle. Section 3.1 adds three validation keys to this same
    block; those keys are the one part of the stamp anything ever reads, and what
    reads them is a session deciding whether this instance was ever checked — never a
    teaching turn.
@@ -449,6 +458,146 @@ Creating the workspace itself — initialising a repository, creating a project 
 is the learner's action unless they ask you to do it, with one qualification: files the
 bundle **declares** in `supplies` are the runner's to place, not a skeleton the learner
 builds, however much they look like one. Materializing `tutorial/` is yours.
+
+### 3.2 Updating an instance from a newer bundle
+
+**The learner starts this. The runner never does, and never applies any part of it by
+itself** (design spec section 15c). `DESIGN.md` holds decisions the learner made during the
+course, and `lessons.generated/` holds lessons written for this learner. No version of the
+bundle can rebuild either. A resume may *say* that the course has a newer version
+(`runner-protocol.md` section 1, **A resume may say the course has moved on**). This section
+begins only when the learner asks for the update.
+
+An update is a second, partial materialization into the same instance. It compares the file
+set that step 2 copies, writes the stamp that step 5 writes, places supplies by step 8's
+rules, and ends with the validation that 3.1 runs. That is why it is part of section 3 and
+not a section of its own.
+
+It never touches `STATE.md` beyond the lines named below, never touches
+`lessons.generated/`, and never touches anything outside `tutorial/` except by step 8's
+create-only placement.
+
+#### Plan it
+
+Resolve the bundle: the source the learner names, or the path in the stamp's
+`materialized_from`. Then run:
+
+```
+scripts/plan_update.py <the instance directory> <the bundle directory>
+```
+
+The script reads both directories and writes nothing. It prints the two versions, the bump
+(`MINOR` or `MAJOR`), the review mode, and one class for every file that materialization
+copies: `tutorial.yaml` (compared without the `instance:` block), `COURSE.md`, `DESIGN.md`,
+and every file under `lessons/`.
+
+| Exit | Meaning | What the runner does |
+|---|---|---|
+| 0 | nothing to do: the same version, and every file the same | tell the learner the instance is current |
+| 1 | a plan | show it to the learner, below |
+| 2 | usage or I/O error | correct the invocation. Never report it to the learner as a problem with their course |
+| 3 | refused | copy nothing. Say what the report names |
+
+The script refuses when the learner's place would not survive the update. It refuses when
+`active_lesson` or `resume_at` names a lesson file that the new bundle lacks, and when a
+generated lesson's `after:` names a lesson that the new `lessons` list lacks. The report
+names the file in each case. It also refuses when the bundle is a different course, when
+the bundle's version is older than the instance's, when either manifest or the `STATE.md`
+frontmatter does not parse, and when `active_lesson` is already inconsistent in the way
+section 7 lists. Repair that first. A refusal over the active lesson usually clears when the
+learner finishes that lesson. Until then, the learner can carry on unchanged.
+
+#### Started and completed
+
+The plan decides which lessons the learner has worked in from what `STATE.md` and the
+instance's manifest already record. It applies this rule, and only this rule:
+
+1. `status: not-started` — no lesson has been started.
+2. `status: complete` — every entry in `lessons` is completed.
+3. Otherwise, take the **anchor**. The anchor is `active_lesson` when that is an entry in
+   `lessons`. While a detour is active (sections 8.3 and 9.3), the anchor is `resume_at`.
+   An entry before the anchor in `lessons` is completed, the anchor is active, and an entry
+   after the anchor is not started. `lessons` is the order, as in section 5 step 3.
+4. The file that `active_lesson` names is active, whatever kind of path it is.
+5. Anything else is **unrecorded**: an optional lesson that is not active, or a file that is
+   in no list. The *Optional lessons* body section is prose, and this rule does not read it.
+
+A file in a lesson folder takes its lesson's state. On a boundary detour the anchor has not
+been begun yet. `STATE.md` cannot tell that case from a mid-lesson detour (the table in
+section 8.3), so the anchor counts as active in both cases. Where the records cannot decide,
+the answer is that the learner decides, never that the file is replaced.
+
+#### The classes
+
+| Class | The file | What happens to it |
+|---|---|---|
+| `unchanged` | is the same on both sides | nothing |
+| `replace` | differs, and is `COURSE.md`, `tutorial.yaml`, or part of a lesson not started | taken from the bundle |
+| `decide-completed` | differs, in a lesson the learner completed | the learner decides |
+| `decide-active` | differs, in the active lesson | the learner decides |
+| `decide-unrecorded` | differs, and is in a lesson the records cannot place, or in no lesson | the learner decides |
+| `decide-design` | is `DESIGN.md`, and differs | the learner decides |
+| `added` | exists only in the bundle | copied |
+| `removed` | exists only in the instance | deleted |
+
+**There is no common ancestor.** The instance keeps no copy of the bundle as it was at
+materialization. When a file differs, the plan cannot tell whether the author changed it,
+the tutor changed it, or both did, and it does not try. A `decide-*` file is reported as
+*different*. Show the learner the difference itself, from a diff of the two files, and do
+not describe which side made it.
+
+#### Show it, and ask
+
+Ask before anything is copied, whatever the bump is.
+
+- **Review `one-change-set`** (a MINOR bump): show the whole plan in one message. One answer
+  applies every `replace`, `added` and `removed` file, and the stamp.
+- **Review `per-file`** (a MAJOR bump, or a MINOR bump whose `lessons` list lost or reordered
+  entries — the plan says which): show each `replace`, `added` and `removed` file with its
+  difference. The learner answers each `replace` file except `tutorial.yaml`.
+- **Each `decide-*` file gets its own answer in both modes**, with its difference shown.
+  The learner keeps their copy or takes the bundle's. For `DESIGN.md` there is a third
+  answer: you draft a merged file, the bundle's text plus the learner's own additions, and
+  the learner approves the draft before it is written. `DESIGN.md` is never overwritten
+  without that answer.
+
+`tutorial.yaml`, the `added` files and the `removed` files move together. Check 4 requires
+the manifest and `lessons/` to agree, so the learner cannot keep the old manifest with new
+lessons, or a lesson the new manifest no longer lists. When the learner declines those,
+they decline the update. Nothing is copied, and the instance stays exactly as it was.
+
+#### Apply it
+
+Only what the learner accepted, in this order, while the bundle source is still in reach:
+
+1. **Copy and delete.** Copy each accepted file from the bundle, and delete each `removed`
+   file. For `tutorial.yaml`, copy the bundle's file and append the existing `instance:`
+   block again.
+2. **Rewrite the stamp.** Set `materialized_version` to the bundle's `version`, in quotes,
+   or to `"1.0"` when the bundle declares none, and set `materialized_at` to today. Update
+   `materialized_from` when the source changed. The instance's own `version` and
+   `materialized_version` now hold the same value. Check 30 reports a finding when they
+   differ, because that is what a half-applied update looks like. Remove `validated`,
+   `validation`, `validation_warnings` and `validation_unchecked`. Keep any `setup:` entry
+   from `validation_unchecked` together with `validation: not-certified`, because an update
+   re-runs no setup check.
+3. **Validate**, exactly as section 3.1 describes, and record the outcome there. A finding
+   stops teaching, as at materialization. The defect is in the bundle, so report it and do
+   not repair it in the instance.
+4. **Place supplies** by step 8, from the bundle source. Step 8 never overwrites, so this
+   places only an entry the new bundle added, and it says nothing about the entries
+   already in place.
+5. **Update `STATE.md`, and nothing else in it.** Set `updated` to today. When the plan
+   printed a `note:` about an *Optional lessons* entry for a lesson the bundle no longer
+   offers, remove that entry and say so. For each differing file the learner kept, add one
+   line under *Known intentional or incomplete state*, for example "`lessons/00-hello-args.md`
+   kept at its 1.0 text when the course moved to 1.1 on 2026-10-14, by the learner's
+   choice". The next plan reports that file as different again, and this line explains
+   why. `active_lesson`, `resume_at`, the completed lessons and every body section stay as
+   they were. An update changes the course text and never changes the learner's progress.
+6. **Say what changed**: the new version, which files were taken, and which were kept.
+   When the active lesson was replaced, read it again before the next task. If its
+   completion conditions changed, tell the learner before you state the next task.
 
 ---
 
@@ -837,7 +986,8 @@ bundle, and that buys three things:
   the course contains from what one tutor improvised.
 
 The same holds for the rest of what the bundle wrote. In an instance, `COURSE.md` and
-everything under `lessons/` are read-only. `DESIGN.md` is the one exception the format
+everything under `lessons/` are read-only. An update the learner asked for (section 3.2) is
+the one thing that rewrites them. `DESIGN.md` is the one exception the format
 already grants, and the tutor appends to it rather than rewriting it.
 
 "Never mutated" includes the bundle source. Materialization copies once and teaching never

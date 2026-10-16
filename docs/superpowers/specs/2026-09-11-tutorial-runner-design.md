@@ -880,7 +880,7 @@ claim that replaced it:
 
 - an **author** runs it over a bundle or a catalogue before shipping;
 - a **runner** runs it over the instance it has just materialized, before the first task,
-  and at the four further moments `references/runner-protocol.md` section 13.1 names;
+  and at the five further moments `references/runner-protocol.md` section 13.1 names;
 - **no teaching turn runs it**, which is the cost rule in `runner-protocol.md` section 1,
   and **no learner invokes it by hand**.
 
@@ -1036,10 +1036,10 @@ belay/
 ├── skills/belay/
 │   ├── SKILL.md
 │   ├── references/{bundle-format,catalogue-format,runner-protocol,state-lifecycle}.md
-│   ├── scripts/{validate_bundle.py,catalogs.py,yamlite.py}
+│   ├── scripts/{validate_bundle.py,catalogs.py,plan_update.py,yamlite.py}
 │   ├── catalog/builtin.yaml
 │   └── examples/rust-cli-basics/
-├── tests/{fixtures/,test_validate_bundle.py,test_catalogs.py}
+├── tests/{fixtures/,test_validate_bundle.py,test_catalogs.py,test_plan_update.py}
 ├── docs/superpowers/specs/
 └── README.md
 ```
@@ -1368,17 +1368,21 @@ first, and the runner still never reconciles on its own.
   any other string and any number, and reports the value it read in the header of both
   modes. In instance mode it checks `materialized_version` with the same rule and is quiet
   when the stamp has none.
-- **MINOR means a live instance accepts the change without review; MAJOR means it stops and
-  asks the learner.** The table is in `bundle-format.md` section 2, **Content version**. A
-  MAJOR bump resets MINOR to `0`.
+- **MINOR means a live instance can take the change as one set, accepted with one answer;
+  MAJOR means the learner reviews it file by file.** Either way the learner asks for the
+  update first (belay#50, below). The table is in `bundle-format.md` section 2,
+  **Content version**. A MAJOR bump resets MINOR to `0`. *Corrected 2026-10-14: this bullet
+  and that table first said MINOR is accepted "without review" and MAJOR "stops and asks",
+  which read as an update that applies by itself. That contradicts the rule this entry
+  keeps.*
 - **The materialization step writes it** (`state-lifecycle.md` section 3 step 5): the
   bundle's `version`, or `"1.0"` when the bundle declares none. An instance is behind its
   bundle when the bundle's `version` is greater than `materialized_version`, compared as
   integer pairs.
-- **What it does not do.** Nothing yet reads the two values side by side; the update
-  operation is belay#50. The validator sees one bundle and cannot check that a version
-  increases; that belongs where two versions are visible at once, in the authoring toolkit
-  and the catalogue generator (belay-authoring#24, belay-authoring#25).
+- **What it does not do.** The validator sees one bundle and cannot check that a version
+  increases. That belongs where two versions are visible at once, in the authoring toolkit
+  and the catalogue generator (belay-authoring#24, belay-authoring#25). The two values are
+  read side by side by a resume and by the update operation (belay#50, below).
 
 **Why it must not apply automatically.** `DESIGN.md` and `lessons/` are not purely bundle
 content once materialized. The tutor appends durable decisions to `DESIGN.md` as the learner
@@ -1393,14 +1397,49 @@ revision can reconstruct.
 > changed (`04`, `07`), and `DESIGN.md` gained a section. Your `DESIGN.md` has three local
 > additions. Update, review the differences, or carry on unchanged?
 
-**What is out of scope for now.** The three-way merge — silently updating unreached lessons,
-leaving completed ones alone, preserving local `DESIGN.md` additions while appending upstream
-ones. That is the correct end state and considerably more to build and test. Detection is
-what has to exist before any policy can be chosen, and reporting is useful on its own.
+*As shipped (belay#50, below), a resume reads only the source's version. It says one
+sentence and teaching continues. The per-file account in this example is what the update's
+plan gives once the learner asks for it.*
 
-**Implementation note.** The stamp is defined in `state-lifecycle.md` and the resume path in
-`runner-protocol.md`. belay#51 added `materialized_version` to the stamp; the resume path is
-unchanged, and the detection this entry describes is not built yet.
+**What is out of scope for now.** *Superseded 2026-10-14 by belay#50, below.* The three-way
+merge — silently updating unreached lessons, leaving completed ones alone, preserving local
+`DESIGN.md` additions while appending upstream ones. That is the correct end state and
+considerably more to build and test. Detection is what has to exist before any policy can be
+chosen, and reporting is useful on its own.
+
+**Shipped 2026-10-14 (belay#50): the learner-started update.** Not a three-way merge, and
+nothing silent. The rule above stands: the runner reports and never applies.
+
+- **Detection on resume** (`runner-protocol.md` section 1, **A resume may say the course
+  has moved on**). Once per session, a resume MAY read the `version` of the source's
+  `tutorial.yaml`, and nothing else. It does this only for a `local:` source, so no host is
+  contacted. It says one sentence when the instance is behind, and says nothing when the
+  source cannot be read. This is the one read of the source outside materialization and
+  update, and `state-lifecycle.md` section 3 step 2 says so beside "teaching never reaches
+  back".
+- **The update** (`state-lifecycle.md` section 3.2). It starts only when the learner asks.
+  `scripts/plan_update.py` reads the instance and the bundle, writes nothing, and classifies
+  every file that materialization copies. A file in a lesson not started is replaced. A
+  differing file in a completed, active or unrecorded lesson, and a differing `DESIGN.md`,
+  get the learner's own answer. Added and removed files move with the manifest. The script
+  refuses when `active_lesson`, `resume_at`, or a generated lesson's `after:` would name a
+  lesson the new bundle lacks. The tutor shows the plan, the learner answers, and the tutor
+  copies, rewrites the stamp, re-validates (3.1), and places new supplies (step 8).
+  `STATE.md` keeps the learner's progress unchanged.
+- **Which version the instance claims.** An update rewrites both the instance's own
+  `version`, by copying the new `tutorial.yaml`, and the stamp's `materialized_version`.
+  After an update the two match, and check 30 now reports a finding when they differ.
+- **The limit, stated rather than hidden:** the instance keeps no copy of the bundle as it
+  was at materialization, so there is no common ancestor. A differing file is reported as
+  different. The plan cannot say which side changed it.
+- **"Started" comes from the existing records.** `status`, then the position of
+  `active_lesson`, or of `resume_at` during a detour, in `lessons`. An optional lesson that
+  is not active cannot be placed by those records, so a change to it goes to the learner.
+  The rule is written once, in section 3.2.
+
+**Implementation note.** The stamp and the update are defined in `state-lifecycle.md`
+(section 3 step 5, section 3.2), and the resume-time detection is in `runner-protocol.md`
+section 1.
 
 ---
 
@@ -1545,12 +1584,13 @@ real files. One repository cannot satisfy both without duplication.
 | `rust-automaton-db` bundle | **done** — imported, corrected, verified |
 | `automaton-db/tutorial/` instance + `STATE.md` | **done** — uncommitted |
 | Validator (`skills/belay/scripts/validate_bundle.py`) | **done** — 28 bundle checks + 7 catalogue checks |
-| Validator test suite | **done** — 783 assertions on a clean checkout, the same on any machine; every check proven firing or warning. `BELAY_SWEEP_SIBLING_REPOS=1` adds the published bundles, counted separately (belay#37) |
+| Validator test suite | **done** — 786 assertions on a clean checkout, the same on any machine; every check proven firing or warning. `BELAY_SWEEP_SIBLING_REPOS=1` adds the published bundles, counted separately (belay#37) |
 | Optional lessons (`optional_lessons`, `failure_modes`) | **done** — 2026-09-12, §6; checks 18-21 |
 | First-load banner + `teaching_method` | **done** — 2026-09-13, released in 0.6.0; `state-lifecycle.md` §3 step 7, check 27; belay#23 |
 | Offer / defer / re-offer behaviour | **untested** — no harness exercises it; belay#22 |
 | Multi-catalogue support (`skills/belay/scripts/catalogs.py`) | **done** — 2026-09-12, §7 |
 | Catalogue test suite (`tests/test_catalogs.py`) | **done** — 338 assertions; every failure kind proven firing |
+| Instance update (`skills/belay/scripts/plan_update.py`, `state-lifecycle.md` §3.2) | **done** — 2026-10-14, belay#50, §15c; `tests/test_plan_update.py`, 60 assertions |
 | Shared YAML reader (`skills/belay/scripts/yamlite.py`) | **done** — the only reader; the PyYAML preference was removed 2026-09-13, belay#29 |
 | `catalog.yaml` inside `belay-bundles` | **done** — 2026-09-12, §15 item 6; generated by `belay-authoring`'s `catalog.py` |
 | `SKILL.md` (the runner control plane) | **done** |

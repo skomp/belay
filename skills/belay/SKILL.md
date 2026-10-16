@@ -249,23 +249,22 @@ not before.
 | Load this | When |
 |---|---|
 | `references/catalogue-format.md` | no active instance was found and you must find a tutorial to offer; the learner asks what tutorials are available; the learner wants to add a catalogue or register a course; a catalogue failed to refresh |
-| `references/state-lifecycle.md` | materializing a new instance; the first time this session you are about to change `STATE.md`; a task completes; a lesson completes; an offer of an optional lesson is accepted or deferred; the learner acknowledges the assumed-concept review; you need to advance `active_lesson`; you are about to write a generated lesson |
+| `references/state-lifecycle.md` | materializing a new instance; the first time this session you are about to change `STATE.md`; a task completes; a lesson completes; an offer of an optional lesson is accepted or deferred; the learner acknowledges the assumed-concept review; you need to advance `active_lesson`; you are about to write a generated lesson; the learner asks to update the course (section 3.2) |
 | `references/runner-protocol.md` | before the first task of a teaching session; when validating; when completion conditions look met; when unsure whether an edit is yours to make; when considering whether to write a lesson; when deciding whether to offer or re-offer an optional lesson; when a course declares `assumes`; when a course declares `setup_validators`, or a setup check fails, or the learner asks whether a course is safe to run; when a course finishes or the learner asks what comes after it |
 | `references/bundle-format.md` | authoring, importing or repairing a **bundle**, including promoting a generated lesson into one. Not needed to teach. |
 
-Two scripts, and a learner's session runs both — each at one moment, never per turn.
+Three scripts, and a learner's session runs them — each at one moment, never per turn.
 `scripts/catalogs.py` belongs to discovery; a resume never runs it.
 `scripts/validate_bundle.py --instance <workspace>/tutorial` checks the instance
 materialization has just created, before the first task: a finding stops the course from
-starting, a warning never does, and an indeterminate run is not a pass. Always pass
-`--instance` when the target is an instance. Without it the script checks the directory as
-a bundle, fails it on the properties every correct instance has — `STATE.md` present,
-`STATE.template.md` absent, the `instance:` stamp — and stops a sound course.
-`references/state-lifecycle.md` section 3.1 has the step, `references/runner-protocol.md`
-section 13 the outcomes and the report. It is the same script an author checks a bundle or
-a catalogue with.
+starting, a warning never does, and an indeterminate run is not a pass. Without
+`--instance` it checks the directory as a bundle and fails every correct instance, which
+has `STATE.md` and a stamp and lacks `STATE.template.md`. `references/state-lifecycle.md`
+section 3.1 has the step, `references/runner-protocol.md` section 13 the outcomes and the
+report. `scripts/plan_update.py` runs only when the learner asks to update the course, and
+writes nothing.
 
-**Neither script ever runs a bundle's validator.** A `command` validator is an argument
+**No script here ever runs a bundle's validator.** A `command` validator is an argument
 list that *you* run, through your own host, where your host's permission prompt sees it.
 Moving that into a script here would put every command in every bundle behind one approval
 the learner gave to the runner. `references/runner-protocol.md` section 14 has the rule,

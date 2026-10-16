@@ -3,7 +3,7 @@
 
 Two callers, one script. An author runs it over a bundle or a catalogue
 before shipping. A runner runs it over the instance it has just materialized,
-before the first task, and at the four further moments
+before the first task, and at the five further moments
 references/runner-protocol.md section 13.1 names. It is never run on a
 teaching turn, and a learner never invokes it by hand.
 
@@ -122,7 +122,7 @@ CHECKS: dict[int, str] = {
     29: "setup_validators entries are well-formed, name a declared validator, "
         "and carry a describe line the banner can print",
     30: "version, when declared, is a quoted \"MAJOR.MINOR\" string; so is the "
-        "instance stamp's materialized_version",
+        "instance stamp's materialized_version, and the two match",
 }
 
 BUNDLE_ONLY = {12, 13, 26}
@@ -4268,8 +4268,10 @@ def check_version(manifest: Any, mode: str, report: Report) -> None:
     2.1 by the time anything here sees it.
 
     In instance mode it also checks the stamp's `materialized_version` with
-    the same rule. An absent one is silent: the instance was made before the
-    field existed. A stamp that is not a mapping is not this check's to
+    the same rule, and that it equals the instance's own `version` (absent
+    read as "1.0"): materialization and an update both write the two from
+    one value. An absent stamp value is silent: the instance was made before
+    the field existed. A stamp that is not a mapping is not this check's to
     report.
 
     The value is reported in the header, in both modes, beside `target:`.
@@ -4314,6 +4316,27 @@ def check_version(manifest: Any, mode: str, report: Report) -> None:
             else:
                 info.materialized = f"{parsed[0]}.{parsed[1]}"
                 seen.append(f'materialized_version "{info.materialized}"')
+                # The instance's tutorial.yaml is a copy of the bundle's, and
+                # the stamp records which version that copy is. Materialization
+                # writes both from one value and an update (state-lifecycle.md
+                # section 3.2) rewrites both together, so two different values
+                # mean a copy or a stamp was changed without the other: a
+                # half-applied update, or a hand edit.
+                if info.bundle is not None and info.bundle != info.materialized:
+                    own = f'"{info.bundle}"'
+                    if not info.bundle_declared:
+                        own += " (absent, read as 1.0)"
+                    report.add(
+                        30,
+                        "tutorial.yaml (instance.materialized_version)",
+                        f"'materialized_version' is \"{info.materialized}\" "
+                        f"but the instance's own 'version' is {own}. The two "
+                        f"are written together, at materialization and by an "
+                        f"update, so they must match: one of them was changed "
+                        f"without the other. Compare the instance with its "
+                        f"bundle (scripts/plan_update.py) before correcting "
+                        f"either.",
+                    )
 
     if not info.bundle_declared and not info.materialized_declared:
         report.na(30, f'no version declared; read as "{VERSION_ABSENT}"')
