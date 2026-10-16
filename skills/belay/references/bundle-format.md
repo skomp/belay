@@ -101,8 +101,10 @@ include a flat list, and each is that shape because the thing it describes reall
 | `assumes` | concept id | that concept's definition | `aliases` |
 
 The other nested shape is one level of list over one level of mapping, with scalars
-underneath — `supplies`, `setup_validators` and the two recommendation lists. A field
-that seems to want a fourth level wants to be that shape instead.
+underneath — `supplies`, `setup_validators` and the two recommendation lists. `sections`
+is that shape with flat lists at its leaves, each section's `lessons` and `objectives`:
+three levels, the ceiling. A field that seems to want a fourth level wants to be one of
+these shapes instead.
 
 ```yaml
 bundle_format: 1
@@ -168,6 +170,7 @@ advance_on: validated-evidence-only
 | `level` | MUST | e.g. `beginner`, `intermediate`, `intermediate-to-advanced`. |
 | `style` | SHOULD | e.g. `project-driven`, `interactive`, `exercise-based`. |
 | `lessons` | MUST | Ordered list of lesson paths — the main path. See below. |
+| `sections` | MAY | Groups of lessons, each with an `id`, a `title` and optionally a description and objectives. Describes the course; never changes its order. See **Course sections** below. |
 | `optional_lessons` | MAY | Authored lessons off the main path, offered rather than sequenced. See **Optional lessons** below. |
 | `failure_modes` | MAY | Stable ids for the ways a learner's work goes wrong. See **Failure modes** below. |
 | `supplies` | MAY | Files the bundle hands the learner's workspace, placed by the runner and never assigned as a task. See **Supplied files** below. |
@@ -416,8 +419,8 @@ how large the change feels:
 
 | Bump | Meaning | Examples |
 |---|---|---|
-| MINOR | A live instance can take the change as one set. The learner still asks for the update, and accepts it with one answer. | A correction to lesson prose. A fix to a check script. A new optional lesson. A new `supplies` entry. A new lesson added after the last lesson. |
-| MAJOR | A live instance cannot take the change as one set. The learner reviews the update file by file. | The `lessons` list changes order. A lesson is removed. A lesson `id` changes. The completion conditions of a lesson change. |
+| MINOR | A live instance can take the change as one set. The learner still asks for the update, and accepts it with one answer. | A correction to lesson prose. A fix to a check script. A new optional lesson. A new `supplies` entry. A new lesson added after the last lesson. A section added, retitled or regrouped. |
+| MAJOR | A live instance cannot take the change as one set. The learner reviews the update file by file. | The `lessons` list changes order. A lesson is removed. A lesson `id` changes. The completion conditions of a lesson change. A section `id` changes or a section is removed, since an instance's assessment record may name it. |
 
 A MAJOR bump resets MINOR to `0`: `"2.4"` becomes `"3.0"`. Two authors who apply the table
 to the same change reach the same answer, because the test is what happens to an instance
@@ -518,6 +521,73 @@ so it is never handed back as a correction. And nothing about a setup validator 
 as progress, the same rule `supplies` carries. `runner-protocol.md` section 14 states what
 the runner does in both directions, including what happens when a manifest-scope setup
 check fails at materialization.
+
+### Course sections — `sections`
+
+A long course has parts. `sections` names them, so a progress report can say where in the
+course the learner is, a learner can ask what a part covers, and an assessment can be
+scoped to one. It describes the course. It never runs it: **`lessons` stays the only
+order**, and nothing reads a section to decide which lesson comes next.
+
+```yaml
+sections:
+  - id: storage-engine
+    title: The storage engine
+    description: >
+      Durable local storage, then immutable segments the automata read in place.
+    objectives:
+      - Recover a crashed node to its last acknowledged write.
+      - Justify each unsafe block by the invariant it relies on.
+    lessons:
+      - lessons/10-storage-durability.md
+      - lessons/11-automaton-aware-segments.md
+```
+
+| Field | Required | Meaning |
+|---|---|---|
+| `id` | MUST | Unique among the sections, `[a-z0-9-]+`. Stable once published: an instance's assessment record names a section by it. |
+| `title` | MUST | What the tutor says when it tells the learner where they are: "lesson 11 of 23, in *The storage engine*". |
+| `description` | MAY | One sentence on what the section covers. Non-empty when declared. |
+| `objectives` | MAY | A non-empty list of one-line objectives for the section as a whole. A quiz scoped to the section is drawn from these, so declare them on a section a learner may want to be tested on. |
+| `lessons` | MUST | A non-empty list of lesson paths, in the form `lessons` uses. Each one is an entry in `lessons` or a key in `optional_lessons`. |
+
+The rules, which validator check 34 enforces:
+
+- **every path names a lesson the course already has**, in `lessons` or `optional_lessons`;
+- **a lesson belongs to at most one section.** A lesson in no section is allowed;
+- **a section is not empty;**
+- **a section is one stretch of the course.** Its main-path lessons are one contiguous run
+  of `lessons`, listed in the order `lessons` gives them, and the sections themselves are
+  listed in `lessons` order. A section that would reorder anything is an error, never
+  something reconciled: `lessons` wins by construction, so a section that disagrees with it
+  can only be a mistake.
+
+**An optional lesson may belong to a section.** A section describes the course, and an
+optional lesson is part of the course even though it is not part of the order. Its place in
+a section takes no part in the ordering rules, and a section holding only optional lessons
+is allowed.
+
+**Why a manifest block and not a field in each lesson.** The alternative was a `chapter`
+reference in each lesson's frontmatter, which keeps a lesson self-describing — the argument
+that settled `optional: true` (2026-09-11 design spec, section 15 item 10). It does not
+carry over. That flag exists because the tutor teaches from one lesson file and must know
+from that file what kind of lesson it holds; the tutor already holds the manifest every
+turn, so a lesson never needs to say which section it is in. A section also has a title,
+a description and objectives of its own, and no single lesson is the place for them. And
+one shape means there is nothing to disagree with, so no disagreement rule is needed.
+
+**What this costs while teaching.** The tutor reads `tutorial.yaml` every turn, so the
+whole block — titles, descriptions and objectives — is in its context from the start of
+every session. Keep `description` to a sentence and `objectives` to a few lines; the
+`sections` block of the `rust-automaton-db` test fixture, seven sections over 23 lessons
+with one description and two objectives among them, is 1.8 KB, which nearly doubles a
+2.0 KB manifest. Most of that is the lesson paths, repeated from `lessons`.
+The tutor *uses* a title when it reports progress, and a description or objectives only
+when the learner asks what a section covers or asks to be quizzed on one
+(`runner-protocol.md` section 17).
+
+`COURSE.md` keeps its map of the course in prose. `sections` does not replace it: a
+learner choosing a course still reads `COURSE.md`, and the tutor still does not.
 
 ### Optional lessons — `optional_lessons`
 
@@ -2145,7 +2215,7 @@ genuinely cannot be finished with the failure in place.
 
 `bundle_format` stays `1`. `optional_lessons`, `failure_modes`, `supplies`, `covers`,
 `assumes`, `recommended_follow_ups`, `recommended_previous_bundles`,
-`teaching_method`, `setup_validators`, `version` and the lesson field `assesses` are all additive: a bundle written before this
+`teaching_method`, `setup_validators`, `version`, `sections` and the lesson field `assesses` are all additive: a bundle written before this
 section existed is valid exactly as it stands, nothing in this document changes what it means, and no edit
 is implied. Run the validator over it and see.
 
@@ -2189,6 +2259,11 @@ keys, and ignores them. The effect on a learner is precise, and worth stating pl
   `## Assessments` record. The learner still answers questions and still advances; what is
   lost is the remediation loop. An older validator reports nothing about a lesson
   frontmatter field it does not know, so it accepts `assesses` in silence;
+- **no section is named.** An older runner reports progress as "lesson 14 of 23" without
+  the section, and a learner who asks to be quizzed on a section is asked to name lessons
+  or a topic instead. Nothing else changes, because nothing reads a section to decide what
+  comes next. An older validator reports `sections` as an unrecognised top-level field
+  rather than rejecting the bundle;
 - **nothing is taught wrongly.** The main path is untouched by `optional_lessons`, because
   an optional lesson is never in it. An unplaced supply is not the same case — a
   manifest-scope entry IS on the main path — but it costs the learner the toil the key
