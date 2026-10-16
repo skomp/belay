@@ -261,6 +261,23 @@ A script enforces that pair, and the runner runs it on the instance it has just 
 before the first task — so a defect in a course is found by the runner rather than by a
 learner five lessons in.
 
+**What `git status` shows after you start a course.** In a git repository, the course
+material appears as untracked files to commit when you choose: `tutorial/tutorial.yaml`,
+`COURSE.md`, `DESIGN.md`, `lessons/` and, once the tutor writes one, `lessons.generated/`.
+Your progress does not appear: `tutorial/STATE.md` and `tutorial/EVENTS.jsonl` are
+listed in this checkout's own `.git/info/exclude`, never in `.gitignore`, so the rule is
+yours alone and is not shared with anyone who clones the repository. The tutor tells you so
+in one line when the course starts. Nothing is ever staged or committed for you.
+
+To commit your progress too — to carry it to another machine, say — ask the tutor, or run
+`python3 skills/belay/scripts/instance_git.py track path/to/project` from the plugin's
+directory. To keep it local again, `instance_git.py apply`; to see what is in force,
+`instance_git.py status`. The
+choice is recorded in the same exclude file, so resuming the course does not undo it.
+Without opting in, a clone of the repository has the course but not your place in it. In a
+directory that is not a git repository, the tutor says so and nothing else happens.
+`state-lifecycle.md` section 3.3 has the full policy.
+
 **Ownership is declared, not assumed.** The manifest names tutor-owned and learner-owned
 paths and an `ownership_policy`, which every course must state — there is no default. Under
 `tutor-must-not-edit-learner-owned`, the normal choice and what four of the six courses
@@ -289,7 +306,7 @@ needs them:
 | [`SKILL.md`](skills/belay/SKILL.md) | the control plane — orient, resume or discover, the teaching contract |
 | [`bundle-format.md`](skills/belay/references/bundle-format.md) | the normative bundle contract, for authors |
 | [`catalogue-format.md`](skills/belay/references/catalogue-format.md) | catalogues, precedence, failure handling, presenting a choice |
-| [`state-lifecycle.md`](skills/belay/references/state-lifecycle.md) | materialisation, what a completed task and lesson record |
+| [`state-lifecycle.md`](skills/belay/references/state-lifecycle.md) | materialisation, what git sees, what a completed task and lesson record |
 | [`runner-protocol.md`](skills/belay/references/runner-protocol.md) | the turn loop, validation outcomes, ownership, detours, offers |
 | [design specification](docs/superpowers/specs/2026-09-11-tutorial-runner-design.md) | the architecture, the measured host facts, and the designs that were rejected |
 
@@ -404,7 +421,7 @@ One skill body serves both hosts.
 
 ### Tests
 
-No pytest; five plain scripts, run from a checkout of this repository.
+No pytest; six plain scripts, run from a checkout of this repository.
 
 ```
 python3 tests/test_validate_bundle.py     # 846 assertions
@@ -412,7 +429,12 @@ python3 tests/test_catalogs.py            # 338 assertions
 python3 tests/test_plan_update.py         # 67 assertions
 python3 tests/test_evidence.py            # 65 assertions
 python3 tests/test_ownership.py           # 127 assertions
+python3 tests/test_instance_git.py        # 88 assertions
 ```
+
+`test_instance_git.py` runs the version-control script against real repositories made
+with `git init` in temporary directories, a linked worktree among them, with your own git
+configuration switched off.
 
 `test_ownership.py` covers the ownership resolver and the Claude Code hook, which it runs
 as Claude Code does: a subprocess fed the hook payload on stdin.
