@@ -38,6 +38,9 @@ bundles that are correct. Checks 23 and 25 are where those come from in
 bundle mode. Check 28 and catalogue checks 1 and 3 warn for a different and
 stronger reason: a manifest and a catalogue are both data a NEWER runner may
 extend, so an unrecognised field is named and the document still passes.
+Check 33 warns about an instance's learning record, EVENTS.jsonl, for a
+third reason: the record is evidence only, so a malformed one never stops a
+course.
 
 Stdlib only. Python 3.11. The restricted reader in yamlite.py parses the
 deliberately shallow subset the format uses and *rejects* anything outside it
@@ -73,6 +76,10 @@ try:
 except ImportError:  # pragma: no cover - only when sys.path lacks this dir
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     from yamlite import YAML_READER, YamlError, _RestrictedYaml, load_yaml
+
+# The learning record's format lives in evidence.py, which the tutor runs to
+# compact and summarise it; check 33 reads it with the same definition.
+import evidence  # noqa: E402
 
 
 # --------------------------------------------------------------------------
@@ -127,10 +134,12 @@ CHECKS: dict[int, str] = {
         "ids, and every id resolves in covers",
     32: "[instance] STATE.md's '## Assessments' record is well-formed: known "
         "states, lessons that exist, concept ids and counts",
+    33: "[instance] the learning record EVENTS.jsonl, when present, holds only "
+        "declared events in seq order; a malformed one WARNS",
 }
 
 BUNDLE_ONLY = {12, 13, 26}
-INSTANCE_ONLY = {11, 14, 15, 17, 21, 32}
+INSTANCE_ONLY = {11, 14, 15, 17, 21, 32, 33}
 
 # Checks that can only ever WARN, never produce a finding.
 #
@@ -145,10 +154,16 @@ INSTANCE_ONLY = {11, 14, 15, 17, 21, 32}
 # a manifest written for a NEWER runner looks like to this one, and rejecting
 # it would break the additive-key policy bundle-format.md section 13 states.
 #
+# Check 33 warns for a third reason: the learning record is evidence only,
+# never progress (references/state-lifecycle.md section 12), so a missing,
+# truncated or malformed one must never stop a course. It is reported so the
+# tutor and the learner know what the record cannot answer, and the run
+# still passes.
+#
 # The suite's coverage meta-test reads this set, so a check named here must
 # be demonstrated WARNING and one not named here must be demonstrated
 # FINDING; neither stands in for the other.
-WARNING_ONLY = {25, 28}
+WARNING_ONLY = {25, 28, 33}
 
 RAN = "ran"
 NOT_APPLICABLE = "n/a"
@@ -2612,6 +2627,56 @@ def check_assessment_state(
     report.ran(32, f"{records} record(s)")
 
 
+# How many malformed lines check 33 names one by one before it summarises.
+LEARNING_RECORD_WARNINGS_SHOWN = 5
+
+
+def check_learning_record(root: Path, report: Report) -> None:
+    """Check 33 - instance mode, WARNING ONLY.
+
+    tutorial/EVENTS.jsonl is the learning-evidence record, evidence only:
+    STATE.md stays the only authority for progress. So nothing about it can
+    stop a course. A record that is absent is normal - the tutor creates it
+    with the first event - and reports n/a, not a warning: a warning on every
+    freshly materialized instance would teach the reader to ignore this
+    check. A record that is present is read with evidence.read_record(), the
+    definition the tutor's own script uses, and every line that is not a
+    declared event, every undeclared field and every seq that does not
+    follow the one before it is a warning naming the line.
+    """
+    record = evidence.read_record(root)
+    where = evidence.FILENAME
+    if not record.present:
+        report.na(33, f"there is no {evidence.FILENAME}; the tutor creates it "
+                      f"with the first event")
+        return
+    shown = record.problems[:LEARNING_RECORD_WARNINGS_SHOWN]
+    for number, why in shown:
+        location = f"{where}, line {number}" if number else where
+        if why.startswith("seq "):
+            message = (
+                f"{why}. seq must increase through the file. Running "
+                f"'scripts/evidence.py compact' renumbers it; the record is "
+                f"evidence only, so the course is unaffected."
+            )
+        else:
+            message = (
+                f"the line {why}. It is not counted, and "
+                f"'scripts/evidence.py compact' drops it. Every event holds "
+                f"only the fields state-lifecycle.md section 12 declares; the "
+                f"record is evidence only, so the course is unaffected."
+            )
+        report.warn(33, location, message)
+    if len(record.problems) > len(shown):
+        report.warn(
+            33,
+            where,
+            f"{len(record.problems) - len(shown)} further problem(s) of the "
+            f"same kind are not listed one by one.",
+        )
+    report.ran(33, f"{len(record.events)} event(s), {len(record.problems)} problem(s)")
+
+
 def check_state_template(
     root: Path, manifest: Any, report: Report
 ) -> dict | None:
@@ -4950,6 +5015,7 @@ def validate(target: Path, mode: str) -> Report:
         check_assessment_state(
             target, manifest_dict, optional_keys, generated, assessments, report
         )
+        check_learning_record(target, report)
 
     return report
 

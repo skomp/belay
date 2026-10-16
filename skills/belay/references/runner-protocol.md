@@ -5,7 +5,8 @@ session, when validating, when a lesson's completion conditions look met, when d
 whether to offer or re-offer an optional lesson, when the active lesson declares
 `assesses` or the learner asks to be quizzed (section 15), when a course finishes or the
 learner asks what comes after it, when a newly materialized instance does not pass
-validation, or when you are unsure whether an edit is yours to make.
+validation, when you are unsure whether an edit is yours to make, or when the learner asks
+how they have done (section 16).
 
 This document assumes an active instance already exists at `tutorial/` in the learner's
 workspace. Materialization is in `state-lifecycle.md`. Finding a tutorial in the first
@@ -40,6 +41,7 @@ Do not load, unless one of the stated exceptions applies:
 | `DESIGN.md` in full | never; load declared anchors only |
 | any lesson other than `active_lesson` | never during teaching; one exception, a quiz the learner asked for on a named lesson (section 15.9) |
 | completed lessons | never; `STATE.md` records what they established |
+| `tutorial/EVENTS.jsonl` | never in full; you append to it, and `scripts/evidence.py summary` reads it when section 16.3 needs it |
 | files inside a lesson folder | only when the lesson body names the file and says when |
 | the whole workspace | never; open the files the task concerns |
 
@@ -309,6 +311,9 @@ rule and what you may and may not tell a learner about it.
 entries there are checks you perform unprompted; a lesson's `validators` are what the
 learner's work is judged by. Section 14.
 
+After each of the lesson's validators runs, append a `check` event to the learning record
+(section 16). A setup check writes none, and nor does a validator that could not run.
+
 ### 2.6 Classify, then act
 
 See section 3. Then update `STATE.md` per `state-lifecycle.md`, but only for progress
@@ -436,6 +441,8 @@ describe an instance that does not exist yet:
 
 - `tutorial/lessons.generated/**` is **tutor-owned in every instance**, whether or not
   `tutor_owned` lists it. It holds only lessons you wrote (section 7);
+- `tutorial/EVENTS.jsonl`, the learning record, is **tutor-owned in every instance** for
+  the same reason (section 16). The learner may read or delete it;
 - `tutorial/lessons/**` is **read-only in every instance**, whether or not `tutor_owned`
   lists it. Those are the author's lessons, copied in at materialization. Correct a
   defective one by reporting it, never by editing the copy.
@@ -458,7 +465,7 @@ These are not:
 - inspecting a diff, listing a directory, or checking whether a path exists;
 - naming a type, a function signature, a standard-library item, or the concept to look
   up;
-- writing `tutorial/STATE.md` and `tutorial/DESIGN.md`;
+- writing `tutorial/STATE.md`, `tutorial/DESIGN.md` and `tutorial/EVENTS.jsonl`;
 - placing a file the bundle declares in `supplies` (section 10). The author is forbidden
   to use that key to hand over what a lesson asks the learner to write, which is what
   keeps this entry off the list above.
@@ -483,6 +490,8 @@ wrong response to a concept nobody taught.
 
 **Inside an assessment the ladder stops at step 3** (section 15.5): steps 4 and 5 hand
 over the thing being assessed.
+
+Each rung you give is a `hint` event in the learning record, with its number (section 16).
 
 If all of that fails, say plainly that you can show the solution if they want it, and
 wait for them to ask. Asking is the learner's decision, and `solution_code` governs
@@ -518,7 +527,9 @@ Then, in order:
    take the next entry. The list is the order; filename sort is not. When the instance has
    a `lessons.generated/` directory, apply section 7.3 first: an incomplete generated
    lesson whose `after:` is the lesson just finished takes precedence over the next entry.
-   Update `STATE.md` per `state-lifecycle.md`.
+   Update `STATE.md` per `state-lifecycle.md`. Append `lesson_completed` for the lesson
+   left and `lesson_started` for the new one, then run `scripts/evidence.py compact
+   tutorial` (section 16).
 5. **Load the new lesson and nothing else.** Discard the previous lesson from working
    context. Do not summarise it into `STATE.md` beyond the concepts it demonstrated. If
    the new lesson declares `supplies`, place them before you state its first task
@@ -1888,7 +1899,8 @@ The assessment's turn is section 2's turn with a question in place of a task:
    objectives*. Prefer a question that needs an explanation or an application. Multiple
    choice may be used, never as the only form: a question answered by recognition does not
    show that a concept can be applied;
-2. **take the answer, and classify it** — section 15.4;
+2. **take the answer, and classify it** — section 15.4 — and append an `answer` event
+   with the concept and the outcome (section 16);
 3. **respond** as the outcome's row says;
 4. **record only what was demonstrated** — `state-lifecycle.md` section 11.
 
@@ -2081,3 +2093,64 @@ Theory again (section 2.3), does not restart the attempt, and asks that question
 - **Recording answers in `STATE.md`.** The row records concept ids, never what was said.
 - **Writing a lesson file, or editing the manifest, for a learner-requested quiz.**
   Section 15.9.
+
+---
+
+## 16. The learning record
+
+`tutorial/EVENTS.jsonl` is evidence of how the learner got where `STATE.md` says they are.
+`state-lifecycle.md` section 12 is the format: the event types and their fields, the cap,
+compaction and repair. This section is when you write it and when you read it.
+
+**It is evidence, never progress.** Nothing in this loop decides anything from the record
+that `STATE.md` does not also say. Section 15.8's count is read from the *Assessments* row,
+never from here; advancement is section 6, never a count of `check` events.
+
+### 16.1 What you write, and at which point
+
+One line per event, appended at the point in the turn where the event happens. Several
+events from one turn may go in one append, in the order they happened.
+
+| At | Append |
+|---|---|
+| a lesson becoming active — the first lesson before its first task, at advancement (section 6), on accepting a detour, on returning into an assessment | `lesson_started` |
+| section 2.5, after each of the lesson's validators runs | `check`, with the validator's name and `pass` or `fail` |
+| section 5, each rung of the help ladder you give | `hint`, with the rung |
+| section 15.3, once an answer is classified | `answer`, with the concept id and the outcome |
+| the end of an assessment attempt, when its *Assessments* row is written | `assessment`, with the row's state, attempt and concepts not demonstrated |
+| section 15.7, practice offered; and accepted, once its file is written | `practice_offered`, then `practice_accepted` with the lesson's path |
+| section 6, a lesson completed — an assessment left at any result included | `lesson_completed`, then run `scripts/evidence.py compact tutorial` |
+
+`seq` is one more than the last event's. The first time in a session that you append, read
+**only the last line** of the file to learn it — never the whole file. When the file is
+absent, start at 1. When the last line does not parse, the previous write was cut off: run
+`scripts/evidence.py compact tutorial`, which drops it, and read the last line again.
+Do the same after any `compact` that says it renumbered.
+
+**Write identifiers, never words.** A concept id, a validator name, a lesson path, an
+enumerated value. Never the learner's code, their answer, a validator's output or anything
+they said: the fields cannot hold it, and check 33 warns about a field that tries.
+
+### 16.2 What you never write
+
+- an event for something that did not happen — a check you did not run, a hint you did not
+  give, an answer you did not classify;
+- an abandonment event, a heartbeat, or a clock time. Abandonment is derived
+  (`state-lifecycle.md` section 12.5);
+- anything into `STATE.md` because the record says it. The record never repairs
+  `STATE.md`.
+
+### 16.3 When you read it
+
+On demand only, through `scripts/evidence.py summary tutorial`, which prints the counts per
+lesson and what it cannot know:
+
+- **the learner asks how they have done** — attempts, repeated failures, hints, assessment
+  results;
+- **after a weak assessment result**, when whether earlier practice on the same concepts
+  helped would change what you say. Section 15.8's rule still reads the *Assessments* row.
+
+When the summary says the record is missing, or lists lines it could not read, say in one
+sentence what you cannot know — "I have no record of how many attempts the earlier lessons
+took" — and carry on from `STATE.md`. A missing or broken record never stops a course and
+never needs the learner to do anything.

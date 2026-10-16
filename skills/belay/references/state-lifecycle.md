@@ -4,12 +4,18 @@
 first time in a session you are about to change `STATE.md`, when a task completes, when a
 lesson completes, when an offer of an optional lesson is accepted or deferred, when the
 learner acknowledges the assumed-concept review, when you need to advance
-`active_lesson`, when an assessment ends or is interrupted (section 11), or when the
-learner asks to update the course to a newer version (section 3.2).
+`active_lesson`, when an assessment ends or is interrupted (section 11), when the
+learner asks to update the course to a newer version (section 3.2), or when the learning
+record is missing, broken or asked about (section 12).
 
 `STATE.md` is the only place a learner's progress is recorded. Nothing in the bundle
 records progress; nothing outside `STATE.md` in the instance records it either. If you
 find progress recorded in a second place, the second place is wrong.
+
+The learning record, `tutorial/EVENTS.jsonl` (section 12), is not a second place. It is
+evidence of how the learner got there — attempts, hints, answer outcomes — and nothing in
+the teaching loop decides anything from it that `STATE.md` does not also say. Where the two
+disagree, `STATE.md` is right.
 
 ---
 
@@ -474,8 +480,8 @@ rules, and ends with the validation that 3.1 runs. That is why it is part of sec
 not a section of its own.
 
 It never touches `STATE.md` beyond the lines named below, never touches
-`lessons.generated/`, and never touches anything outside `tutorial/` except by step 8's
-create-only placement.
+`lessons.generated/` or the learning record `EVENTS.jsonl` (section 12), and never touches
+anything outside `tutorial/` except by step 8's create-only placement.
 
 #### Plan it
 
@@ -716,6 +722,9 @@ Procedure:
    the learner has plainly moved on or plainly not started what was recorded.
 4. record nothing you did not measure.
 
+The learning record (section 12) is never a source for this repair. It is evidence, not
+progress, and it cannot be measured against the workspace.
+
 The failure this avoids: a resume marker that describes work the learner finished two
 lessons ago sends the tutor to re-teach it. A marker that describes work they have not
 started lets the tutor assume it exists.
@@ -763,6 +772,7 @@ tutorial/
 ├── COURSE.md
 ├── DESIGN.md
 ├── STATE.md
+├── EVENTS.jsonl          the learning record, section 12; tutor-owned, may be absent
 ├── lessons/              the author's lessons, copied at materialization, read-only
 └── lessons.generated/    lessons the tutor wrote during this course, tutor-owned
 ```
@@ -1358,3 +1368,130 @@ crash-recovery after `lessons/03-durability-check.md`, attempt 1, partial".
   lesson the learner left; the *Optional lessons* entry becomes `deferred` first (11.3).
   From a quiz the learner asked for, it is the lesson they are standing in.
 - It is recorded under *Generated lessons* with its kind, like any other.
+
+---
+
+## 12. The learning record
+
+`tutorial/EVENTS.jsonl` records how the learner got where `STATE.md` says they are: how
+many attempts a check needed, which checks failed repeatedly, which hints were given and
+how far up the ladder, how each assessment answer was judged, and whether practice was
+offered and taken. `STATE.md` records outcomes; this records attempts. When to write it and
+when to read it is `runner-protocol.md` section 16.
+
+### 12.1 Evidence, never progress
+
+- **`STATE.md` stays the only authority for progress.** Nothing here moves
+  `active_lesson`, completes a lesson or a task, or fills a section of `STATE.md`. When the
+  two disagree, `STATE.md` is right and the record is simply incomplete.
+- **It is tutor-owned in every instance**, like `lessons.generated/`, whether or not
+  `tutor_owned` lists it. Materialization does not create it; the first event does. An
+  update (section 3.2) never touches it.
+- **It holds learning evidence, never a transcript.** Concept ids, validator names, lesson
+  paths, enumerated values, counts and dates. No field holds free text, so learner code,
+  answers and conversation cannot be written into it. This is the signal layer of the
+  design spec's section 16; the content layer stays out.
+- **The learner may read it, and may delete it,** at any time. Deleting it loses the
+  evidence and nothing else: the course carries on from `STATE.md`.
+- **Committing it** is belay#35's question, which also covers `STATE.md`. The provisional
+  answer: the learner may commit it, since it holds no content.
+
+### 12.2 Events
+
+One JSON object per line, appended. Every event has four fields:
+
+- `seq` — an integer, strictly increasing through the file, one more than the last;
+- `date` — the calendar date, `YYYY-MM-DD`. No clock time: with `seq` a date orders the
+  events, and a clock time says more about the learner than a course needs;
+- `lesson` — the lesson path the event belongs to: an entry in `lessons`, a key in
+  `optional_lessons`, or a path under `lessons.generated/`;
+- `type` — one of the types below, which decides every other field. No other field is
+  allowed.
+
+| `type` | Fields beyond the four | Written when |
+|---|---|---|
+| `lesson_started` | none | a lesson becomes active, including a detour and a return into an assessment for a retake |
+| `lesson_completed` | none | the lesson is completed in section 5's sense, an assessment left at any result included |
+| `check` | `validator` (its name in the manifest), `result`, which is pass or fail | a lesson's validator has run; a validator that could not run writes nothing |
+| `hint` | `rung` (1 to 5) | a rung of the help ladder is given |
+| `answer` | `concept` (a concept id), `outcome`, and `requested` | an assessment answer is classified |
+| `assessment` | `state`, `attempt`, `not_demonstrated` (concept ids), and `requested` | an attempt ends and its *Assessments* row is written |
+| `practice_offered` | `concepts` (concept ids) | practice is offered after a weak result |
+| `practice_accepted` | `concepts`, `practice_lesson` (its path under `lessons.generated/`) | the learner accepts it and the lesson is written |
+| `summary` | `first_date`, `events`, `started`, `completed`, `checks`, `hints`, `answers`, `attempts`, `practice_offered`, `practice_lessons` | written only by compaction, 12.3 |
+
+- **`outcome`** is one of the four answer outcomes of `runner-protocol.md` section 15.4:
+  `demonstrated`, `partial`, `misconception`, `not-enough-evidence`.
+- **`state`** is one of the four states of section 11.2: `passed`, `partial`, `stopped`,
+  `skipped`. `skipped` and `passed` are different values here exactly as in `STATE.md`.
+- **`requested`** is written, as `true`, only for a quiz the learner asked for (section
+  11.1's `_scope:_` rows). Its `lesson` is the lesson the learner stands in, and the scope
+  in words stays in `STATE.md`.
+- **A `summary` holds counts:** `checks` maps a validator name to its `attempts` and
+  `failures`; `hints` maps a rung to how often it was given; `answers` maps a concept id to
+  a count per outcome; `attempts` lists each assessment attempt as its `state`, `attempt`,
+  `not_demonstrated` and `requested`; `events`, `started` and `completed` count what was
+  replaced; `first_date` and `date` are the first and last dates.
+
+```json
+{"seq":12,"date":"2026-09-14","lesson":"lessons/01-subcommands/LESSON.md","type":"check","validator":"cargo-test","result":"fail"}
+{"seq":13,"date":"2026-09-14","lesson":"lessons/01-subcommands/LESSON.md","type":"hint","rung":2}
+```
+
+`scripts/evidence.py` holds this definition, and validator check 33 reads the record with
+it.
+
+### 12.3 Retention and compaction
+
+**The cap is 2,000 lines.** An event is 90 to 160 bytes, so a full record is at most about
+320 KB. A course of 23 lessons at 30 to 60 events each fits uncompacted; the cap is reached
+by a learner who struggles long or retakes often. Nobody reads the file whole into a
+conversation: `scripts/evidence.py summary` reads it and prints counts.
+
+At each lesson completion, after writing `lesson_completed`, run
+`scripts/evidence.py compact tutorial`. Under the cap it changes nothing but repairs
+(12.4). Over the cap it replaces every event of each **completed** lesson by one `summary`
+event, placed where that lesson's last event was, with its `seq` and `date`, so the file
+stays in order without renumbering. A lesson is completed when it has a
+`lesson_completed` event and is neither `active_lesson` nor `resume_at` in `STATE.md`. The
+events of a lesson still in progress are kept as written. A lesson re-entered after
+compaction, an assessment's retake, merges into its summary again at the next one.
+
+After compaction the record is valid under the same check, and every question in 12.5
+can still be answered for a completed lesson, at the precision of counts per lesson and
+one entry per assessment attempt. When the events left are all of lessons in progress and
+still exceed the cap, they are kept and the script says so.
+
+### 12.4 Repair
+
+Nothing about this record ever stops a course. Validator check 33 reports a malformed one
+as a warning, never a finding.
+
+| The record is | What happens |
+|---|---|
+| missing | normal before the first event. The next event starts the file, at `seq` 1 or wherever you are counting from |
+| empty | normal; it holds no events yet |
+| truncated — the last line has no line end and does not parse | an interrupted write. Run `scripts/evidence.py compact tutorial` before the next append: it drops that line. Appending without it would join the new line to the fragment and lose both |
+| inconsistent — a line is not an event, or `seq` does not increase | `compact` drops lines that are not events and renumbers from 1 in file order, and says so. Read the last line again before the next append |
+
+When you would have used the record and it cannot answer — it is missing, or `summary`
+reports lines it could not read — say what you cannot know, in a sentence, and carry on
+from `STATE.md`.
+
+### 12.5 What it answers
+
+- **Attempts a check needed, and which failed repeatedly** — the `check` events, per
+  validator and lesson.
+- **Whether hints were used, and how far the ladder went** — the `hint` events' rungs.
+- **How an assessment went** — its `assessment` events: `passed`, `partial`, `stopped` or
+  `skipped`, per attempt, with what was not demonstrated.
+- **Which misconceptions appeared** — `answer` events with the outcome `misconception`,
+  by concept.
+- **Whether practice improved the next result** — a `practice_accepted` event, then the
+  next `answer` and `assessment` events on the same concepts, in `seq` order.
+- **Elapsed time per lesson**, at date precision — from its `lesson_started` to its
+  `lesson_completed`.
+- **Where a course was abandoned** is not an event: nobody writes "I stopped". It is
+  derived from the date of the last event and `STATE.md`'s `status` and `active_lesson`.
+  A course `in-progress` whose last event is long past was left at `active_lesson`. There
+  is no heartbeat, and you do not write one.
