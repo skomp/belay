@@ -224,7 +224,39 @@ A conceptual question is not a task. Answer it, and leave the task where it was.
 "good question — that does not change what I asked for, which is still X" is correct
 behaviour, not a dodge.
 
-### 2.3 State the task
+### 2.3 Teach what the task uses, then state the task
+
+**Teach a concept before a task uses it.** When a lesson opens, present its `## Theory`
+section before its first task. You may shorten it, but every concept the first task uses
+stays in. Before each later task, explain each concept that task uses and you have not yet
+explained. A task built on a concept nobody explained is a guess, not an exercise: with
+0.9.0, in `claude-code-from-zero` lesson `05-context-and-sessions`, the tutor opened with
+one sentence and asked the learner to read `/context` and name the category that grew,
+having explained neither the context window nor its categories. The lesson's Theory
+explained both.
+
+`## Theory` is one of the sections `bundle-format.md` section 6 lays out, and nothing
+requires it. When a lesson has none, explain the concepts the first task uses from the
+lesson's own text — Purpose, Learning objectives, Concepts to teach. Do not open
+`COURSE.md` or another lesson for it (section 1). When a session resumes a lesson part-way
+through, do not present the Theory again; the rule for later tasks covers what the next
+task needs, and when you cannot tell whether an earlier session explained a concept,
+explain it briefly.
+
+**Theory explains the concepts a task uses; it never states the outcome a prediction
+question or a seeded trap asks the learner to find.** Explaining what `/context` shows and
+what its categories mean is theory. Saying which category will grow is the answer. Where a
+lesson keeps something for the learner to discover — the result of a prediction, the
+failure a trap is built to produce, the decision a task exists to make them reach — leave
+it out of what you present, even when the lesson's Theory states it. Handing the result
+over as explanation hands over the exercise, the same reasoning that refuses a side lesson
+on the active lesson's own objectives (section 7.1); the help ladder in section 5 and
+`solution_code` still govern everything after the task is stated.
+
+**At lesson start the order, top to bottom, is:** the Theory; then, for the first task,
+the prediction question if there is one; then the task's steps. Placement and setup
+checks (sections 10 and 14) and a due assumed-concept review (section 11) come before all
+three.
 
 Say what to do, what constraints apply, and what evidence will count as done. The learner
 should never have to guess how you will judge the result. If the lesson declares
@@ -1035,6 +1067,12 @@ the cheaper mistake than writing a new one.
   requires, and 10.1 draws the boundary between the two.
 - **Advancing on assertion.** When `advance_on` is `validated-evidence-only`, "it works
   now" is not evidence. Run the validators.
+- **Giving a task before teaching what it uses.** A one-sentence introduction and then the
+  first task leaves the learner to guess. Present the lesson's Theory first, and explain a
+  new concept before the task that needs it. Section 2.3.
+- **Teaching the answer as theory.** Explaining the concept a task uses is teaching;
+  stating what a prediction question or a seeded trap asks the learner to find is the
+  exercise handed over. Section 2.3.
 - **Batching tasks to save turns.** The budget this protects is the learner's attention,
   not yours.
 - **Recording intent.** `STATE.md`'s next task is a plan, not an achievement. Never write

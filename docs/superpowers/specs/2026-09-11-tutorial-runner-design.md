@@ -1,7 +1,7 @@
 # Generic Tutorial Runner + Portable Tutorial Bundles — Design
 
 **Date:** 2026-09-11
-**Last amended:** 2026-10-14
+**Last amended:** 2026-10-16
 **Status:** Design approved. Formats and first bundle implemented; runner in progress.
 **Repositories:** `belay` (runner), `belay-bundles` (courses), `automaton-db` (a learner)
 
@@ -236,6 +236,16 @@ A lesson defines purpose, prerequisites, objectives, theory, concepts to teach,
 constraints, suggested progression, completion conditions, and what to persist on
 completion. It is **not** a script of conversational turns — the tutor generates each
 task from objectives + state + workspace + the learner's last response.
+
+**The tutor teaches a concept before a task uses it** (belay#64, 2026-10-16). When a lesson
+opens, the tutor presents its Theory before the first task — shortened if it likes, with
+every concept the first task uses kept in — and before each later task explains any concept
+that task uses and was not yet explained. A lesson with no Theory section is taught from its
+other sections; the section stays optional and the validator does not require it. Theory
+never states the outcome a prediction question or a seeded trap keeps for the learner. At
+lesson start the order is Theory, then the first task's prediction question, then its steps
+(`runner-protocol.md` section 2.3). Observed with 0.9.0: a one-sentence introduction
+followed by a task built on concepts nobody had explained.
 
 `design_refs` is the mechanism for partial `DESIGN.md` loading. `DESIGN.md` uses stable
 section anchors; a lesson declares only the anchors it needs; the tutor reads only those.
@@ -835,6 +845,7 @@ ORIENT
                                   │  read tutorial.yaml, STATE.md      │
                                   │  read ONE lesson file              │
                                   │  inspect learner workspace         │
+                                  │  teach what the next task uses     │
                                   │  → exactly one task                │
                                   │  ← learner evidence                │
                                   │  validate                          │
