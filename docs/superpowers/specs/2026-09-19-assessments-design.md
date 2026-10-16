@@ -4,7 +4,7 @@
 **Last amended:** 2026-10-16
 **Status:** implemented — see §10 for the decisions the implementation added
 **Issue:** belay#33
-**Does not close:** belay#34, which stays open and narrower — see §9.
+**Related:** belay#34, the learning-evidence record, designed and built separately — see §9.
 
 ---
 
@@ -255,6 +255,11 @@ belay#34's attempt-level questions — hint counts, which checks failed repeated
 remediation improved the next result — are **not** answered here. §5.1 records per-concept
 failure counts for assessments because §4.4 needs them, and nothing further.
 
+*Later (2026-10-16):* belay#34 answered them with `tutorial/EVENTS.jsonl`, a record of
+evidence only, so this section's sentence stands: `STATE.md` is still the only place
+progress is recorded, and §4.4 still reads the row, never the record. See
+`2026-10-16-learning-evidence-design.md`.
+
 ### 5.3 Check 32
 
 This section first called the record check "check 31" and the `assesses` check "check 30",
@@ -351,11 +356,13 @@ lesson still appears under `## Generated lessons` with its `reason:`.
 
 ## 9. Relationship to other issues
 
-- **belay#34** — **stays open, and narrower.** §5.1 records per-concept failure counts
-  because §4.4 needs them. Everything else that issue asks for — hint counts, repeated check
-  failures, elapsed time, abandonment, whether remediation improved the next result — is
-  untouched, and so is its question about whether a separate append-oriented record is the
-  right home. Do not read this design as closing it.
+- **belay#34** — narrower than it was, and built separately on 2026-10-16. §5.1 records
+  per-concept failure counts because §4.4 needs them. Everything else that issue asks for —
+  hint counts, repeated check failures, elapsed time, abandonment, whether remediation
+  improved the next result — is in the learning record, `tutorial/EVENTS.jsonl`
+  (`2026-10-16-learning-evidence-design.md`). It records each answer's outcome and each
+  attempt's state from §3.1 and §5.1, by concept id, and is evidence only: nothing in this
+  design reads it.
 - **belay#36** — sections. §6.2 supports three scopes and not "the current section",
   because the format has no grouping concept. This design does not depend on that issue.
 - **belay-authoring#16** — the authoring tools, validation and dry-run scenarios for an
