@@ -195,6 +195,16 @@ Then teach. Do not repeat it in the same session, and do not plan or apply anyth
 of it. The update is the learner's to start, and `state-lifecycle.md` section 3.2 is the
 procedure when they do.
 
+### A resume settles what git sees, once
+
+**Once, at the start of a resumed session, run
+`scripts/instance_git.py apply --if-undecided <workspace>`.** It changes something only
+when this checkout has no recorded choice: an instance made before the policy existed, or
+a fresh clone. When the learner chose to track their progress, it leaves that alone. Say
+one sentence before the first task when it prints `applied:` or `recorded:`, and nothing
+when it prints `unchanged:` or that the workspace is not a git repository.
+`state-lifecycle.md` section 3.3 has the policy, the commands, and what each line means.
+
 ---
 
 ## 2. One turn
@@ -633,8 +643,9 @@ against your impression of what the lesson is about.
 
 A requested lesson is an ordinary generated lesson in every other respect: the same
 structure, the same provenance frontmatter, the same completion conditions, the same
-placement by `after:`. Record in `reason:` that the learner asked for it, and what they
-asked for.
+placement by `after:`. Record in `reason:` that the learner asked for it, and the concept
+they asked about, in your words: never a quote of the learner or a personal detail, because
+a generated lesson is committed course material (`state-lifecycle.md` sections 3.3 and 8.2).
 
 **The request usually arrives part-way through a lesson**, because that is when the
 learner notices what they are missing. Take the detour from where they are and send them
