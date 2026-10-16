@@ -275,7 +275,9 @@ To commit your progress too — to carry it to another machine, say — ask the 
 directory. To keep it local again, `instance_git.py apply`; to see what is in force,
 `instance_git.py status`. The
 choice is recorded in the same exclude file, so resuming the course does not undo it.
-Without opting in, a clone of the repository has the course but not your place in it. In a
+Without opting in, a clone of the repository has the course but not your place in it: the
+tutor says so and asks whether to start from the first lesson or where you are, and checks
+your code before it records a position. In a
 directory that is not a git repository, the tutor says so and nothing else happens.
 `state-lifecycle.md` section 3.3 has the full policy.
 
@@ -427,7 +429,7 @@ One skill body serves both hosts.
 No pytest; six plain scripts, run from a checkout of this repository.
 
 ```
-python3 tests/test_validate_bundle.py     # 884 assertions
+python3 tests/test_validate_bundle.py     # 896 assertions
 python3 tests/test_catalogs.py            # 338 assertions
 python3 tests/test_plan_update.py         # 67 assertions
 python3 tests/test_evidence.py            # 65 assertions
@@ -462,7 +464,7 @@ BELAY_SWEEP_SIBLING_REPOS=1 python3 tests/test_validate_bundle.py
 Those are separate checkouts at their own revisions, so what they contribute is
 reported on its own line and never added to the total above — `and 24 more against
 sibling repositories outside this commit` on the machine this was measured on. The
-headline stays 884 either way. Run it before publishing a bundle; a plain `python3
+headline stays 896 either way. Run it before publishing a bundle; a plain `python3
 tests/test_validate_bundle.py` is the check that a commit of *this* repository is
 sound.
 

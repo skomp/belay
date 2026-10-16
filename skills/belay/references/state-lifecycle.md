@@ -5,8 +5,9 @@ first time in a session you are about to change `STATE.md`, when a task complete
 lesson completes, when an offer of an optional lesson is accepted or deferred, when the
 learner acknowledges the assumed-concept review, when you need to advance
 `active_lesson`, when an assessment ends or is interrupted (section 11), when the
-learner asks to update the course to a newer version (section 3.2), or when the learning
-record is missing, broken or asked about (section 12).
+learner asks to update the course to a newer version (section 3.2), when a stamped
+instance has no `STATE.md` (section 7.1), or when the learning record is missing, broken
+or asked about (section 12).
 
 `STATE.md` is the only place a learner's progress is recorded. Nothing in the bundle
 records progress; nothing outside `STATE.md` in the instance records it either. If you
@@ -674,11 +675,10 @@ applies the default then.
 not repair the file.
 
 **A clone has no `STATE.md`.** With the default, a learner who clones the repository on a
-second machine, or a second learner in a team repository, gets an instance with no
-`STATE.md`. That is section 7's structural defect, not a fresh start: report it, say that
-progress stays in the checkout it was made in unless the learner tracks it, and let the
-learner decide. A learner who wants their progress on two machines runs `track` and commits
-it.
+second machine, or a second learner in a team repository, gets an instance without
+progress. Section 7.1 is the procedure. Say that progress stays in the checkout it was made
+in unless the learner tracks it. A learner who wants their progress on two machines runs
+`track` and commits it.
 
 ---
 
@@ -821,14 +821,62 @@ started lets the tutor assume it exists.
   than concept ids under "not demonstrated";
 - `tutorial_id` does not match the manifest's `id`;
 - `STATE.template.md` is present in the instance;
-- `STATE.md` is absent from a stamped instance: usually a clone of a repository where
-  progress stays local (section 3.3);
+- `STATE.md` is absent and `tutorial.yaml` carries no `instance:` stamp;
 - the manifest names a lesson file that does not exist.
 
 Section 10.5 adds two more, for the assumed-concept stamp.
 
 These are structural defects, not stale progress. Guessing at the intent will lose the
 learner's place. Say what is wrong and let the learner decide.
+
+### 7.1 An instance without progress
+
+**An instance without progress** is an instance whose `tutorial.yaml` carries the
+`instance:` stamp and which holds neither `STATE.md` nor `STATE.template.md`. It is not a
+defect. Section 3.3 keeps `STATE.md` in one checkout, so a clone of the learner's
+repository has the course and not the place in it, and so does a second learner in a team
+repository. A half-materialized instance still holds `STATE.template.md`, and an unstamped
+one was never materialized by a runner. Both stay on the list above. The validator reports
+an instance without progress as a check 7 finding that names this section, because a
+course does not start without `STATE.md`.
+
+Do not materialize again. The course material is committed and intact, and `tutorial/`
+already exists (section 3, preconditions). Then:
+
+1. **Tell the learner plainly, and ask one question.** Say that this checkout has the
+   course and no progress, which is normal for a clone or for a second learner. Then ask:
+   start from the first lesson, or tell you where they are. Never pick a position
+   silently. A learner who starts their own progress in a shared repository answers the
+   same question.
+2. **Measure a named position before you write it.** The source wins, as above. Open the
+   lesson they name, run its declared validators and check its completion conditions
+   against the workspace. The position is an entry in `lessons`. A detour into a generated
+   or optional lesson is not restored: use the entry it would return to. If the conditions
+   are already met, they have finished it. Say so, and make the next entry active only when
+   they agree. If the workspace has not reached the work that lesson starts from, say what
+   you measured and ask again. Write the lesson they confirm, never one further on.
+3. **Build `STATE.md` from the shape in section 2.** Write `tutorial_id` from the
+   manifest's `id`, `active_lesson` from step 1 or step 2, `status: in-progress` and
+   today's `updated`. Write all seven headings. *Next task* holds the first task of the
+   active lesson. *Last completed task* holds what step 2 measured, in one sentence, or
+   "None" for a start at the first lesson. Write "None" in the other sections: nothing
+   else was measured, so nothing else is recorded. The template was deleted at
+   materialization. You MAY read `STATE.template.md` from the stamp's `materialized_from`
+   when that source is reachable, and the procedure must work without it. When the stamp
+   says `validation: not-certified`, add the line section 3.1 asks for under *Known
+   intentional or incomplete state*.
+4. **Never overwrite.** Check that `STATE.md` does not exist immediately before you write
+   it. If one has appeared, write nothing and resume from it.
+5. **Validate the instance** as section 3.1 does, and leave the stamp as it is. It is
+   committed, and its validation keys record the materialization. A finding in the
+   `STATE.md` you just wrote is your error: correct the file and run the validator again.
+   Any other finding stops the course: `runner-protocol.md` section 13.3.
+6. **Continue as a resume.** Do not draw the banner and do not run materialization steps 8
+   and 9 again. When the course declares `assumes`, show the review before the first task
+   (section 10), because this `STATE.md` has no `assumes_reviewed`.
+
+`EVENTS.jsonl` absent is normal (section 12.4), and one that is present is never a source
+for the position.
 
 ---
 

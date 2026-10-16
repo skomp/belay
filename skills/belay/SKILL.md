@@ -277,13 +277,13 @@ that a course is safe.
   not improvise a replacement lesson or skip to the next entry.
 - **`STATE.md`'s `active_lesson` is not in the manifest's `lessons` list** — stop and
   report it. The instance is inconsistent and guessing which lesson was meant will lose
-  the learner's place. Two exceptions, and both are a detour in progress rather than an
-  inconsistency: a path under `tutorial/lessons.generated/` with `resume_at` set, and a
-  key in the manifest's `optional_lessons` with `resume_at` set. `resume_at` names the
-  lesson to make active when the detour finishes — including a lesson the detour
-  interrupted part-way through.
+  the learner's place. Two exceptions, both a detour in progress with `resume_at` set: a
+  path under `tutorial/lessons.generated/`, or a key in the manifest's `optional_lessons`
+  (`references/state-lifecycle.md` sections 8.3 and 9.3).
 - **The instance directory holds `STATE.template.md`** — materialization did not finish.
   Load `references/state-lifecycle.md` and complete it before teaching.
+- **A stamped instance has neither `STATE.md` nor `STATE.template.md`** — a clone or a
+  second learner. Never guess a position: `references/state-lifecycle.md` section 7.1.
 - **A learner-owned file changed in a way you cannot account for** — say so and ask. Do
   not revert it, stash it, or discard it. It is almost certainly the learner working.
 - **A bundle `source.type` the runner does not implement** (`git`, `archive`) — fail
