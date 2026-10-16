@@ -932,7 +932,8 @@ stays explicit on the command line for the same reason bundle and instance do.
 9. `COURSE.md`, `DESIGN.md` exist; `lessons` is non-empty
 10. `workspace_kind` and `ownership_policy` are known values; `tutor_owned` is non-empty;
     `learner_owned` is non-empty **unless** `workspace_kind: none`, since a course that
-    builds no software owns none of the learner's files
+    builds no software owns none of the learner's files; and every ownership glob parses
+    in the dialect of §15e
 
 **Optional-lesson checks** (added 2026-09-12, with the feature in §6):
 
@@ -1044,13 +1045,16 @@ One shared `skills/` directory, sibling per-host manifests. Proven shape: superp
 belay/
 ├── .claude-plugin/{plugin.json,marketplace.json}
 ├── .codex-plugin/plugin.json          "skills": "./skills/", "hooks": {}
+├── hooks/hooks.json                   Claude Code only: the ownership guard (§15e)
 ├── skills/belay/
 │   ├── SKILL.md
 │   ├── references/{bundle-format,catalogue-format,runner-protocol,state-lifecycle}.md
-│   ├── scripts/{validate_bundle.py,catalogs.py,plan_update.py,evidence.py,yamlite.py}
+│   ├── scripts/{validate_bundle.py,catalogs.py,plan_update.py,evidence.py,yamlite.py,
+│   │            ownership.py,ownership_guard.py}
 │   ├── catalog/builtin.yaml
 │   └── examples/rust-cli-basics/
-├── tests/{fixtures/,test_validate_bundle.py,test_catalogs.py,test_plan_update.py,test_evidence.py}
+├── tests/{fixtures/,conformance/,test_validate_bundle.py,test_catalogs.py,test_plan_update.py,
+│          test_evidence.py,test_ownership.py}
 ├── docs/superpowers/specs/
 └── README.md
 ```
@@ -1172,7 +1176,8 @@ should not re-derive these.
 | Codex file-backed slash commands | **do not exist**; `~/.codex/prompts/*.md` is inert |
 | Codex skill invocation | `$name` popup, or implicit description match; `/skills` is management only |
 | Codex implicit-invocation opt-out | `agents/openai.yaml` → `policy.allow_implicit_invocation: false` |
-| Codex plugin manifest | `.codex-plugin/plugin.json`; needs `"hooks": {}` to suppress hook discovery |
+| Codex plugin manifest | `.codex-plugin/plugin.json`; needs `"hooks": {}` to suppress hook discovery, which since §15e also keeps Codex off the Claude Code `hooks/hooks.json` |
+| Claude Code plugin hooks | `hooks/hooks.json` at the plugin root, loaded with no manifest key; PreToolUse output `hookSpecificOutput.permissionDecision` (`allow`/`deny`/`ask`/`defer`) and `permissionDecisionReason`. Verified 2026-10-16 against code.claude.com/docs/en/hooks and plugins-reference, and end to end on Claude Code 2.1.301 with `--plugin-dir` |
 | Claude Code plugin manifest | `.claude-plugin/plugin.json`; `skills/` auto-discovered |
 | Path resolution in skill body | relative to skill directory, **both hosts** |
 | `project_doc_fallback_filenames` | real, but ambient-instructions only — **not** a skills mechanism |
@@ -1514,6 +1519,50 @@ may not be removed.
 
 ---
 
+## 15e. Ownership, resolved by one function and guarded where a host can
+
+Decided 2026-10-16, for belay#32. `runner-protocol.md` section 5 stays the rule on every
+host. Underneath it:
+
+- **One resolver.** `scripts/ownership.py` resolves a workspace path and an operation
+  (create or modify) against the manifest to an owner (tutor, learner, read-only,
+  supplies target, outside), a verdict (allow, refuse, needs-learner-request) and the rule
+  that decided it. Precedence: outside the workspace; `tutorial/lessons/**` read-only;
+  `tutorial/lessons.generated/**` and `tutorial/EVENTS.jsonl` tutor-owned; the rest of
+  `tutorial/` is the instance and the tutor's; a declared supplies target (create allowed,
+  modify refused, under every policy); `tutor_owned`; `learner_owned`; unlisted is the
+  learner's. No second path list: the manifest is the only source.
+- **The rest of `tutorial/` is not the learner's.** Read literally, "unlisted is the
+  learner's" made `tutorial/tutorial.yaml` learner-owned, and a guard built on that would
+  deny the validation record that `state-lifecycle.md` section 3.1 writes into the stamp
+  after the stamp exists. `bundle-format.md` already says `tutorial/` is not the learner's
+  workspace; section 5 now says so too.
+- **The glob dialect** is in `bundle-format.md` section 2: anchored, `*` and `?` within a
+  segment, `**` only as a whole segment, dotfiles ordinary, case-sensitive, `..` never
+  escapes. All 123 globs in the published bundles and fixtures parsed under it on the day,
+  and none changed meaning in effect: the root-only `*.py` style in two bundles matches
+  less than an author might guess, but an unmatched path is the learner's anyway.
+- **Directory supplies** resolve by listing the source: the instance's `lessons/` copy
+  for a lesson-scope entry, the bundle the stamp's `local:` source names otherwise. When
+  neither can be listed, no path under the entry counts as a target, so a create there is
+  judged by the manifest and may be refused. That matches the protocol: a manifest-scope
+  entry cannot be placed once its source is out of reach.
+- **The Claude Code guard** is a PreToolUse hook on `Write|Edit|MultiEdit|NotebookEdit`.
+  Silent unless the workspace holds a stamped instance; fails open on any error. A
+  refused write is denied; a learner-owned write under `on-request` asks, because the
+  learner's request is in the conversation the hook cannot read and the host's prompt is
+  where the learner gives it; `unrestricted` and tutor-owned get no decision.
+  `tutorial/lessons/**` **asks rather than denies**, because the one legitimate write
+  there is an update the learner asked for (`state-lifecycle.md` section 3.2). A create
+  whose content is byte-identical to a file under `tutorial/lessons/` gets no decision,
+  because section 10.1's fallback may permit it and only the tutor can judge the lesson
+  prose. Shell writes are not intercepted, and no attempt is made.
+- **Not enforced by any host:** keeping the tutor active, one actionable step per turn,
+  and every rule about what the tutor says. `tests/conformance/ownership-scenarios.md`
+  writes them as scenarios for the dry-run harness.
+
+---
+
 ## 16. Deferred: telemetry feedback
 
 Generated lessons are the course's only quality signal from real use. A later version
@@ -1611,6 +1660,7 @@ real files. One repository cannot satisfy both without duplication.
 | Offer / defer / re-offer behaviour | **untested** — no harness exercises it; belay#22 |
 | Knowledge assessments (`assesses`, `## Assessments`, `kind: practice`) | **done** — 2026-10-16, belay#33; `runner-protocol.md` §15, `state-lifecycle.md` §11, checks 31-32. The question-and-answer loop is untested, as above |
 | Learning-evidence record (`tutorial/EVENTS.jsonl`, `skills/belay/scripts/evidence.py`) | **done** — 2026-10-16, belay#34; `state-lifecycle.md` §12, `runner-protocol.md` §16, check 33 (warning only); `tests/test_evidence.py`, 65 assertions. Whether the tutor writes the events in conversation is untested, as above |
+| Ownership resolution and the Claude Code guard (`skills/belay/scripts/ownership.py`, `ownership_guard.py`, `hooks/hooks.json`) | **done** — 2026-10-16, belay#32, §15e; `tests/test_ownership.py`. Conformance scenarios for what no host enforces are written in `tests/conformance/ownership-scenarios.md` and run by nothing yet: belay-authoring#5 |
 | Multi-catalogue support (`skills/belay/scripts/catalogs.py`) | **done** — 2026-09-12, §7 |
 | Catalogue test suite (`tests/test_catalogs.py`) | **done** — 338 assertions; every failure kind proven firing |
 | Instance update (`skills/belay/scripts/plan_update.py`, `state-lifecycle.md` §3.2) | **done** — 2026-10-14, belay#50, §15c; `tests/test_plan_update.py`, 67 assertions |
