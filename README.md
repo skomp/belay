@@ -303,7 +303,7 @@ python3 skills/belay/scripts/validate_bundle.py --instance path/to/project/tutor
 python3 skills/belay/scripts/validate_bundle.py --catalog path/to/catalog.yaml
 ```
 
-29 bundle checks and 7 catalogue checks. Your run and the runner's run are the same checks
+30 bundle checks and 7 catalogue checks. Your run and the runner's run are the same checks
 over the same files, which is the point: a bundle that passes here starts cleanly there. It
 checks structure — that references resolve, that no progress leaked into the course, that
 every lesson is reachable. It says nothing about whether the course is any good.
@@ -389,7 +389,7 @@ One skill body serves both hosts.
 No pytest; two plain scripts, run from a checkout of this repository.
 
 ```
-python3 tests/test_validate_bundle.py     # 735 assertions
+python3 tests/test_validate_bundle.py     # 783 assertions
 python3 tests/test_catalogs.py            # 338 assertions
 ```
 
@@ -410,7 +410,7 @@ BELAY_SWEEP_SIBLING_REPOS=1 python3 tests/test_validate_bundle.py
 Those are separate checkouts at their own revisions, so what they contribute is
 reported on its own line and never added to the total above — `and 22 more against
 sibling repositories outside this commit` on the machine this was measured on. The
-headline stays 735 either way. Run it before publishing a bundle; a plain `python3
+headline stays 783 either way. Run it before publishing a bundle; a plain `python3
 tests/test_validate_bundle.py` is the check that a commit of *this* repository is
 sound.
 

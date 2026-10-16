@@ -1573,8 +1573,9 @@ gives them nothing to do; a pasted validator run gives them a check table, a lim
 essay and no sentence addressed to them. Five things, in this order:
 
 1. **Which course, and where it came from.** The title and `id`, the `materialized_from`
-   locator in the stamp, and the catalogue entry that offered it while discovery is still
-   in hand. The catalogue is how they reach whoever can fix this.
+   locator and the `materialized_version` in the stamp, and the catalogue entry that
+   offered it while discovery is still in hand. The catalogue is how they reach whoever
+   can fix this.
 2. **What the validator said, in its own words** — one line per finding: the check number,
    the file, the message. Do not paraphrase. The message names the anchor, the path or the
    field that is wrong, and that is the only part an author can act on. Do not include the

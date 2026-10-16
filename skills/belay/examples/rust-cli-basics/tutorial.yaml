@@ -1,5 +1,6 @@
 bundle_format: 1
 id: rust-cli-basics
+version: "1.0"
 title: Rust Fundamentals Through a Command-Line Tool
 description: >
   Core Rust taught by building `tally`, a small command-line tool that counts

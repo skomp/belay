@@ -107,6 +107,7 @@ that seems to want a fourth level wants to be that shape instead.
 ```yaml
 bundle_format: 1
 id: rust-automaton-db
+version: "2.1"
 title: Learn Rust by Building AutomatonDB
 description: >
   Project-driven Rust taught by building a masterless, partitioned,
@@ -158,6 +159,7 @@ advance_on: validated-evidence-only
 |---|---|---|
 | `bundle_format` | MUST | Always `1` for this document. |
 | `id` | MUST | Stable, unique, `[a-z0-9-]+`. Never changes once published. |
+| `version` | MUST (absent reads as `"1.0"`) | The content version, a quoted `"MAJOR.MINOR"` string such as `"2.1"`. Moves when the course changes. See **Content version** below. |
 | `title` | MUST | Human-facing course name. |
 | `description` | MUST | One or two sentences. Shown when a learner is choosing. |
 | `teaching_method` | MAY | One or two sentences on how the course teaches. Shown in the first-load banner, below `description`. Non-empty when declared. |
@@ -364,6 +366,58 @@ buys you nothing you did not already have: the host's own permission prompt appl
 every command whatever its role, and the declaration decides only who types it afterwards
 and whether it counts as the learner's evidence. That is exactly why it is safe to let an
 author make it.
+
+### Content version — `version`
+
+```yaml
+version: "2.1"
+```
+
+`version` says which version of the course's content a bundle holds. An author sets it, and
+moves it whenever the course changes. The runner copies it into the instance when it
+materializes one (`materialized_version`, `state-lifecycle.md` section 3 step 5), so a
+session can tell whether an instance is behind its bundle by comparing two values instead
+of every file.
+
+**The value is two non-negative integers joined by one period, `MAJOR.MINOR`, in quotes.**
+The quotes are required: an unquoted `2.10` is read as the number 2.1, so the digit is lost
+before anything can compare it. Neither part has a leading zero — `"02.1"` would compare
+equal to `"2.1"` while looking different — so `"0.3"` and `"2.10"` are well formed and
+`"02.1"`, `"2.1.3"`, `"v2.1"`, `"2.1a"` and an unquoted `2.1` are not.
+
+**The two parts compare as integers, MAJOR first.** `"2.10"` is later than `"2.9"`, and
+`"3.0"` is later than `"2.99"`. A comparison that reads the value as a decimal number or as
+text gets this wrong, and silently: it is right for every version below `x.10`.
+
+**Which part to bump is decided by what a live instance can do with the change**, not by
+how large the change feels:
+
+| Bump | Meaning | Examples |
+|---|---|---|
+| MINOR | A live instance accepts the change. No review. | A correction to lesson prose. A fix to a check script. A new optional lesson. A new `supplies` entry. A new lesson added after the last lesson. |
+| MAJOR | A live instance stops and asks the learner. | The `lessons` list changes order. A lesson is removed. A lesson `id` changes. The completion conditions of a lesson change. |
+
+A MAJOR bump resets MINOR to `0`: `"2.4"` becomes `"3.0"`. Two authors who apply the table
+to the same change reach the same answer, because the test is what happens to an instance
+that already exists.
+
+**A bundle with no `version` is read as `"1.0"`.** The field is REQUIRED for every bundle
+you write, but a bundle published before it existed declares none, and the validator stays
+quiet about it rather than making every older bundle invalid. Check 30 checks the shape of
+a value that is there, and reports the value it read, in both modes.
+
+`version` is not a format version. Four other fields carry the word, and all four version a
+*schema*; none of them moves when the course does:
+
+| Field | Where | What it versions |
+|---|---|---|
+| `bundle_format: 1` | a bundle manifest | the manifest schema |
+| `catalog_version: 1` | `catalog.yaml` | the catalogue schema |
+| `catalogs_version: 1` | `catalogs.yaml` | the catalogue-list schema |
+| `runner_version: 1` | the `instance:` stamp | the runner protocol |
+
+The validator sees one bundle, so it cannot tell whether a version moved forwards, or moved
+at all when the course did. That is the author's to get right.
 
 ### Setup validators — `setup_validators`
 
@@ -1542,7 +1596,9 @@ authoring act that you perform, on the bundle, using a generated lesson as sourc
 7. **Add the path to `lessons`, at the right position.** For a side lesson that is normally
    directly after the lesson its `after:` named. For a main-path draft it is the position
    `COURSE.md` already maps. The list is the order; the filename prefix is a convention
-   that follows the list, not the other way round.
+   that follows the list, not the other way round. Then move `version` (section 2,
+   **Content version**): MINOR for a lesson added after the last one or as an optional
+   lesson, MAJOR for one inserted anywhere else.
 8. **Update `COURSE.md`** when the course now covers a chapter its map did not mention.
 9. **Say what happens to the learner's copy.** Promotion is a bundle-side act, so the
    instance that produced the draft still holds it, and the promoted lesson and the draft
@@ -1681,6 +1737,9 @@ Confirm each of these by looking, not by remembering:
 - [ ] every top-level field in `tutorial.yaml` is one the field reference lists — a key it
       does not list is a warning rather than a rejection, but it is almost always a
       misspelling, and the runner reads nothing by a name it does not know
+- [ ] `version` is declared, in quotes, as `"MAJOR.MINOR"`, and moved since the last
+      published revision if the course changed — MAJOR when a live instance must ask the
+      learner, MINOR otherwise
 - [ ] `teaching_method`, if the manifest declares it at all, holds a real sentence about
       how the course teaches — an empty value is a finding, not a default, and leaving the
       key out entirely is the correct way to say nothing
@@ -1761,6 +1820,7 @@ tiny-cli-course/
 ```yaml
 bundle_format: 1
 id: tiny-cli-course
+version: "1.0"
 title: A Tiny CLI Course
 description: Learn core Rust by building a small command-line tool.
 subjects: [rust, cli]
@@ -1959,7 +2019,7 @@ genuinely cannot be finished with the failure in place.
 
 `bundle_format` stays `1`. `optional_lessons`, `failure_modes`, `supplies`, `covers`,
 `assumes`, `recommended_follow_ups`, `recommended_previous_bundles`,
-`teaching_method` and `setup_validators` are all additive: a bundle written before this
+`teaching_method`, `setup_validators` and `version` are all additive: a bundle written before this
 section existed is valid exactly as it stands, nothing in this document changes what it means, and no edit
 is implied. Run the validator over it and see.
 
@@ -1991,6 +2051,12 @@ keys, and ignores them. The effect on a learner is precise, and worth stating pl
   course in prose, the way every runner did before the banner existed. The learner loses
   the opening orientation and nothing else: the field is read at one moment, is shown at
   one moment, and gates nothing;
+- **no `materialized_version` is stamped.** An older runner copies `version` into the
+  instance with the rest of `tutorial.yaml` but writes no `materialized_version`, so that
+  instance reads as one made before the field existed. Nothing is taught differently: the
+  field is read when a session asks whether an instance is behind its bundle, never on a
+  teaching turn. An older validator reports `version` as an unrecognised top-level field
+  rather than rejecting the bundle;
 - **nothing is taught wrongly.** The main path is untouched by `optional_lessons`, because
   an optional lesson is never in it. An unplaced supply is not the same case — a
   manifest-scope entry IS on the main path — but it costs the learner the toil the key

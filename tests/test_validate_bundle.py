@@ -2697,6 +2697,128 @@ def m_supplies_is_a_defined_field(root: Path) -> None:
     )
 
 
+# -- check 30: the content version, `version` and `materialized_version`
+
+
+def _declare_version(root: Path, literal: str, expected: object) -> None:
+    """Append a top-level `version:` line and prove what the reader made of it.
+
+    `expected` is the fixture verification, and for this field it is the
+    whole point: `version: 2.10` must be shown to reach the validator as the
+    float 2.1, or the case named for it is testing something else.
+    """
+    _append_top_level(root, literal, {"version": expected})
+
+
+def _stamp_materialized_version(root: Path, literal: str, expected: object) -> None:
+    """Add `materialized_version` to the stamp to_instance() wrote, and verify it."""
+    edit(
+        root / "tutorial.yaml",
+        "  runner_version: 1\n",
+        f"  runner_version: 1\n  materialized_version: {literal}\n",
+    )
+    parsed = vb.load_yaml((root / "tutorial.yaml").read_text(), "tutorial.yaml")
+    stamp = parsed.get("instance")
+    assert isinstance(stamp, dict) and "materialized_version" in stamp, (
+        "materialized_version did not land inside the instance stamp"
+    )
+    got = stamp["materialized_version"]
+    assert got == expected and type(got) is type(expected), (
+        f"materialized_version parsed to {got!r} ({type(got).__name__}), not "
+        f"{expected!r} ({type(expected).__name__})"
+    )
+
+
+def m_version_2_1(root: Path) -> None:
+    _declare_version(root, 'version: "2.1"', "2.1")
+
+
+def m_version_0_0(root: Path) -> None:
+    _declare_version(root, 'version: "0.0"', "0.0")
+
+
+def m_version_2_10(root: Path) -> None:
+    _declare_version(root, 'version: "2.10"', "2.10")
+
+
+def m_version_three_parts(root: Path) -> None:
+    _declare_version(root, 'version: "2.1.3"', "2.1.3")
+
+
+def m_version_prefixed(root: Path) -> None:
+    _declare_version(root, 'version: "v2.1"', "v2.1")
+
+
+def m_version_suffixed(root: Path) -> None:
+    _declare_version(root, 'version: "2.1a"', "2.1a")
+
+
+def m_version_empty(root: Path) -> None:
+    _declare_version(root, 'version: ""', "")
+
+
+def m_version_leading_zero(root: Path) -> None:
+    _declare_version(root, 'version: "02.1"', "02.1")
+
+
+def m_version_unquoted_2_1(root: Path) -> None:
+    _declare_version(root, "version: 2.1", 2.1)
+
+
+def m_version_unquoted_2_10(root: Path) -> None:
+    """The digit is gone before the validator sees it - asserted, not assumed."""
+    _declare_version(root, "version: 2.10", 2.1)
+
+
+def m_version_unquoted_2(root: Path) -> None:
+    _declare_version(root, "version: 2", 2)
+
+
+def m_version_a_list(root: Path) -> None:
+    _declare_version(root, "version: [2, 1]", [2, 1])
+
+
+def m_no_version(root: Path) -> None:
+    """The positive control: a bundle that predates the field.
+
+    It mutates nothing and asserts there is nothing to mutate.
+    """
+    parsed = vb.load_yaml((root / "tutorial.yaml").read_text(), "tutorial.yaml")
+    assert "version" not in parsed, (
+        "this baseline declares version, so it cannot show a bundle that "
+        "predates the field still validating"
+    )
+    stamp = parsed.get("instance")
+    assert not (isinstance(stamp, dict) and "materialized_version" in stamp), (
+        "this instance's stamp already records materialized_version"
+    )
+
+
+def m_materialized_version_good(root: Path) -> None:
+    m_version_2_1(root)
+    _stamp_materialized_version(root, '"2.1"', "2.1")
+
+
+def m_materialized_version_unquoted(root: Path) -> None:
+    m_version_2_1(root)
+    _stamp_materialized_version(root, "2.1", 2.1)
+
+
+def m_materialized_version_three_parts(root: Path) -> None:
+    m_version_2_1(root)
+    _stamp_materialized_version(root, '"2.1.3"', "2.1.3")
+
+
+def m_materialized_version_absent(root: Path) -> None:
+    """An instance made before the field: the bundle has a version, the stamp none."""
+    m_version_2_1(root)
+    parsed = vb.load_yaml((root / "tutorial.yaml").read_text(), "tutorial.yaml")
+    assert isinstance(parsed.get("instance"), dict), "to_instance() wrote no stamp"
+    assert "materialized_version" not in parsed["instance"], (
+        "the stamp already records materialized_version"
+    )
+
+
 # -- check 29: setup_validators, at manifest scope and at lesson scope
 
 SETUP_DESCRIBE = "confirms the placed skeleton compiles before the first lesson"
@@ -3911,6 +4033,63 @@ CASES: list[Case] = [
     Case("29: an INSTANCE with a well-formed entry is silent", 29,
          "automaton", "instance", m_setup_validators_well_formed,
          kind="silent"),
+    # ---- check 30: the content version. Verdicts are what these assert;
+    # test_version_is_reported asserts the value the header carries.
+    Case('30: version "2.1" is silent', 30, "cli", "bundle", m_version_2_1,
+         kind="silent"),
+    Case('30: version "0.0" is silent', 30, "cli", "bundle", m_version_0_0,
+         kind="silent"),
+    Case('30: version "2.10" is silent', 30, "cli", "bundle", m_version_2_10,
+         kind="silent"),
+    Case("30: a bundle that predates the field is silent", 30, "cli",
+         "bundle", m_no_version, kind="silent"),
+    Case("30: and so is every other baseline", 30, "automaton", "bundle",
+         m_no_version, kind="silent"),
+    Case('30: version "2.1.3" fires', 30, "cli", "bundle",
+         m_version_three_parts, "'version' is malformed", where="tutorial.yaml"),
+    Case('30: version "v2.1" fires', 30, "cli", "bundle", m_version_prefixed,
+         "'version' is malformed", where="tutorial.yaml"),
+    Case('30: version "2.1a" fires', 30, "cli", "bundle", m_version_suffixed,
+         "'version' is malformed", where="tutorial.yaml"),
+    Case('30: version "" fires', 30, "cli", "bundle", m_version_empty,
+         "'version' is malformed", where="tutorial.yaml"),
+    Case('30: version "02.1" - a leading zero - fires', 30, "cli", "bundle",
+         m_version_leading_zero, "'version' is malformed",
+         where="tutorial.yaml"),
+    Case("30: an unquoted version: 2.1 fires", 30, "cli", "bundle",
+         m_version_unquoted_2_1, "'version' is malformed",
+         where="tutorial.yaml"),
+    Case("30: an unquoted version: 2.10 fires", 30, "cli", "bundle",
+         m_version_unquoted_2_10, "'version' is malformed",
+         where="tutorial.yaml"),
+    Case("30: an unquoted version: 2 fires", 30, "cli", "bundle",
+         m_version_unquoted_2, "'version' is malformed",
+         where="tutorial.yaml"),
+    Case("30: a list version fires", 30, "cli", "bundle", m_version_a_list,
+         "'version' is malformed", where="tutorial.yaml"),
+    # ---- check 30 in INSTANCE mode: the manifest's copy, and the stamp.
+    Case("30: an INSTANCE with a malformed version fires", 30, "cli",
+         "instance", m_version_three_parts, "'version' is malformed",
+         where="tutorial.yaml"),
+    Case("30: an INSTANCE with a good materialized_version is silent", 30,
+         "cli", "instance", m_materialized_version_good, kind="silent"),
+    Case("30: an INSTANCE with an unquoted materialized_version fires", 30,
+         "cli", "instance", m_materialized_version_unquoted,
+         "'materialized_version' is malformed",
+         where="tutorial.yaml (instance.materialized_version)"),
+    Case('30: an INSTANCE with materialized_version "2.1.3" fires', 30,
+         "cli", "instance", m_materialized_version_three_parts,
+         "'materialized_version' is malformed",
+         where="tutorial.yaml (instance.materialized_version)"),
+    Case("30: an INSTANCE stamped before the field is silent", 30, "cli",
+         "instance", m_materialized_version_absent, kind="silent"),
+    Case("30: an INSTANCE of a bundle that predates the field is silent", 30,
+         "cli", "instance", m_no_version, kind="silent"),
+    # ---- check 28 must not warn about `version`, which the format defines.
+    Case("28: a declared version is a DEFINED field", 28, "cli", "bundle",
+         m_version_2_1, kind="silent"),
+    Case("28: and so is an INSTANCE's, with the stamped copy", 28, "cli",
+         "instance", m_materialized_version_good, kind="silent"),
 ]
 
 
@@ -6950,6 +7129,169 @@ def test_setup_validators_status() -> None:
     )
 
 
+def test_version_is_reported() -> None:
+    """Check 30's reported VALUE and status, which the case table cannot see.
+
+    run_case reads findings only. This asserts what the run says the version
+    IS - in the report and in the rendered header - in both modes, and that
+    an absent version is read as "1.0" rather than left blank.
+    """
+    print("\ncheck 30: the version the run reports, in both modes:")
+
+    def run(mode: str, *mutators: Mutator):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = fresh("cli", Path(tmpdir))
+            if mode == "instance":
+                to_instance(root)
+            for mutate in mutators:
+                mutate(root)
+            report = vb.validate(root, mode)
+            out = io.StringIO()
+            vb.render(report, out)
+            header = [
+                line for line in out.getvalue().splitlines()
+                if line.startswith("version:")
+            ]
+            return report, header
+
+    for mode in ("bundle", "instance"):
+        for mutate, value in (
+            (m_version_2_1, "2.1"),
+            (m_version_0_0, "0.0"),
+            (m_version_2_10, "2.10"),
+        ):
+            report, header = run(mode, mutate)
+            info = report.version
+            record(
+                report.exit_code() == 0
+                and info is not None
+                and info.bundle == value
+                and info.bundle_declared
+                and report.status.get(30, ("missing", ""))[0] == vb.RAN,
+                f'{mode}: version "{value}" is accepted and reported as {value}',
+                f"exit {report.exit_code()}, version = {info!r}, "
+                f"status = {report.status.get(30)!r}",
+            )
+            record(
+                len(header) == 1 and header[0].split()[1].rstrip(";") == value,
+                f"{mode}: and the header line says {value}",
+                f"header = {header!r}",
+            )
+
+        report, header = run(mode, m_no_version)
+        info = report.version
+        state, reason = report.status.get(30, ("missing", ""))
+        record(
+            report.exit_code() == 0
+            and info is not None
+            and info.bundle == "1.0"
+            and not info.bundle_declared
+            and state == vb.NOT_APPLICABLE
+            and "1.0" in reason,
+            f"{mode}: an absent version is quiet, n/a, and read as 1.0",
+            f"exit {report.exit_code()}, version = {info!r}, "
+            f"status = {(state, reason)!r}",
+        )
+        record(
+            len(header) == 1 and header[0].split()[1].rstrip(";") == "1.0",
+            f"{mode}: and the header line says 1.0",
+            f"header = {header!r}",
+        )
+
+        report, header = run(mode, m_version_unquoted_2_10)
+        info = report.version
+        record(
+            report.exit_code() == 1
+            and info is not None
+            and info.bundle is None
+            and info.bundle_declared,
+            f"{mode}: an unquoted 2.10 is refused and reports no value",
+            f"exit {report.exit_code()}, version = {info!r}",
+        )
+
+    # The materialized_version, instance mode only.
+    report, header = run("instance", m_materialized_version_good)
+    info = report.version
+    record(
+        report.exit_code() == 0
+        and info is not None
+        and info.materialized == "2.1"
+        and info.materialized_declared
+        and len(header) == 1
+        and header[0].endswith("materialized_version: 2.1"),
+        "instance: a good materialized_version is accepted and reported",
+        f"exit {report.exit_code()}, version = {info!r}, header = {header!r}",
+    )
+    report, header = run("instance", m_materialized_version_three_parts)
+    info = report.version
+    record(
+        report.exit_code() == 1
+        and info is not None
+        and info.materialized is None
+        and info.materialized_declared
+        and len(header) == 1
+        and header[0].endswith("materialized_version: malformed"),
+        "instance: a malformed materialized_version is refused and reported "
+        "as malformed",
+        f"exit {report.exit_code()}, version = {info!r}, header = {header!r}",
+    )
+    report, header = run("instance", m_materialized_version_absent)
+    info = report.version
+    record(
+        report.exit_code() == 0
+        and info is not None
+        and info.materialized is None
+        and not info.materialized_declared
+        and report.status.get(30, ("missing", ""))[0] == vb.RAN
+        and len(header) == 1
+        and header[0].endswith("materialized_version: not recorded"),
+        "instance: an absent materialized_version is quiet, and the header "
+        "says it is not recorded",
+        f"exit {report.exit_code()}, version = {info!r}, header = {header!r}",
+    )
+    # A bundle never reads the stamp: bundle mode reports no materialized
+    # value even when a version is declared.
+    report, header = run("bundle", m_version_2_1)
+    record(
+        len(header) == 1 and "materialized_version" not in header[0],
+        "bundle: the header names no materialized_version",
+        f"header = {header!r}",
+    )
+
+    # The quote-it message: an unquoted number tells the author to quote it.
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = fresh("cli", Path(tmpdir))
+        m_version_unquoted_2_10(root)
+        report = vb.validate(root, "bundle")
+        hits = [f.message for f in report.findings if f.check == 30]
+        record(
+            len(hits) == 1
+            and 'version: "2.10"' in hits[0]
+            and "quote" in hits[0]
+            and "loses digits" in hits[0],
+            "an unquoted number's finding says to quote it, and why",
+            f"messages = {hits!r}",
+        )
+
+    # The comparison rule the documents state, on the parsed parts.
+    record(
+        vb.parse_version("2.10") > vb.parse_version("2.9")
+        and vb.parse_version("3.0") > vb.parse_version("2.99")
+        and vb.parse_version("2.1") == (2, 1),
+        '"2.10" parses to a pair that orders after "2.9"',
+        f'2.10 -> {vb.parse_version("2.10")!r}, 2.9 -> '
+        f'{vb.parse_version("2.9")!r}',
+    )
+    record(
+        30 not in vb.BUNDLE_ONLY
+        and 30 not in vb.INSTANCE_ONLY
+        and 30 not in vb.WARNING_ONLY,
+        "check 30 runs in both modes and is a FINDING, not a warning",
+        f"BUNDLE_ONLY = {vb.BUNDLE_ONLY}, INSTANCE_ONLY = "
+        f"{vb.INSTANCE_ONLY}, WARNING_ONLY = {vb.WARNING_ONLY}",
+    )
+
+
 def test_manifest_near_miss_distance() -> None:
     """The suggestion helper over the BUNDLE field list, before anything
     relies on what it suggests.
@@ -8037,6 +8379,7 @@ def main() -> int:
     test_assumes_reviewed_is_bundle_only()
     test_teaching_method_status()
     test_setup_validators_status()
+    test_version_is_reported()
     test_disclosure_extraction_helper()
     test_disclosure_block()
     test_manifest_near_miss_distance()

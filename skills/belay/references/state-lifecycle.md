@@ -136,15 +136,23 @@ Steps, in order:
    ```yaml
    instance:
      materialized_from: local:../belay-bundles/rust-automaton-db
+     materialized_version: "2.1"
      materialized_at: 2026-09-11
      runner_version: 1
    ```
 
    `materialized_from` records the resolved source in provider-qualified form
    (`local:` plus the path, and for future provider types the equivalent locator).
+   `materialized_version` records *which version* of that source this instance holds:
+   copy the bundle's `version` exactly, in quotes, or write `"1.0"` when the bundle
+   declares none (`bundle-format.md` section 2, **Content version**). A path has no
+   version, so without this key the only way to tell whether an instance is behind its
+   bundle is to compare every file. With it, the instance is behind when the bundle's
+   `version` is greater than `materialized_version`, the two compared as pairs of
+   integers, MAJOR first — `"2.10"` is later than `"2.9"`.
    This block is **provenance only**. Nothing in the teaching loop reads it. It exists so
-   a learner, or a future update mechanism, can tell where the instance came from. It
-   never appears in a bundle. Section 3.1 adds three validation keys to this same
+   a learner, or a future update mechanism, can tell where the instance came from and
+   which version of it. It never appears in a bundle. Section 3.1 adds three validation keys to this same
    block; those keys are the one part of the stamp anything ever reads, and what
    reads them is a session deciding whether this instance was ever checked — never a
    teaching turn.
@@ -358,6 +366,7 @@ Extend step 5's block with the validation keys:
 ```yaml
 instance:
   materialized_from: local:../belay-bundles/rust-automaton-db
+  materialized_version: "2.1"
   materialized_at: 2026-09-11
   runner_version: 1
   validated: 2026-09-12
