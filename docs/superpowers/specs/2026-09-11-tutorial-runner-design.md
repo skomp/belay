@@ -891,7 +891,7 @@ claim that replaced it:
 
 - an **author** runs it over a bundle or a catalogue before shipping;
 - a **runner** runs it over the instance it has just materialized, before the first task,
-  and at the five further moments `references/runner-protocol.md` section 13.1 names;
+  and at the six further moments `references/runner-protocol.md` section 13.1 names;
 - **no teaching turn runs it**, which is the cost rule in `runner-protocol.md` section 1,
   and **no learner invokes it by hand**.
 
@@ -1583,8 +1583,14 @@ Decided 2026-10-16, for belay#35. `state-lifecycle.md` section 3.3 is normative.
 - **A generated lesson is committed**, so its `reason` names the concept and the kind of
   evidence and never quotes the learner (`state-lifecycle.md` section 8.2).
 - **Known cost.** A clone of a repository under the default has an instance with no
-  `STATE.md`. It is reported as a structural defect rather than repaired, and the learner
-  who wants progress in more than one checkout opts in with `track`.
+  `STATE.md`: an instance without progress, which `state-lifecycle.md` section 7.1
+  defines (belay#70). It is not a defect. The validator still reports it as a check 7
+  finding, because a course does not start without `STATE.md`, and the finding names
+  section 7.1. There the tutor asks one question, start from the first lesson or say
+  where you are, measures a named position against the workspace before writing it, and
+  builds `STATE.md` from the documented shape without overwriting one that exists. A
+  second learner in a team repository starts their own progress the same way. A learner
+  who wants one record of progress in more than one checkout opts in with `track`.
 
 ---
 

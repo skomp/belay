@@ -3,7 +3,7 @@
 
 Two callers, one script. An author runs it over a bundle or a catalogue
 before shipping. A runner runs it over the instance it has just materialized,
-before the first task, and at the five further moments
+before the first task, and at the six further moments
 references/runner-protocol.md section 13.1 names. It is never run on a
 teaching turn, and a learner never invokes it by hand.
 
@@ -1092,6 +1092,35 @@ def discover_lessons(
 # -- the checks -------------------------------------------------------------
 
 
+# Where the runner's procedure for an instance without progress is written.
+# Check 7's finding for that case names it, and the test suite asserts the
+# finding points here rather than at the half-materialized wording.
+NO_PROGRESS_PROCEDURE = "state-lifecycle.md section 7.1"
+
+
+def instance_without_progress(entries: Any, manifest: Any) -> bool:
+    """Is this an instance without progress (state-lifecycle.md section 7.1)?
+
+    Three facts, all required: the manifest carries the `instance:` stamp,
+    and the directory holds neither STATE.md nor STATE.template.md. That is
+    what a clone sees when STATE.md stays in one checkout's exclude file
+    (section 3.3, belay#35), and what a second learner sees in a shared
+    repository. It is still a check 7 FINDING, because a course does not
+    start without STATE.md; the finding differs only in naming the case and
+    the procedure that repairs it (belay#70).
+
+    STATE.template.md present means materialization stopped before step 3
+    finished, which is a different case with its own finding. No stamp means
+    nothing says a runner ever materialized this directory.
+    """
+    return (
+        isinstance(manifest, dict)
+        and "instance" in manifest
+        and "STATE.md" not in entries
+        and "STATE.template.md" not in entries
+    )
+
+
 def check_state_files(root: Path, mode: str, manifest: Any, report: Report) -> None:
     """Check 7 - the mechanical bundle/instance distinction."""
     entries = list_dir(root)
@@ -1122,7 +1151,20 @@ def check_state_files(root: Path, mode: str, manifest: Any, report: Report) -> N
                 "materializes an instance. A bundle must not carry it.",
             )
     else:
-        if not has_state:
+        if instance_without_progress(entries, manifest):
+            report.add(
+                7,
+                "STATE.md",
+                "this is an instance without progress: tutorial.yaml carries "
+                "the instance stamp and there is neither STATE.md nor "
+                "STATE.template.md. A clone of a repository that keeps "
+                "progress local, or a second learner, sees exactly this. The "
+                "course material is intact; do not materialize it again and "
+                "do not guess a position. Follow "
+                f"{NO_PROGRESS_PROCEDURE}, which asks the learner where they "
+                "are and then writes STATE.md.",
+            )
+        elif not has_state:
             report.add(
                 7,
                 "STATE.md",

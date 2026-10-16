@@ -622,6 +622,26 @@ def m_instance_missing_stamp(root: Path) -> None:
     (root / "tutorial.yaml").write_text(head + "\n")
 
 
+def m_instance_missing_state_and_stamp(root: Path) -> None:
+    """No STATE.md, no template, no stamp: NOT an instance without progress."""
+    m_instance_missing_stamp(root)
+    (root / "STATE.md").unlink()
+    assert "STATE.md" not in os.listdir(root)
+    assert "STATE.template.md" not in os.listdir(root)
+
+
+def m_instance_half_materialized(root: Path) -> None:
+    """Stamped, STATE.template.md still present, STATE.md never written.
+
+    Materialization stopped inside step 3. This is NOT an instance without
+    progress, and keeps the finding it always had.
+    """
+    to_instance(root)
+    (root / "STATE.md").rename(root / "STATE.template.md")
+    assert "STATE.md" not in os.listdir(root)
+    assert "STATE.template.md" in os.listdir(root)
+
+
 # -- check 8: the manifest
 
 
@@ -3700,6 +3720,8 @@ def m_events_clock_time(root: Path) -> None:
 # to_instance() over the top of them.
 SELF_MATERIALIZING = {
     m_instance_missing_state,
+    m_instance_missing_state_and_stamp,
+    m_instance_half_materialized,
     m_instance_has_template,
     m_instance_missing_stamp,
     m_instance_id_mismatch,
@@ -3833,8 +3855,17 @@ CASES: list[Case] = [
          m_bundle_missing_template, "a bundle must contain STATE.template.md"),
     Case("7: a bundle carries an instance stamp", 7, "automaton", "bundle",
          m_bundle_has_instance_stamp, "A bundle must not carry it"),
-    Case("7: an instance has no STATE.md", 7, "automaton", "instance",
-         m_instance_missing_state, "an instance must contain STATE.md"),
+    # A stamped instance with neither state file is an instance without
+    # progress (belay#70): still a finding, pointing at the procedure.
+    Case("7: a stamped instance has no STATE.md and no template (no progress)",
+         7, "automaton", "instance", m_instance_missing_state,
+         vb.NO_PROGRESS_PROCEDURE, where="STATE.md"),
+    Case("7: an unstamped instance has no STATE.md", 7, "automaton",
+         "instance", m_instance_missing_state_and_stamp,
+         "an instance must contain STATE.md", where="STATE.md"),
+    Case("7: a half-materialized instance keeps its STATE.md finding", 7,
+         "automaton", "instance", m_instance_half_materialized,
+         "an instance must contain STATE.md", where="STATE.md"),
     Case("7: an instance still carries STATE.template.md", 7, "automaton",
          "instance", m_instance_has_template,
          "an instance must not contain STATE.template.md"),
@@ -8222,6 +8253,167 @@ def test_unknown_top_level_field_reads_keys_not_text() -> None:
         )
 
 
+STATE_LIFECYCLE = REPO / "skills" / "belay" / "references" / "state-lifecycle.md"
+
+
+def _documented_state_shape() -> str:
+    """The STATE.md block that state-lifecycle.md section 2 documents.
+
+    Read from the reference rather than copied here, so the test proves the
+    shape the procedure tells a tutor to build is one the validator accepts.
+    """
+    text = STATE_LIFECYCLE.read_text(encoding="utf-8")
+    start = text.index("## 2. Shape of `STATE.md`")
+    fence = text.index("```markdown\n", start) + len("```markdown\n")
+    end = text.index("```", fence)
+    return text[fence:end]
+
+
+def build_state_from_shape(root: Path, lesson_index: int) -> None:
+    """Write STATE.md as section 7.1 does: the section 2 shape, no template.
+
+    Refuses to overwrite, as the procedure does: the assertion is the
+    check-immediately-before-writing step.
+    """
+    assert not (root / "STATE.md").exists(), "STATE.md exists; never overwrite"
+    manifest = yamlite.load_yaml(
+        (root / "tutorial.yaml").read_text(encoding="utf-8"), "tutorial.yaml"
+    )
+    lesson = manifest["lessons"][lesson_index]
+    lines = []
+    for line in _documented_state_shape().splitlines():
+        if line.startswith("tutorial_id:"):
+            line = f"tutorial_id: {manifest['id']}"
+        elif line.startswith("active_lesson:"):
+            line = f"active_lesson: {lesson}"
+        elif line.startswith("status:"):
+            line = "status: in-progress"
+        elif line.startswith("updated:"):
+            line = "updated: 2026-10-16"
+        lines.append(line)
+    text = "\n".join(lines) + "\n"
+    assert f"tutorial_id: {manifest['id']}" in text, "shape has no tutorial_id"
+    assert f"active_lesson: {lesson}" in text, "shape has no active_lesson"
+    (root / "STATE.md").write_text(text, encoding="utf-8")
+
+
+def test_instance_without_progress_agrees_with_the_procedure() -> None:
+    """belay#70: the validator's verdict on an instance without progress.
+
+    The case is a stamped instance with neither STATE.md nor
+    STATE.template.md - a clone, or a second learner. state-lifecycle.md
+    section 7.1 says a course does not start on it, the tutor builds STATE.md
+    from the section 2 shape, and then validates the instance. So the
+    validator must: report it as a check 7 finding that points at the
+    procedure; pass the same instance once that STATE.md exists; and never
+    give the no-progress verdict to an instance that has a STATE.md of any
+    kind, or to a half-materialized or unstamped one.
+    """
+    print("\nan instance without progress (belay#70):")
+
+    def check7(report) -> list:
+        return [f for f in report.findings if f.check == 7]
+
+    def points_at_procedure(findings: list) -> bool:
+        return any(vb.NO_PROGRESS_PROCEDURE in f.message for f in findings)
+
+    for name in ("automaton", "generated"):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = fresh(name, Path(tmpdir))
+            if name not in INSTANCE_BASELINES:
+                to_instance(root)
+            (root / "STATE.md").unlink()
+            report = vb.validate(root, "instance")
+            seven = check7(report)
+            record(
+                vb.instance_without_progress(os.listdir(root), _manifest(root))
+                and report.exit_code() == 1
+                and len(report.findings) == 1
+                and len(seven) == 1
+                and seven[0].where == "STATE.md"
+                and points_at_procedure(seven),
+                f"{name}: fires - one check 7 finding, pointing at the "
+                f"procedure, and the course does not start",
+                f"exit {report.exit_code()}, findings = "
+                f"{[str(f) for f in report.findings]}",
+            )
+
+            for index in (0, 1):
+                if (root / "STATE.md").exists():
+                    (root / "STATE.md").unlink()
+                build_state_from_shape(root, index)
+                report = vb.validate(root, "instance")
+                record(
+                    report.exit_code() == 0 and not report.findings,
+                    f"{name}: after the procedure writes STATE.md at "
+                    f"lessons[{index}] from the section 2 shape, the instance "
+                    f"validates",
+                    f"exit {report.exit_code()}, findings = "
+                    f"{[str(f) for f in report.findings]}, "
+                    f"blocked = {report.blocked_checks}",
+                )
+
+    # Control: a normal instance stays quiet.
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = fresh("automaton", Path(tmpdir))
+        to_instance(root)
+        report = vb.validate(root, "instance")
+        record(
+            not vb.instance_without_progress(os.listdir(root), _manifest(root))
+            and report.exit_code() == 0
+            and not check7(report),
+            "control: a normal instance gets no check 7 finding",
+            f"findings = {[str(f) for f in report.findings]}",
+        )
+
+    # Controls: half-materialized and unstamped keep their old findings, and
+    # an existing STATE.md - even an empty one - is never routed to the
+    # procedure, which is the validator's half of "never overwrite".
+    controls = (
+        ("half-materialized (STATE.template.md, no STATE.md)",
+         m_instance_half_materialized, 7),
+        ("unstamped, no STATE.md", m_instance_missing_state_and_stamp, 7),
+    )
+    for label, mutate, check in controls:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = fresh("automaton", Path(tmpdir))
+            mutate(root)
+            report = vb.validate(root, "instance")
+            seven = check7(report)
+            record(
+                not vb.instance_without_progress(
+                    os.listdir(root), _manifest(root)
+                )
+                and report.exit_code() == 1
+                and any(f.where == "STATE.md" for f in seven)
+                and not points_at_procedure(report.findings),
+                f"control: {label} keeps its existing check {check} finding "
+                f"and is not an instance without progress",
+                f"findings = {[str(f) for f in report.findings]}",
+            )
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = fresh("automaton", Path(tmpdir))
+        to_instance(root)
+        (root / "STATE.md").write_text("", encoding="utf-8")
+        report = vb.validate(root, "instance")
+        record(
+            not vb.instance_without_progress(os.listdir(root), _manifest(root))
+            and report.exit_code() == 1
+            and not check7(report)
+            and not points_at_procedure(report.findings),
+            "control: an empty STATE.md is a check 11 matter, never the "
+            "no-progress procedure",
+            f"findings = {[str(f) for f in report.findings]}",
+        )
+
+
+def _manifest(root: Path):
+    return yamlite.load_yaml(
+        (root / "tutorial.yaml").read_text(encoding="utf-8"), "tutorial.yaml"
+    )
+
+
 def test_the_instance_stamp_gets_exactly_one_report() -> None:
     """`instance:` is a defined field, so check 28 never warns about it.
 
@@ -9294,6 +9486,7 @@ def main() -> int:
     test_unknown_top_level_field_warns_and_never_rejects()
     test_unknown_top_level_field_reads_keys_not_text()
     test_the_instance_stamp_gets_exactly_one_report()
+    test_instance_without_progress_agrees_with_the_procedure()
     test_a_misspelled_required_key_is_reported_twice()
     test_no_manifest_in_reach_gains_an_unknown_field_warning()
     test_no_real_bundle_ships_a_stamped_template()
