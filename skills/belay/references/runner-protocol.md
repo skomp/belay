@@ -230,6 +230,13 @@ Say what to do, what constraints apply, and what evidence will count as done. Th
 should never have to guess how you will judge the result. If the lesson declares
 validators, name the ones you will run.
 
+**A prediction question goes above the steps.** When you ask the learner what they expect
+to happen, put the question before the steps of the task, and tell them to answer it
+before they do anything. A learner reads a message from the top and acts as they read; a
+question placed after the steps reaches them after they have already run the command, and
+the prediction it asked for is no longer possible. This holds whether the lesson asks for
+the prediction or you add it yourself, and a lesson author does not need to repeat it.
+
 ### 2.4 Receive evidence
 
 Evidence is: the learner's changed files, the output of the declared validators, a diff,
