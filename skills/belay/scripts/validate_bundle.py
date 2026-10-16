@@ -123,10 +123,14 @@ CHECKS: dict[int, str] = {
         "and carry a describe line the banner can print",
     30: "version, when declared, is a quoted \"MAJOR.MINOR\" string; so is the "
         "instance stamp's materialized_version, and the two match",
+    31: "assesses, where a lesson declares it, is a non-empty list of concept "
+        "ids, and every id resolves in covers",
+    32: "[instance] STATE.md's '## Assessments' record is well-formed: known "
+        "states, lessons that exist, concept ids and counts",
 }
 
 BUNDLE_ONLY = {12, 13, 26}
-INSTANCE_ONLY = {11, 14, 15, 17, 21}
+INSTANCE_ONLY = {11, 14, 15, 17, 21, 32}
 
 # Checks that can only ever WARN, never produce a finding.
 #
@@ -262,7 +266,11 @@ KNOWN_BUNDLE_FORMATS = (1,)
 # is never mutated to mention it: a generated lesson is a learner-specific
 # overlay, discovered by listing the directory and placed by reading `after:`.
 GENERATED_DIR = "lessons.generated"
-GENERATED_KINDS = ("side-lesson", "main-path-draft")
+# `practice` is the third kind (belay#33): a lesson written to practise the
+# concepts an assessment found not demonstrated. It is a generated lesson in
+# every other respect, so checks 14 and 15 hold it to the same provenance and
+# the same `after:` rule as the other two.
+GENERATED_KINDS = ("side-lesson", "main-path-draft", "practice")
 # `generated_at` is deliberately not format-checked. Check 14 asserts that the
 # field is there and not empty; no script parses its value, and ordering two
 # detours by it is the tutor's job. The reader reads an unquoted 2026-09-11 as
@@ -294,6 +302,34 @@ _FAILURE_MODE_ID_RE = re.compile(r"[a-z0-9-]+")
 _OPTIONAL_RECORD_RE = re.compile(
     r"^[-*+][ \t]+`(?P<path>[^`]+)`[ \t]*[—–-][ \t]*"
     r"(?P<state>[A-Za-z][A-Za-z-]*)"
+)
+
+# Assessments (checks 31 and 32, belay#33).
+#
+# A lesson is an assessment when, and only when, its frontmatter declares
+# `assesses`: the concepts its answers must demonstrate. Every id resolves in
+# the manifest's `covers` map, whose `summary` is the standard an answer is
+# judged against (check 31). STATE.md records one row per assessment under
+# `## Assessments`, updated in place (check 32). A learner-requested
+# assessment has no lesson file, so its row is keyed by scope instead, with
+# the `_scope:_` prefix.
+ASSESSES_KEY = "assesses"
+ASSESSMENT_SECTION = "Assessments"
+# `skipped` and `passed` are distinct states on purpose: a skipped assessment
+# must never be read as a passed one. `misconception` is an ANSWER outcome,
+# not an assessment state; it surfaces as a concept under "not demonstrated".
+ASSESSMENT_STATES = ("passed", "partial", "stopped", "skipped")
+# The scope prefix is matched before the backticked value. The dashes are
+# written as escapes, so that this rule adds no non-ASCII character here.
+_ASSESSMENT_RECORD_RE = re.compile(
+    r"^[-*+][ \t]+(?P<scope>_scope:_[ \t]+)?`(?P<path>[^`]+)`[ \t]*"
+    r"[\u2014\u2013-][ \t]*(?P<state>[A-Za-z][A-Za-z-]*)(?P<rest>.*)$"
+)
+_NOT_DEMONSTRATED_RE = re.compile(r"not demonstrated[ \t]*:", re.IGNORECASE)
+# One "not demonstrated" item: a concept id, then optionally a count written
+# with the multiplication sign (U+00D7) or, after a space, an ASCII x.
+_NOT_DEMONSTRATED_ITEM_RE = re.compile(
+    r"^(?P<id>\S+?)(?:(?:[ \t]*\u00d7|[ \t]+x)[ \t]*(?P<count>\S+))?$"
 )
 
 # Progress markers (check 5).
@@ -697,7 +733,28 @@ LIMITATIONS = """What a pass does and does not mean
       forwards; that needs two versions side by side, which is the
       catalogue generator's view and not this one's. It does not compare
       `version` against `materialized_version` either: an instance behind
-      its bundle is a fact to report to the learner, not a defect."""
+      its bundle is a fact to report to the learner, not a defect.
+
+  Assessments (`assesses`, and STATE.md's `## Assessments`):
+    a bundle in which no lesson declares `assesses` is silent and check 31
+      reports "n/a"; every bundle written before the key existed is valid
+      unedited. An instance with no `## Assessments` section is silent too:
+      a learner who has taken no assessment has nothing to record.
+    check 31 proves that every assessed id is a `covers` concept. It says
+      nothing about whether the questions test that concept, whether the
+      completion conditions are fair, or whether an answer was judged well.
+      Those are judgement, and the conversation is not something this
+      validator can see.
+    check 32 validates the SHAPE of the record, not its truth: a known
+      state, a lesson that exists and declares `assesses`, concept ids, and
+      counts greater than one. It does not check the concept ids against
+      the lesson's `assesses` - a learner-requested assessment may name a
+      concept the course mentions without declaring - and it cannot tell
+      whether any question was really asked.
+    a `_scope:_` value is checked against the instance's lessons only when
+      it reads as a path (it holds a '/' or ends in '.md'). A scope written
+      in words - "the course so far", a topic - is free text and is not
+      checked."""
 
 
 @dataclass(frozen=True)
@@ -2263,6 +2320,296 @@ def check_optional_state(
                 f"'deferred' or 'complete', or make it active.",
             )
     report.ran(21, f"{len(seen)} record(s)")
+
+
+def _lesson_frontmatter(lesson: Lesson) -> dict | None:
+    """The parsed frontmatter of one lesson, or None when it cannot be read.
+
+    Check 3 reports a file whose frontmatter is missing or does not parse, so
+    a caller that only needs one field skips such a lesson in silence.
+    """
+    text = read_text(lesson.path)
+    if text is None:
+        return None
+    fm_text, _ = split_frontmatter(text)
+    if fm_text is None:
+        return None
+    try:
+        fm = load_yaml(fm_text, lesson.rel + " frontmatter")
+    except YamlError:
+        return None
+    return fm if isinstance(fm, dict) else None
+
+
+def check_assesses(
+    lessons: list[Lesson], manifest: Any, report: Report
+) -> set[str]:
+    """Check 31 - both modes.
+
+    `assesses` is what makes a lesson an assessment, and the only thing that
+    does: there is no `type: quiz`. Every id names a concept in `covers`,
+    because the concept's `summary` is the standard an answer is judged
+    against, and a standard the course never declared cannot be judged.
+
+    An id that is in `assumes` and not in `covers` is a finding too. The
+    course does not teach an assumed concept, so it has no standard of its
+    own for one.
+
+    A bundle in which no lesson declares `assesses` is silent and reports
+    n/a; that is every bundle written before the key existed.
+
+    Returns the paths of the lessons that declare the key, whether or not it
+    is well-formed, so check 32 can tell an assessment's row from a row that
+    should have been written in the `_scope:_` form.
+    """
+    declared: set[str] = set()
+    covers_raw = manifest.get("covers") if isinstance(manifest, dict) else None
+    covers_malformed = covers_raw is not None and not isinstance(covers_raw, dict)
+    decls = concept_declarations(manifest)
+    covers = set(decls.get("covers", {}))
+    assumes = set(decls.get("assumes", {}))
+    checked = 0
+    for lesson in lessons:
+        fm = _lesson_frontmatter(lesson)
+        if fm is None or ASSESSES_KEY not in fm:
+            continue
+        declared.add(lesson.rel)
+        value = fm[ASSESSES_KEY]
+        if not isinstance(value, list) or not value:
+            shown = "nothing" if value is None else repr(value)
+            report.add(
+                31,
+                lesson.rel,
+                f"assesses is {shown}; it must be a non-empty list of the "
+                f"concept ids this assessment tests, each one a key in "
+                f"tutorial.yaml's 'covers'. A lesson that assesses nothing is "
+                f"not an assessment: remove the field.",
+            )
+            continue
+        for entry in value:
+            if not isinstance(entry, str) or not _CONCEPT_ID_RE.fullmatch(entry):
+                report.add(
+                    31,
+                    lesson.rel,
+                    f"assesses names {entry!r}, which is not a concept id. A "
+                    f"concept id is a string matching [a-z0-9-]+ and a key in "
+                    f"tutorial.yaml's 'covers'.",
+                )
+                continue
+            checked += 1
+            if covers_malformed or entry in covers:
+                continue
+            if entry in assumes:
+                why = (
+                    "it is in 'assumes', which the course does not teach, so "
+                    "the course has no standard to judge an answer against"
+                )
+            elif not covers:
+                why = "the manifest declares no 'covers' concepts at all"
+            else:
+                why = "no 'covers' concept has that id"
+            report.add(
+                31,
+                lesson.rel,
+                f"assesses names {entry!r}, which does not resolve: {why}. "
+                f"Each assessed concept's 'covers' summary is the standard the "
+                f"tutor judges an answer against, so declare the concept under "
+                f"'covers' or correct the id.",
+            )
+    if not declared:
+        report.na(31, "no lesson declares assesses")
+    elif covers_malformed:
+        report.blocked(
+            31, "covers is not a mapping (see check 23), so no id can be resolved"
+        )
+    else:
+        report.ran(
+            31,
+            f"{checked} concept ids in {len(declared)} assessment lesson(s), "
+            f"against {len(covers)} covers concepts",
+        )
+    return declared
+
+
+def parse_assessment_records(
+    lines: list[str],
+) -> list[tuple[str, dict[str, Any] | None]]:
+    """Parse the bullets of a '## Assessments' section.
+
+    Returns one (entry text, record) pair per bullet, a wrapped bullet joined
+    into one line. `record` is None when the bullet is not a record at all.
+    Otherwise it carries `scope` (True for the `_scope:_` form), `path`,
+    `state`, and `concepts`: the "not demonstrated" items as written, or None
+    when the entry has no such clause.
+
+    Check 32 is built on this, and so is the suite's proof that `skipped` and
+    `passed` read back as two different states.
+    """
+    entries: list[str] = []
+    for line in lines:
+        if re.match(r"^[-*+][ \t]", line):
+            entries.append(line.strip())
+        elif entries and line.strip():
+            entries[-1] = entries[-1] + " " + line.strip()
+    out: list[tuple[str, dict[str, Any] | None]] = []
+    for entry in entries:
+        if re.fullmatch(r"[-*+][ \t]+[Nn]one\.?", entry):
+            continue  # the conventional "nothing to record" bullet
+        match = _ASSESSMENT_RECORD_RE.match(entry)
+        if match is None:
+            out.append((entry, None))
+            continue
+        rest = match.group("rest")
+        concepts: list[str] | None = None
+        found = _NOT_DEMONSTRATED_RE.search(rest)
+        if found is not None:
+            clause = rest[found.end():].split(";", 1)[0].strip().rstrip(".")
+            concepts = [c.strip() for c in clause.split(",") if c.strip()]
+        out.append(
+            (
+                entry,
+                {
+                    "scope": match.group("scope") is not None,
+                    "path": match.group("path").strip(),
+                    "state": match.group("state"),
+                    "concepts": concepts,
+                },
+            )
+        )
+    return out
+
+
+def check_assessment_state(
+    root: Path,
+    manifest: Any,
+    optional_keys: set[str],
+    generated: list[Lesson],
+    assessments: set[str],
+    report: Report,
+) -> None:
+    """Check 32 - instance mode. Mirrors check 21.
+
+    STATE.md records one row per assessment, updated in place: a lesson path
+    for an authored assessment, or `_scope:_` and the scope for one the
+    learner asked for. This proves the SHAPE of that record - a known state,
+    a lesson that exists, concept ids, counts greater than one - and nothing
+    about whether the learner really answered anything.
+
+    No section is normal and reports n/a: a learner who has taken no
+    assessment has nothing to record.
+    """
+    where = f"STATE.md (## {ASSESSMENT_SECTION})"
+    if "STATE.md" not in list_dir(root):
+        report.na(32, "there is no STATE.md (see check 7)")
+        return
+    text = read_text(root / "STATE.md")
+    if text is None:
+        report.na(32, "STATE.md could not be read (see check 11)")
+        return
+    _, body = split_frontmatter(text)
+    lines = section_lines(body, ASSESSMENT_SECTION)
+    if lines is None:
+        report.na(32, f"STATE.md has no '## {ASSESSMENT_SECTION}' section")
+        return
+
+    listed_raw = as_list(manifest.get("lessons")) if isinstance(manifest, dict) else None
+    listed = {e for e in listed_raw or [] if isinstance(e, str)}
+    authored = listed | optional_keys
+    lessons_known = authored | {lesson.rel for lesson in generated}
+
+    seen: dict[tuple[bool, str], str] = {}
+    records = 0
+    for entry, record in parse_assessment_records(lines):
+        if record is None:
+            report.add(
+                32,
+                where,
+                f"the entry {entry[:70]!r} is not a record. Each one names the "
+                f"assessment's lesson path in backticks - or '_scope:_' and the "
+                f"scope in backticks, for an assessment the learner asked for - "
+                f"then a dash, then one of {', '.join(ASSESSMENT_STATES)}.",
+            )
+            continue
+        records += 1
+        path, state = record["path"], record["state"]
+        key = (record["scope"], path)
+        label = f"_scope:_ {path!r}" if record["scope"] else repr(path)
+        if key in seen:
+            report.add(
+                32,
+                where,
+                f"{label} is recorded twice, as {seen[key]!r} and {state!r}. "
+                f"One assessment has one row, updated in place; an appended "
+                f"row per attempt is the transcript this record must not "
+                f"become.",
+            )
+        else:
+            seen[key] = state
+        if state not in ASSESSMENT_STATES:
+            report.add(
+                32,
+                where,
+                f"{label} is recorded as {state!r}, which is not one of "
+                f"{', '.join(ASSESSMENT_STATES)}.",
+            )
+        if not record["scope"]:
+            if path not in authored:
+                report.add(
+                    32,
+                    where,
+                    f"{path!r} is neither an entry in tutorial.yaml's 'lessons' "
+                    f"nor a key in its '{OPTIONAL_KEY}', so there is no "
+                    f"assessment for this row to be about.",
+                )
+            elif path not in assessments:
+                report.add(
+                    32,
+                    where,
+                    f"{path!r} is a lesson, but it declares no 'assesses', so it "
+                    f"is not an assessment. A quiz the learner asked for is "
+                    f"recorded in the '_scope:_' form.",
+                )
+        elif ("/" in path or path.endswith(".md")) and path not in lessons_known:
+            report.add(
+                32,
+                where,
+                f"the scope {path!r} reads as a lesson path, and no lesson in "
+                f"this instance has it. Name a lesson that exists, or describe "
+                f"the scope in words.",
+            )
+        concepts = record["concepts"]
+        if state == "partial" and not concepts:
+            report.add(
+                32,
+                where,
+                f"{label} is recorded as 'partial' with no 'not demonstrated:' "
+                f"concepts. The concepts are what the remediation offer and the "
+                f"second-failure rule read, so a partial result names them.",
+            )
+        for item in concepts or []:
+            match = _NOT_DEMONSTRATED_ITEM_RE.match(item)
+            cid = match.group("id") if match else None
+            if cid is None or not _CONCEPT_ID_RE.fullmatch(cid):
+                report.add(
+                    32,
+                    where,
+                    f"{label}: {item!r} under 'not demonstrated' is not a "
+                    f"concept id, optionally followed by a count such as "
+                    f"'\u00d72'. The row records concept ids, never answers.",
+                )
+                continue
+            count = match.group("count")
+            if count is not None and not (
+                count.isdigit() and count.isascii() and int(count) > 1
+            ):
+                report.add(
+                    32,
+                    where,
+                    f"{label}: the count for {cid!r} is {count!r}. A count is "
+                    f"an integer greater than one; a concept not demonstrated "
+                    f"once carries no count.",
+                )
+    report.ran(32, f"{records} record(s)")
 
 
 def check_state_template(
@@ -4554,6 +4901,9 @@ def validate(target: Path, mode: str) -> Report:
     # generated lesson's own setup_validators entries get every
     # well-formedness check a listed lesson's do.
     check_setup_validators(manifest_dict, all_lessons, report)
+    # Check 31, both modes, over all_lessons for check 22's reason: a lesson
+    # is an assessment by its frontmatter, wherever it lives.
+    assessments = check_assesses(all_lessons, manifest_dict, report)
     # Disclosure, and NOT a check: no finding, no warning, no number, no
     # effect on the exit code. It is derived here rather than by the tutor so
     # that the banner's content is testable, and it is given the RAW manifest
@@ -4597,6 +4947,9 @@ def validate(target: Path, mode: str) -> Report:
             state_fm, manifest_dict, generated, optional_keys, report
         )
         check_optional_state(target, optional_keys, state_fm, report)
+        check_assessment_state(
+            target, manifest_dict, optional_keys, generated, assessments, report
+        )
 
     return report
 

@@ -943,6 +943,11 @@ Not every minor topic belongs here. List the concepts that are meaningful for di
 for another author's `assumes` — the ones a learner would name when saying what they want to
 learn, or what they already know.
 
+`covers` is also what an assessment is judged against. A lesson's `assesses` list names
+`covers` ids, and each concept's `summary` is the standard the tutor holds an answer to
+(section 6, **Writing an assessment**). Write a summary an answer can be checked against,
+not a slogan.
+
 A `covers` concept should also be recognisable in `COURSE.md`, and the coverage list is the
 natural place for it. The validator warns, conservatively, when a concept appears nowhere in
 `COURSE.md` under any spelling; it never rejects, because a course whose prose uses different
@@ -1450,6 +1455,10 @@ What to record in the instance's DESIGN.md or STATE.md when this lesson finishes
 ## Optional deeper paths
 
 Material available if the learner asks. Not required.
+
+## Questions
+
+An assessment only, and optional there: questions to ask verbatim.
 ```
 
 ### Frontmatter
@@ -1462,6 +1471,7 @@ Material available if the learner asks. Not required.
 | `validators` | SHOULD | Validator names from `tutorial.yaml`. MUST all be declared. |
 | `optional` | MUST on an optional lesson | `true`, on every lesson listed in `optional_lessons` and on no other. |
 | `setup_validators` | MAY | Checks the runner performs itself when this lesson opens, before its first task, in the same two-field form the manifest key uses. See section 2, **Setup validators**. |
+| `assesses` | MAY | The `covers` concept ids this lesson assesses. Declaring it is what makes the lesson an **assessment**, and nothing else does. A non-empty list; every id MUST be a key in `covers`. See **Writing an assessment** below. |
 | `supplies` | MAY | Files this lesson hands the learner's workspace when it opens, in the same three-field form the manifest key uses. A lesson-scope `from` MUST resolve inside `lessons/` — anywhere inside it, though this lesson's own folder is the recommended home. Declaring `supplies` does not oblige a single-file lesson to become a foldered one. See section 2, **Supplied files**. |
 
 `design_refs` is how a lesson stays cheap. A lesson about splitting a file into a
@@ -1496,6 +1506,86 @@ from a failure several lessons later, so it cannot assume the learner arrived wi
 particular task half-finished. State what it needs in *Prerequisites*, the same as any
 lesson, and keep it short — a detour that costs more than the lesson it interrupts is a
 detour nobody finishes.
+
+### Writing an assessment
+
+An **assessment** is a lesson whose evidence is answers. It is an ordinary lesson file in
+`lessons/`, listed in `lessons` when every learner takes it or in `optional_lessons` when it
+is offered, and it uses the same frontmatter, sections and material rules. One field makes
+it an assessment:
+
+```yaml
+---
+id: 03-durability-check
+title: What durability actually guarantees
+assesses: [write-ahead-log, fsync-boundaries, crash-recovery]
+---
+```
+
+There is no `type: quiz`. Remove `assesses` and the lesson has nothing left to assess, so
+the declaration and the behaviour cannot drift apart.
+
+- **The standard is the concept's `covers` summary.** Every id in `assesses` MUST be a key
+  in `covers`, and the tutor judges an answer against that summary — the same text
+  discovery shows. Do not write a model answer or a per-question rubric: the tutor would
+  drift towards matching its wording, which is grading by string equality by another
+  route. A concept in `assumes` and not in `covers` cannot be assessed, because the course
+  does not teach it and has no standard of its own for it. The validator checks every id
+  (check 31).
+- **`## Questions` is optional.** Write it when you want particular questions asked
+  verbatim. Leave it out and the tutor writes the questions from the assessed concepts and
+  the lesson's *Learning objectives*. Prefer questions that need an explanation or an
+  application; multiple choice may be among them, never all of them.
+- **`## Completion conditions` states what passing requires, in concepts.** "The learner
+  explains why an acknowledged write survives a crash, and where the fsync boundary sits"
+  is checkable. "The learner understands durability" is not.
+- **`## Theory` must not give the answers away.** The tutor presents a lesson's Theory
+  before its first task (`runner-protocol.md` section 2.3), and in an assessment the
+  first task is the first question. Keep the Theory to framing — what is being assessed
+  and how — or leave the section out.
+- **`validators` is allowed.** A lesson may ask the learner to explain *and* to show.
+- **An assessment never blocks.** A weak result offers practice and a retake; it never
+  stops the learner advancing (`runner-protocol.md` section 15). So the course stays
+  completable by a learner who declines every offer, and `required_for` keeps gating on
+  a failure, never on an assessment.
+
+A theoretical quiz that needs no repository artifact at all is the plainest case. The
+manifest declares the concepts once, under `covers`, and lists the lesson in `lessons`:
+
+```markdown
+---
+id: 03-durability-check
+title: What durability actually guarantees
+assesses: [write-ahead-log, fsync-boundaries, crash-recovery]
+---
+
+## Purpose
+
+Check that the learner can reason about durability before lesson 04 builds on it.
+
+## Learning objectives
+
+- Explain what an acknowledged write promises, and when that promise starts
+- Place the fsync boundary in the write path, and say what is lost before it
+
+## Theory
+
+A few questions, one at a time, about the log you have been building. No code.
+
+## Questions
+
+1. A client got an acknowledgement and the machine lost power a millisecond later. What
+   must be true of that record after restart, and why?
+2. Where in the write path does a record become durable?
+
+## Completion conditions
+
+- The learner explains the acknowledgement promise in terms of the fsync boundary.
+- The learner names what recovery replays, and from where.
+```
+
+No validator, no workspace file: the evidence is the learner's answers, judged against
+the three `covers` summaries.
 
 ### A lesson is not a script
 
@@ -1546,6 +1636,10 @@ provenance frontmatter recording when they were written and why.
 A third route produces one: the learner asks for a side lesson outright, on a topic outside
 the lesson they are in. Those carry the same provenance, and `reason:` records that the
 learner asked.
+
+A fourth produces a **practice** lesson (`kind: practice`): an assessment found concepts
+not demonstrated, the learner accepted practice on them, and the tutor wrote it. Its
+`reason:` names the assessment and the concepts.
 
 **`after:` is placement, and placement only.** It tells you where the lesson belongs in
 the sequence, which is what step 7 of the promotion procedure below uses. It is not where
@@ -1655,6 +1749,8 @@ Compare `kind`, `after:` and `reason:` across the instances you can see:
   drafts it again, differently. Author the lesson.
 - **one `side-lesson`, once** — usually one learner's background rather than a gap in the
   course. Evidence of nothing. Leave it.
+- **`practice` lessons on one concept, from several learners** — the lesson that teaches
+  that concept is not landing. A single one is one learner's result, not a defect.
 - **a lesson the learner asked for** — `reason:` says so. That is one learner's curiosity
   or one learner's background, not a hole in your course. Take it as interest in the topic
   and weigh it far below a detour the tutor judged necessary. Several learners asking for
@@ -1782,6 +1878,8 @@ Confirm each of these by looking, not by remembering:
       and nothing in the course treats `assumes` as a gate
 - [ ] every `covers` concept is recognisable in `COURSE.md` — in the coverage list, or by
       an alias naming it the way `COURSE.md` does
+- [ ] every `assesses` id is a key in `covers`, and an assessment's Theory does not state
+      the answers its questions ask for
 - [ ] every recommendation names a `bundle` id spelled as that bundle spells its own `id`,
       and a `because` written for the learner
 - [ ] no recommendation names this bundle, and no bundle id appears twice in one list
@@ -2025,7 +2123,7 @@ genuinely cannot be finished with the failure in place.
 
 `bundle_format` stays `1`. `optional_lessons`, `failure_modes`, `supplies`, `covers`,
 `assumes`, `recommended_follow_ups`, `recommended_previous_bundles`,
-`teaching_method`, `setup_validators` and `version` are all additive: a bundle written before this
+`teaching_method`, `setup_validators`, `version` and the lesson field `assesses` are all additive: a bundle written before this
 section existed is valid exactly as it stands, nothing in this document changes what it means, and no edit
 is implied. Run the validator over it and see.
 
@@ -2063,6 +2161,12 @@ keys, and ignores them. The effect on a learner is precise, and worth stating pl
   field is read when a session asks whether an instance is behind its bundle, never on a
   teaching turn. An older validator reports `version` as an unrecognised top-level field
   rather than rejecting the bundle;
+- **an assessment is taught as an ordinary lesson.** An older runner ignores `assesses` and
+  teaches the lesson from its body, judging the answers against its *Completion
+  conditions*, without the four answer outcomes, the help-ladder ceiling or the
+  `## Assessments` record. The learner still answers questions and still advances; what is
+  lost is the remediation loop. An older validator reports nothing about a lesson
+  frontmatter field it does not know, so it accepts `assesses` in silence;
 - **nothing is taught wrongly.** The main path is untouched by `optional_lessons`, because
   an optional lesson is never in it. An unplaced supply is not the same case — a
   manifest-scope entry IS on the main path — but it costs the learner the toil the key
