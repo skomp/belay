@@ -124,7 +124,9 @@ The loop in one screen:
 5. place anything that lesson declares in `supplies`, reporting what you placed and what
    was already there and left alone — setup, never a task, and run anything it declares in
    `setup_validators`, saying each entry's `describe` line first;
-6. give exactly one actionable task;
+6. teach what the task uses — the lesson's Theory before its first task, a new concept
+   before a later one, never the answer it keeps for the learner — then give exactly one
+   actionable task;
 7. take the learner's evidence, run the lesson's declared validators, classify the
    outcome;
 8. record demonstrated progress in `STATE.md`, then repeat.
@@ -257,12 +259,11 @@ Three scripts, and a learner's session runs them — each at one moment, never p
 `scripts/catalogs.py` belongs to discovery; a resume never runs it.
 `scripts/validate_bundle.py --instance <workspace>/tutorial` checks the instance
 materialization has just created, before the first task: a finding stops the course from
-starting, a warning never does, and an indeterminate run is not a pass. Without
-`--instance` it checks the directory as a bundle and fails every correct instance, which
-has `STATE.md` and a stamp and lacks `STATE.template.md`. `references/state-lifecycle.md`
-section 3.1 has the step, `references/runner-protocol.md` section 13 the outcomes and the
-report. `scripts/plan_update.py` runs only when the learner asks to update the course, and
-writes nothing.
+starting, a warning never does, and an indeterminate run is not a pass.
+`references/state-lifecycle.md` section 3.1 has the step, `references/runner-protocol.md`
+section 13 the outcomes, the report, and what a run without `--instance` does.
+`scripts/plan_update.py` runs only when the learner asks to update the course, and writes
+nothing.
 
 **No script here ever runs a bundle's validator.** A `command` validator is an argument
 list that *you* run, through your own host, where your host's permission prompt sees it.
@@ -290,9 +291,6 @@ that a course is safe.
   explicitly and say so. Do not substitute a different source. A course that lives in a
   repository is reached by adding that repository as a **catalogue**, which is
   supported; a bundle source that names a repository directly is not.
-- **A catalogue that did not refresh** — say which one, say which failure it was, and say
-  that its entries are cached and how old they are. Never let it read as "nothing
-  matched".
 - **A newly materialized instance does not pass validation** — do not start the course.
   Say which bundle, and give the validator's findings verbatim.
   `references/runner-protocol.md` section 13.
@@ -300,8 +298,7 @@ that a course is safe.
 ## Tone
 
 Teach like a good pair partner who refuses to take the keyboard. Ask what the learner
-expects to happen before running the command, and put that question above the steps, with
-the instruction to answer it first — a learner reads top to bottom and acts as they read,
-so a question below the steps arrives after the result. `references/runner-protocol.md`
-section 2.3. Name the concept, not just the fix. When
-they get it right, say what specifically was right — that is the part that transfers.
+expects to happen before running the command, and put that question above the steps, to
+be answered first (`references/runner-protocol.md` section 2.3). Name the concept, not
+just the fix. When they get it right, say what specifically was right — that is the part
+that transfers.
