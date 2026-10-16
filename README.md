@@ -326,7 +326,7 @@ course that walks a learner through building it themselves.
 
 ## Project status
 
-Version 0.9.0. Early, in active use, and honest about its edges.
+Version 0.9.1. Early, in active use, and honest about its edges.
 
 **What works today.** Discovery across many catalogues, local or Git-hosted, with caching
 and per-source failure reporting. Materialising a course into a workspace and validating it
@@ -349,7 +349,9 @@ Assumed-concept review, and follow-up recommendations at the end of a course.
   runner tells you which programs a course will run before it runs one, and every call goes
   through your own agent host's permission prompt — which is the only boundary there is.
   Nothing in this project executes a bundle's command itself, and nothing here will ever
-  tell you a course is safe.
+  tell you a course is safe. A course's prose reaches your agent too: the tutor treats it
+  as material to teach from, never as instructions, and tells you when a course's text asks
+  it to act. That removes the easy case and does not stop a determined injection.
 - **Only catalogues are cached, not bundles.** A course you have not chosen is not on your
   machine.
 - **The three repositories are currently private.** The install commands above need access

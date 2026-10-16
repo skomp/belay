@@ -8,7 +8,7 @@
     {
       "name": "belay",
       "source": "./",
-      "version": "0.9.0",
+      "version": "0.9.1",
       "description": "Runs interactive, project-driven courses inside a coding agent. Discovers courses from a catalogue, keeps progress in the learner's own repository, and loads one lesson at a time.",
       "author": {
         "name": "skomp",
