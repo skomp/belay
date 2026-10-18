@@ -286,12 +286,21 @@ unchanged. No lesson file is written for the assessment itself.
 
 ### 6.2 Scope
 
-The learner names it: the previous lesson, a named lesson or topic, or the course so far.
-A generated question derives its scope from the objectives, the content and the concepts the
-learner has demonstrated. It never introduces an expectation the course did not set.
+The learner names it: the previous lesson, a named lesson or topic, a section, or the course
+so far. A generated question derives its scope from the objectives, the content and the
+concepts the learner has demonstrated. It never introduces an expectation the course did not
+set.
 
-"The current section" is not supported, because the format has no grouping concept.
-belay#36 would add one; this design does not depend on it.
+**Amended 2026-10-16 (belay#36).** "The current section" was unsupported when this was
+written, because the format had no grouping concept. belay#36 added `sections` to the
+manifest, so a section is now a scope, named by title or id. Its questions come from the
+section's `objectives` and `description`, the `covers` concepts they name, and *Concepts
+demonstrated*; no lesson file is opened to widen it, and a section that declares no
+objectives is not quizzed as a section. This was first drafted as "the section's lessons'
+`covers`", which does not exist: `covers` is declared once per course, and the only
+per-lesson concept list is `assesses`, in frontmatter the tutor does not load. The row is
+keyed `section:<id>`, which check 32 resolves against the manifest's `sections`
+(`runner-protocol.md` section 15.9, `state-lifecycle.md` section 11.1).
 
 ### 6.3 What they leave behind
 
@@ -363,8 +372,8 @@ lesson still appears under `## Generated lessons` with its `reason:`.
   (`2026-10-16-learning-evidence-design.md`). It records each answer's outcome and each
   attempt's state from §3.1 and §5.1, by concept id, and is evidence only: nothing in this
   design reads it.
-- **belay#36** — sections. §6.2 supports three scopes and not "the current section",
-  because the format has no grouping concept. This design does not depend on that issue.
+- **belay#36** — sections. Added after this design; §6.2 now includes a section among the
+  learner-requested scopes, and check 32 resolves a `section:<id>` row.
 - **belay-authoring#16** — the authoring tools, validation and dry-run scenarios for an
   assessment. That work follows this format and should not start before it lands.
 - **belay#22 and belay#45** — the conversational behaviour in §3, §4 and §6 has the

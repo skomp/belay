@@ -1597,6 +1597,29 @@ section 3.3 is normative.
 
 ---
 
+## 15g. Course sections describe the course and never order it
+
+Decided 2026-10-16, for belay#36. `bundle-format.md` section 2, **Course sections**, is
+normative.
+
+- **One shape: a `sections` list in the manifest.** Each entry has `id`, `title`, an
+  optional `description` and `objectives`, and a non-empty `lessons` list. A per-lesson
+  `chapter` field was rejected. Decision 10 above kept `optional: true` in the lesson
+  because the tutor teaches from one lesson file and must know from it what kind of lesson
+  it holds; the tutor holds the manifest every turn, so a lesson never needs to name its
+  section. A section also carries text of its own with no lesson to live in, and one shape
+  needs no disagreement rule.
+- **`lessons` stays the only order.** A section's main-path lessons are one contiguous run
+  of `lessons` in the same order, and sections follow `lessons` order. Check 34 makes a
+  section that would reorder anything an error, under decision 10's rule that a
+  disagreement is never reconciled.
+- **An optional lesson may belong to a section**, outside the ordering rules.
+- **Known cost.** The manifest is read every turn, so the whole block is in context from
+  session start; the tutor *uses* a title in progress reports and a description or
+  objectives only on request (`runner-protocol.md` section 17).
+
+---
+
 ## 16. Deferred: telemetry feedback
 
 Generated lessons are the course's only quality signal from real use. A later version
@@ -1687,7 +1710,7 @@ real files. One repository cannot satisfy both without duplication.
 | `belay-bundles` repository | **done** — holds five bundles and its own `catalog.yaml` |
 | `rust-automaton-db` bundle | **done** — imported, corrected, verified |
 | `automaton-db/tutorial/` instance + `STATE.md` | **done** — committed 2026-09-12 (§15, decision 1) |
-| Validator (`skills/belay/scripts/validate_bundle.py`) | **done** — 33 bundle checks + 7 catalogue checks |
+| Validator (`skills/belay/scripts/validate_bundle.py`) | **done** — 34 bundle checks + 7 catalogue checks |
 | Validator test suite | **done** — 846 assertions on a clean checkout, the same on any machine; every check proven firing or warning. `BELAY_SWEEP_SIBLING_REPOS=1` adds the published bundles, counted separately (belay#37) |
 | Optional lessons (`optional_lessons`, `failure_modes`) | **done** — 2026-09-12, §6; checks 18-21 |
 | First-load banner + `teaching_method` | **done** — 2026-09-13, released in 0.6.0; `state-lifecycle.md` §3 step 7, check 27; belay#23 |

@@ -154,7 +154,8 @@ question at a time, judges each answer against the concept's own summary, and te
 partial answer from a misconception and from one that is simply too short to judge. A weak
 result never blocks you. It offers practice on the concepts you missed and a retake, and if
 the same concept fails twice it says the course may assume something you have not met.
-You can also ask to be quizzed — "test me on the last lesson" — at any point.
+You can also ask to be quizzed — "test me on the last lesson", or on a section of a course
+that groups its lessons into sections — at any point.
 
 Belay is not a course generator. Adaptation supplements an authored curriculum and is
 bounded by its learning objectives.
@@ -329,7 +330,7 @@ python3 skills/belay/scripts/validate_bundle.py --instance path/to/project/tutor
 python3 skills/belay/scripts/validate_bundle.py --catalog path/to/catalog.yaml
 ```
 
-33 bundle checks and 7 catalogue checks. Your run and the runner's run are the same checks
+34 bundle checks and 7 catalogue checks. Your run and the runner's run are the same checks
 over the same files, which is the point: a bundle that passes here starts cleanly there. It
 checks structure — that references resolve, that no progress leaked into the course, that
 every lesson is reachable. It says nothing about whether the course is any good.
@@ -361,6 +362,8 @@ recording. On Claude Code, a hook also refuses a file edit the course's ownershi
 forbid; shell commands are not guarded, and Codex has no such check, so the rules the tutor
 follows stay the first line on both. Authored optional lessons and failure modes. Generated detours with provenance.
 Knowledge assessments, authored or asked for, with practice and retakes after a weak result.
+Optional course sections, which name where in a long course you are without changing its
+order.
 A learning record beside `STATE.md` — attempts, check failures, hints and answer outcomes,
 as identifiers and counts, never your code or your words — that you may read or delete.
 Assumed-concept review, and follow-up recommendations at the end of a course. Updating a
@@ -424,7 +427,7 @@ One skill body serves both hosts.
 No pytest; six plain scripts, run from a checkout of this repository.
 
 ```
-python3 tests/test_validate_bundle.py     # 846 assertions
+python3 tests/test_validate_bundle.py     # 884 assertions
 python3 tests/test_catalogs.py            # 338 assertions
 python3 tests/test_plan_update.py         # 67 assertions
 python3 tests/test_evidence.py            # 65 assertions
@@ -459,7 +462,7 @@ BELAY_SWEEP_SIBLING_REPOS=1 python3 tests/test_validate_bundle.py
 Those are separate checkouts at their own revisions, so what they contribute is
 reported on its own line and never added to the total above — `and 24 more against
 sibling repositories outside this commit` on the machine this was measured on. The
-headline stays 846 either way. Run it before publishing a bundle; a plain `python3
+headline stays 884 either way. Run it before publishing a bundle; a plain `python3
 tests/test_validate_bundle.py` is the check that a commit of *this* repository is
 sound.
 

@@ -1347,6 +1347,7 @@ fresh instance does not have it, and `STATE.template.md` never does:
   attempt 2; not demonstrated: fsync-boundaries ×2, crash-recovery
 - _scope:_ `lessons/02-segments.md` — passed — last taken 2026-09-20, attempt 1
 - _scope:_ `the course so far` — stopped — last taken 2026-09-21, attempt 1
+- _scope:_ `section:storage-engine` — passed — last taken 2026-09-22, attempt 1
 ```
 
 **One row per assessment, updated in place.** Never append a row per attempt: that would
@@ -1355,7 +1356,10 @@ turn a section read every turn into a transcript.
 - **The key.** An authored assessment is keyed by its lesson path, which MUST name a lesson
   in `lessons` or `optional_lessons` that declares `assesses`. A quiz the learner asked for
   has no lesson, so it is keyed by its scope after `_scope:_`: a lesson path when the scope
-  is one lesson, otherwise the scope in words.
+  is one lesson, `section:` and the section's `id` when it is a section the manifest
+  declares (`bundle-format.md` section 2, **Course sections**), otherwise the scope in
+  words. A section is keyed by its id even when the learner named its title, so a retitled
+  section keeps its row.
 - **The state** — one of the four in 11.2.
 - **The clause** — when it was last taken, the attempt number, and `not demonstrated:`
   followed by the concept ids the last attempt did not show. A `partial` row MUST name at
