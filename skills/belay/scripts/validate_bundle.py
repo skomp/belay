@@ -81,6 +81,10 @@ except ImportError:  # pragma: no cover - only when sys.path lacks this dir
 # compact and summarise it; check 33 reads it with the same definition.
 import evidence  # noqa: E402
 
+# The ownership glob dialect lives in ownership.py, which the Claude Code
+# hook also uses; check 10 asks it whether each glob parses.
+import ownership  # noqa: E402
+
 
 # --------------------------------------------------------------------------
 # Checks
@@ -99,7 +103,8 @@ CHECKS: dict[int, str] = {
     7: "state-file shape: STATE.template.md / STATE.md, and the instance stamp",
     8: "tutorial.yaml parses; bundle_format known; required fields present",
     9: "COURSE.md and DESIGN.md exist; lessons is non-empty",
-    10: "workspace_kind and ownership_policy are known; ownership globs non-empty",
+    10: "workspace_kind and ownership_policy are known; ownership globs "
+    "non-empty, and each one parses in the glob dialect",
     11: "[instance] STATE.md frontmatter well-formed and consistent with the manifest",
     12: "[bundle] STATE.template.md is consistent with the manifest",
     13: "[bundle] lessons.generated/ is absent - it exists only in an instance",
@@ -1322,6 +1327,11 @@ def check_workspace_and_ownership(manifest: Any, report: Report) -> None:
             f"learner_owned is only correct for workspace_kind: none, where the "
             f"course builds no software.",
         )
+    # The dialect is bundle-format.md section 2, "The glob dialect". A glob
+    # it cannot parse would resolve no path, so the tutor_owned or
+    # learner_owned entry would silently mean nothing.
+    for problem in ownership.glob_problems(manifest):
+        report.add(10, "tutorial.yaml", f"ownership glob does not parse: {problem}")
     report.ran(10, f"workspace_kind={kind!r}")
 
 

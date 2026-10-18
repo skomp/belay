@@ -301,6 +301,27 @@ is the instance's state file, and `src/**` is the learner's source. Neither path
 inside the bundle you are writing, which is why you cannot verify them by looking — write
 them for the workspace the course will be taken in.
 
+**The glob dialect.** `tutor_owned` and `learner_owned` entries are matched by one
+function, `scripts/ownership.py`, and these are its rules. Check 10 reports a glob it
+cannot parse.
+
+| Rule | Example | Matches | Does not match |
+|---|---|---|---|
+| Anchored at the workspace root | `Cargo.toml` | `Cargo.toml` | `crates/x/Cargo.toml` |
+| `*` matches within one segment and never crosses `/` | `src/*.rs` | `src/main.rs` | `src/cli/args.rs` |
+| `?` matches one character, never `/` | `src/?.rs` | `src/a.rs` | `src/ab.rs` |
+| `**` as a whole segment matches zero or more segments | `**/*.go` | `main.go`, `cmd/x/main.go` | `main.rs` |
+| No glob character: that exact path | `README.md` | `README.md` | `docs/README.md` |
+| A dotfile is an ordinary name | `src/**` | `src/.env` | `.env` |
+| Case-sensitive | `src/**` | `src/main.rs` | `Src/main.rs` |
+
+So `*.py` names Python files at the workspace root only; write `**/*.py` for every one.
+`**` anywhere but a whole segment (`src/**.rs`) is an error, and so are a leading `/`, a
+trailing `/` (write `src/**`), and a `.` or `..` segment. `[` and `]` are literal
+characters. A path is normalised before it is matched: `src/../Cargo.toml` is
+`Cargo.toml`, and a path that climbs out of the workspace is outside it and matches no
+glob.
+
 `tutor_owned` should stay small. `tutorial/STATE.md` and `tutorial/DESIGN.md` are the
 normal contents. **Do not add `tutorial/lessons/**`**: lesson copies are read-only in an
 instance, because all progress belongs in `STATE.md` and a lesson carrying progress is

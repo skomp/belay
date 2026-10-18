@@ -1,7 +1,7 @@
 # Validator trust, and setup checks — Design
 
 **Date:** 2026-09-14
-**Last amended:** 2026-10-14
+**Last amended:** 2026-10-16
 **Status:** sections 4 to 7 implemented in `PR: belay#44`. Sections 5.4 and 5.5 — the
 validator deriving the disclosure block, and its harness — implemented for belay#45;
 section 7's failure path is conversational behaviour and stays open there. Section 2.2 -
@@ -122,10 +122,11 @@ materialization too, before the protocol is loaded. The validator does not chang
 check can tell an instruction from teaching.
 
 **Which layer holds it** (decided 2026-10-14, for belay#46). The protocol holds this rule,
-because the protocol is the one layer every host has. belay#32's host enforcement, when it
-is built, sits underneath as defence in depth: it may enforce consequences of this rule
-where a host can intercept an action, and it must not restate the rule or carry a second
-copy of it. The same division belay#32 already draws for ownership — the protocol
+because the protocol is the one layer every host has. belay#32's host enforcement sits
+underneath as defence in depth: it may enforce consequences of this rule where a host can
+intercept an action, and it must not restate the rule or carry a second copy of it. As
+built on 2026-10-16 it enforces ownership on file edits in Claude Code and nothing else,
+and it states no part of this rule (the runner spec, section 15e). The same division belay#32 already draws for ownership — the protocol
 canonical, a hook a second line — holds here.
 
 ---

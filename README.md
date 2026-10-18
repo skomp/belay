@@ -340,7 +340,9 @@ Version 0.10.0. Early, in active use, and honest about its edges.
 **What works today.** Discovery across many catalogues, local or Git-hosted, with caching
 and per-source failure reporting. Materialising a course into a workspace and validating it
 before teaching. The teaching loop, ownership enforcement, validation outcomes and progress
-recording. Authored optional lessons and failure modes. Generated detours with provenance.
+recording. On Claude Code, a hook also refuses a file edit the course's ownership rules
+forbid; shell commands are not guarded, and Codex has no such check, so the rules the tutor
+follows stay the first line on both. Authored optional lessons and failure modes. Generated detours with provenance.
 Knowledge assessments, authored or asked for, with practice and retakes after a weak result.
 A learning record beside `STATE.md` — attempts, check failures, hints and answer outcomes,
 as identifiers and counts, never your code or your words — that you may read or delete.
@@ -402,14 +404,21 @@ One skill body serves both hosts.
 
 ### Tests
 
-No pytest; four plain scripts, run from a checkout of this repository.
+No pytest; five plain scripts, run from a checkout of this repository.
 
 ```
 python3 tests/test_validate_bundle.py     # 846 assertions
 python3 tests/test_catalogs.py            # 338 assertions
 python3 tests/test_plan_update.py         # 67 assertions
 python3 tests/test_evidence.py            # 65 assertions
+python3 tests/test_ownership.py           # 127 assertions
 ```
+
+`test_ownership.py` covers the ownership resolver and the Claude Code hook, which it runs
+as Claude Code does: a subprocess fed the hook payload on stdin.
+`tests/conformance/ownership-scenarios.md` holds the ownership and teaching rules no host
+can check, written as scenarios for a dry-run harness that does not exist yet; nothing runs
+them.
 
 **Those numbers are properties of this commit, not of your machine.** A clean
 checkout reports them on any machine. Nothing outside the checkout is validated by
