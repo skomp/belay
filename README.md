@@ -272,7 +272,7 @@ When the course starts the tutor asks you one question about your progress, `STA
 you to another machine, or **local**, meaning it stays on this machine. Under remote it
 shows in `git status` like the rest. Under local it is listed in this checkout's own
 `.git/info/exclude`, never in `.gitignore`, so the rule is not shared with anyone who clones
-the repository, and a clone has the course but not your place in it. The tutor never picks
+the repository, and a clone has the course but not your place in it: the tutor says so and asks whether to start from the first lesson or where you are, and checks your code before it records a position. The tutor never picks
 for you, and never stages, commits or pushes. To change your mind, ask the tutor, or run
 `python3 skills/belay/scripts/instance_git.py track path/to/project` (remote) or `apply`
 (local) from the plugin's directory; `status` shows what is in force. In a directory that is
@@ -427,7 +427,7 @@ One skill body serves both hosts.
 No pytest; six plain scripts, run from a checkout of this repository.
 
 ```
-python3 tests/test_validate_bundle.py     # 884 assertions
+python3 tests/test_validate_bundle.py     # 896 assertions
 python3 tests/test_catalogs.py            # 338 assertions
 python3 tests/test_plan_update.py         # 67 assertions
 python3 tests/test_evidence.py            # 65 assertions
@@ -462,7 +462,7 @@ BELAY_SWEEP_SIBLING_REPOS=1 python3 tests/test_validate_bundle.py
 Those are separate checkouts at their own revisions, so what they contribute is
 reported on its own line and never added to the total above — `and 24 more against
 sibling repositories outside this commit` on the machine this was measured on. The
-headline stays 884 either way. Run it before publishing a bundle; a plain `python3
+headline stays 896 either way. Run it before publishing a bundle; a plain `python3
 tests/test_validate_bundle.py` is the check that a commit of *this* repository is
 sound.
 

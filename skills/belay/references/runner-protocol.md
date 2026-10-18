@@ -26,7 +26,8 @@ Load, every turn:
   `optional_lessons` and `failure_modes` where the bundle declares them (section 8),
   `supplies` where it declares that (section 10), `assumes` where it declares that
   (section 11), and `sections` where it declares that (section 17);
-- `tutorial/STATE.md` — where the learner is;
+- `tutorial/STATE.md` — where the learner is. A stamped instance without one is an
+  instance without progress: **A resume with no `STATE.md`**, below;
 - the single lesson file named by `STATE.md`'s `active_lesson` — which is normally an
   entry in `lessons`, and may be a key in `optional_lessons` (section 8) or a file under
   `tutorial/lessons.generated/` (section 7);
@@ -203,6 +204,15 @@ procedure when they do.
 `undecided`, ask the learner the question in `state-lifecycle.md` section 3.3 once, never
 answer it for them, and record the answer with `apply` or `track`. Say nothing when the
 workspace is not a git repository.
+
+### A resume with no `STATE.md`
+
+**When the instance is stamped and holds neither `STATE.md` nor `STATE.template.md`, it is
+an instance without progress**: the learner chose local and opened another checkout, never
+committed `STATE.md`, or deleted it. Run the `status` step above first, then follow `state-lifecycle.md` section 7.1 before the first task. It
+asks the learner one question, start from the first lesson or say where they are, and
+never guesses a position. An instance that still holds `STATE.template.md` is a
+materialization to finish instead (`state-lifecycle.md` section 3).
 
 ---
 
@@ -1646,7 +1656,7 @@ breaks that rule to re-check a directory that almost never changes. The files th
 read are the bundle's, and the bundle's copy in an instance is written once.
 
 **Never re-checking is the opposite mistake**, because an instance whose files were edited
-would never be looked at again. So the check runs at five further moments, each one a
+would never be looked at again. So the check runs at six further moments, each one a
 moment where something changed or something is already wrong:
 
 1. **The stamp carries no `validated` key.** The instance was materialized by a runner
@@ -1664,6 +1674,9 @@ moment where something changed or something is already wrong:
 5. **An update has just been applied** (`state-lifecycle.md` section 3.2). The update
    removed the old record. Validate before the next task, and record the outcome exactly
    as at materialization.
+6. **`STATE.md` has just been written for an instance without progress**
+   (`state-lifecycle.md` section 7.1). Validate before the first task. The stamp is left as
+   it is.
 
 At every one of these moments the command is the one materialization runs,
 `scripts/validate_bundle.py --instance <workspace>/tutorial` (`state-lifecycle.md`
