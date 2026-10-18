@@ -253,15 +253,16 @@ not before.
 | `references/runner-protocol.md` | before the first task of a teaching session; when validating; when completion conditions look met; when unsure whether an edit is yours to make; when considering whether to write a lesson; when deciding whether to offer or re-offer an optional lesson; when the active lesson declares `assesses`, or the learner asks to be quizzed; when a course declares `assumes`; when a course declares `setup_validators`, or a setup check fails, or the learner asks whether a course is safe to run; when a course finishes or the learner asks what comes after it; when the learner asks how they have done |
 | `references/bundle-format.md` | authoring, importing or repairing a **bundle**, including promoting a generated lesson into one. Not needed to teach. |
 
-Four scripts, and a learner's session runs them — each at one moment, never per turn.
+Five scripts, and a learner's session runs them — each at one moment, never per turn.
 `scripts/catalogs.py` belongs to discovery; a resume never runs it.
 `scripts/validate_bundle.py --instance <workspace>/tutorial` checks the instance
 materialization has just created, before the first task: a finding stops the course from
-starting, a warning never does, and an indeterminate run is not a pass.
-`references/state-lifecycle.md` section 3.1 has the step, `references/runner-protocol.md`
-section 13 the outcomes, the report, and what a run without `--instance` does.
+starting, a warning never does, and an indeterminate run is not a pass
+(`references/runner-protocol.md` section 13).
 `scripts/plan_update.py` runs only when the learner asks to update the course, and writes
 nothing. `scripts/evidence.py` compacts the learning record when a lesson completes.
+`scripts/instance_git.py` records the learner's answer to where their progress is kept,
+asked once (`references/state-lifecycle.md` section 3.3).
 
 **No script here ever runs a bundle's validator.** A `command` validator is an argument
 list that *you* run, through your own host, where your host's permission prompt sees it.

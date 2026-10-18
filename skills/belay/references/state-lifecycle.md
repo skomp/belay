@@ -174,6 +174,11 @@ Steps, in order:
 6. **Verify the invariant**, by looking: the instance has `STATE.md` and does not have
    `STATE.template.md`. Say that you checked. **Then validate the instance, before
    step 7 and before anything is placed outside `tutorial/`: section 3.1.**
+   **Once the course will start, ask the learner how their progress is kept** — one
+   question, two options, remote or local — and record the answer: section 3.3. The
+   answer writes only the checkout's own exclude file, never a file under `tutorial/` and
+   never git history, so it changes nothing 3.1 certified. Keep the line the script
+   prints for step 7.
 7. **Draw the banner, then report what was created.** This is the moment the learner
    first meets the course, and it is the only moment the banner is drawn: the manifest's
    `title` in large text — the runner writes Markdown to a terminal, so a large heading or
@@ -239,7 +244,9 @@ Steps, in order:
    a command, nothing can, and any wording shaped like *"these commands have been
    checked"* is a defect — see `runner-protocol.md` section 14.
 
-   Then report what was created — the instance path, the course title, the first lesson.
+   Then report what was created — the instance path, the course title, the first lesson
+   — and, in one line, what step 6 recorded: where the learner's progress is kept, or that
+   the workspace is not a git repository.
    The banner names the course; this says where it now lives and what happens next.
 8. **Place what the manifest supplies, then report it.** When `tutorial.yaml` declares
    `supplies` at the top level, place those entries now: the instance exists, no lesson
@@ -608,6 +615,74 @@ Only what the learner accepted, in this order, while the bundle source is still 
    When the active lesson was replaced, read it again before the next task. If its
    completion conditions changed, tell the learner before you state the next task.
 
+### 3.3 What git sees
+
+**A course repository belongs to one learner.** It is never shared by two learners. The
+learner builds software in it, which is an individual task, so the owner decided on
+2026-10-18 that where their progress is kept is the learner's choice, not a default.
+
+| Path | Category | Kept |
+|---|---|---|
+| `tutorial/tutorial.yaml`, `COURSE.md`, `DESIGN.md`, `lessons/**`, `lessons.generated/**` | course material | always ordinary repository content, to commit |
+| `tutorial/STATE.md`, `tutorial/EVENTS.jsonl` | the learner's progress | as the learner chooses, below |
+
+**Ask once, at the start of the course.** After validation passes (3.1) and before the
+step-7 report, ask one question with two options:
+
+- **Remote** — progress is committed with your work and pushed, so it follows you to
+  another machine.
+- **Local** — progress stays on this machine, out of git.
+
+Use the `AskUserQuestion` tool in Claude Code. In a host without it, ask in plain text
+with the same two options. **Never choose for the learner.** Then run:
+
+| Answer | Command | What it does |
+|---|---|---|
+| remote | `scripts/instance_git.py track <workspace>` | records the choice with one marker line in the checkout's exclude file; nothing is hidden |
+| local | `scripts/instance_git.py apply <workspace>` | appends a marked block to the exclude file listing `STATE.md` and `EVENTS.jsonl` |
+| (read) | `scripts/instance_git.py status <workspace>` | prints `progress: undecided`, `local` or `remote`, and the state of each file |
+
+The first word of the output says what happened: `applied:`, `unchanged:` or `tracked:`.
+Report that line at step 7. A learner who changes their mind runs the other command, and
+you may run it when they ask.
+
+**The choice lives in the exclude file, never in `.gitignore` and never in the stamp.**
+`.gitignore` and `tutorial.yaml` are committed and reach every clone; the exclude file is
+local to one checkout, like the choice. The script finds it with
+`git rev-parse --git-path info/exclude`, which is right in a linked worktree and a
+submodule. Lines anyone else wrote are never rewritten or reordered. `tutorial/` as a
+whole is never ignored.
+
+**On a resume, run `status` once at the start of the session** (`runner-protocol.md`
+section 1). `local` and `remote` mean a choice was made: ask nothing. `undecided` means an
+instance made before this policy, or a fresh clone: ask the same question once, then
+record the answer. Do not infer a choice from what is committed; a committed `STATE.md`
+is not an answer, and the script says so rather than guessing. If the learner declines to
+choose, record nothing and ask again next session.
+
+**You never stage, commit or push, and you never run `git rm`.** The course material and,
+under remote, the progress appear in `git status` as untracked files, and the learner
+commits them when they choose. An exclude rule does not hide a file git already tracks:
+when `apply` prints that `STATE.md` is already committed, tell the learner, and leave
+`git rm --cached` to them.
+
+**Not a git repository.** The script prints one sentence and exits 0, writing nothing.
+Do not ask the question. Say the sentence once at step 7. Nothing is recorded, so a resume
+after the learner runs `git init` asks then.
+
+**Exit 1** means belay's block was edited by hand: nothing changed. Tell the learner, and do
+not repair the file.
+
+**Because the repository may be pushed, possibly to a public remote,** what you write under
+`tutorial/` is written to be read by others. A generated lesson's `reason` names the
+concept and the kind of evidence and never quotes the learner or holds a personal detail
+(section 8.2).
+
+**A clone with no `STATE.md`.** The learner chose local and opened another checkout, or
+never committed it, or deleted it. That is section 7's structural defect, not a fresh
+start: report it, say that local progress stays in the checkout it was made in, and let
+the learner decide.
+
 ---
 
 ## 4. What a completed task updates
@@ -749,6 +824,8 @@ started lets the tutor assume it exists.
   than concept ids under "not demonstrated";
 - `tutorial_id` does not match the manifest's `id`;
 - `STATE.template.md` is present in the instance;
+- `STATE.md` is absent from a stamped instance: the learner chose local and opened
+  another checkout, never committed it, or deleted it (section 3.3);
 - the manifest names a lesson file that does not exist.
 
 Section 10.5 adds two more, for the assumed-concept stamp.
@@ -824,7 +901,7 @@ title: Lifetimes, just enough to unblock the borrow
 generated: true
 generated_at: 2026-09-11
 kind: side-lesson            # | main-path-draft | practice
-reason: "The borrow in Table::get_cell_at cannot be explained without lifetimes"
+reason: "Lifetimes: a borrow error at cargo-check cannot be explained without them"
 after: lessons/03-first-refactor.md
 design_refs: [row-cell-model]
 validators: [cargo-check]
@@ -838,7 +915,7 @@ validators: [cargo-check]
 | `generated` | MUST | Always `true`. Marks the file as an overlay rather than an authored lesson. |
 | `generated_at` | MUST | The date it was written. Orders two detours that share one `after:`. |
 | `kind` | MUST | `side-lesson`, `main-path-draft`, or `practice` — written after an assessment, on the concepts it found not demonstrated (section 11.5). |
-| `reason` | MUST | One sentence, written for a bundle author who was not in the room. When the learner asked for this lesson rather than you judging it necessary, `reason` MUST say so and say what they asked for — the two mean different things about the course. This is the evidence `bundle-format.md` section 8 depends on. |
+| `reason` | MUST | One sentence, written for a bundle author who was not in the room. It names the concept and the kind of evidence — a check that failed, a question the course does not answer, a request — and never quotes the learner or holds personal detail: the repository may be pushed to a public remote (section 3.3). When the learner asked for this lesson rather than you judging it necessary, `reason` MUST say so and name the concept they asked about, in your words — the two mean different things about the course. This is the evidence `bundle-format.md` section 8 depends on. |
 | `after` | MUST | Where this lesson belongs in the course sequence: the authored lesson it follows. MUST be an entry in the manifest's `lessons` list — an authored lesson, never another generated one. |
 | `design_refs` | SHOULD | Anchors that already exist in the instance's `DESIGN.md`. |
 | `validators` | SHOULD | Names already declared in the manifest's `validators` map. |
@@ -1393,8 +1470,8 @@ when to read it is `runner-protocol.md` section 16.
   design spec's section 16; the content layer stays out.
 - **The learner may read it, and may delete it,** at any time. Deleting it loses the
   evidence and nothing else: the course carries on from `STATE.md`.
-- **Committing it** is belay#35's question, which also covers `STATE.md`. The provisional
-  answer: the learner may commit it, since it holds no content.
+- **It follows `STATE.md`.** Both are one learner's progress, and the learner's choice in
+  section 3.3, remote or local, covers both.
 
 ### 12.2 Events
 

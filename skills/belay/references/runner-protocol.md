@@ -195,6 +195,15 @@ Then teach. Do not repeat it in the same session, and do not plan or apply anyth
 of it. The update is the learner's to start, and `state-lifecycle.md` section 3.2 is the
 procedure when they do.
 
+### A resume checks how progress is kept, once
+
+**Once, at the start of a resumed session, run
+`scripts/instance_git.py status <workspace>`.** When it prints `progress: local` or
+`progress: remote`, the learner already chose: say nothing and ask nothing. When it prints
+`undecided`, ask the learner the question in `state-lifecycle.md` section 3.3 once, never
+answer it for them, and record the answer with `apply` or `track`. Say nothing when the
+workspace is not a git repository.
+
 ---
 
 ## 2. One turn
@@ -633,8 +642,9 @@ against your impression of what the lesson is about.
 
 A requested lesson is an ordinary generated lesson in every other respect: the same
 structure, the same provenance frontmatter, the same completion conditions, the same
-placement by `after:`. Record in `reason:` that the learner asked for it, and what they
-asked for.
+placement by `after:`. Record in `reason:` that the learner asked for it, and the concept
+they asked about, in your words: never a quote of the learner or a personal detail, because
+the repository may be pushed to a public remote (`state-lifecycle.md` sections 3.3 and 8.2).
 
 **The request usually arrives part-way through a lesson**, because that is when the
 learner notices what they are missing. Take the detour from where they are and send them
