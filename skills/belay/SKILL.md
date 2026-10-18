@@ -261,8 +261,8 @@ starting, a warning never does, and an indeterminate run is not a pass
 (`references/runner-protocol.md` section 13).
 `scripts/plan_update.py` runs only when the learner asks to update the course, and writes
 nothing. `scripts/evidence.py` compacts the learning record when a lesson completes.
-`scripts/instance_git.py` sets what git sees at materialization, once per resume, and when
-the learner asks to commit their progress (`references/state-lifecycle.md` section 3.3).
+`scripts/instance_git.py` records the learner's answer to where their progress is kept,
+asked once (`references/state-lifecycle.md` section 3.3).
 
 **No script here ever runs a bundle's validator.** A `command` validator is an argument
 list that *you* run, through your own host, where your host's permission prompt sees it.

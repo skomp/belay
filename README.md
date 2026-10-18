@@ -262,22 +262,22 @@ A script enforces that pair, and the runner runs it on the instance it has just 
 before the first task — so a defect in a course is found by the runner rather than by a
 learner five lessons in.
 
-**What `git status` shows after you start a course.** In a git repository, the course
-material appears as untracked files to commit when you choose: `tutorial/tutorial.yaml`,
-`COURSE.md`, `DESIGN.md`, `lessons/` and, once the tutor writes one, `lessons.generated/`.
-Your progress does not appear: `tutorial/STATE.md` and `tutorial/EVENTS.jsonl` are
-listed in this checkout's own `.git/info/exclude`, never in `.gitignore`, so the rule is
-yours alone and is not shared with anyone who clones the repository. The tutor tells you so
-in one line when the course starts. Nothing is ever staged or committed for you.
+**What `git status` shows after you start a course.** A course repository is yours alone,
+one learner per repository. In a git repository, the course material appears as untracked
+files to commit when you choose: `tutorial/tutorial.yaml`, `COURSE.md`, `DESIGN.md`,
+`lessons/` and, once the tutor writes one, `lessons.generated/`.
 
-To commit your progress too — to carry it to another machine, say — ask the tutor, or run
-`python3 skills/belay/scripts/instance_git.py track path/to/project` from the plugin's
-directory. To keep it local again, `instance_git.py apply`; to see what is in force,
-`instance_git.py status`. The
-choice is recorded in the same exclude file, so resuming the course does not undo it.
-Without opting in, a clone of the repository has the course but not your place in it. In a
-directory that is not a git repository, the tutor says so and nothing else happens.
-`state-lifecycle.md` section 3.3 has the full policy.
+When the course starts the tutor asks you one question about your progress, `STATE.md` and
+`EVENTS.jsonl`: **remote**, meaning you commit it with your work and push it, so it follows
+you to another machine, or **local**, meaning it stays on this machine. Under remote it
+shows in `git status` like the rest. Under local it is listed in this checkout's own
+`.git/info/exclude`, never in `.gitignore`, so the rule is not shared with anyone who clones
+the repository, and a clone has the course but not your place in it. The tutor never picks
+for you, and never stages, commits or pushes. To change your mind, ask the tutor, or run
+`python3 skills/belay/scripts/instance_git.py track path/to/project` (remote) or `apply`
+(local) from the plugin's directory; `status` shows what is in force. In a directory that is
+not a git repository, the tutor says so and asks nothing. `state-lifecycle.md` section 3.3
+has the full policy.
 
 **Ownership is declared, not assumed.** The manifest names tutor-owned and learner-owned
 paths and an `ownership_policy`, which every course must state — there is no default. Under
@@ -432,7 +432,7 @@ python3 tests/test_catalogs.py            # 338 assertions
 python3 tests/test_plan_update.py         # 67 assertions
 python3 tests/test_evidence.py            # 65 assertions
 python3 tests/test_ownership.py           # 127 assertions
-python3 tests/test_instance_git.py        # 88 assertions
+python3 tests/test_instance_git.py        # 90 assertions
 ```
 
 `test_instance_git.py` runs the version-control script against real repositories made
