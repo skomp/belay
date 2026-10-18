@@ -148,6 +148,14 @@ The bounds matter as much as the behaviour:
   against the course's own coverage list; a concept the course already taught gets
   coaching, not a new lesson.
 
+A lesson may also be an **assessment**: one that declares which of the course's concepts it
+`assesses`, so the evidence is your answers rather than your code. The tutor asks one
+question at a time, judges each answer against the concept's own summary, and tells a
+partial answer from a misconception and from one that is simply too short to judge. A weak
+result never blocks you. It offers practice on the concepts you missed and a retake, and if
+the same concept fails twice it says the course may assume something you have not met.
+You can also ask to be quizzed — "test me on the last lesson" — at any point.
+
 Belay is not a course generator. Adaptation supplements an authored curriculum and is
 bounded by its learning objectives.
 
@@ -303,7 +311,7 @@ python3 skills/belay/scripts/validate_bundle.py --instance path/to/project/tutor
 python3 skills/belay/scripts/validate_bundle.py --catalog path/to/catalog.yaml
 ```
 
-30 bundle checks and 7 catalogue checks. Your run and the runner's run are the same checks
+32 bundle checks and 7 catalogue checks. Your run and the runner's run are the same checks
 over the same files, which is the point: a bundle that passes here starts cleanly there. It
 checks structure — that references resolve, that no progress leaked into the course, that
 every lesson is reachable. It says nothing about whether the course is any good.
@@ -332,6 +340,7 @@ Version 0.10.0. Early, in active use, and honest about its edges.
 and per-source failure reporting. Materialising a course into a workspace and validating it
 before teaching. The teaching loop, ownership enforcement, validation outcomes and progress
 recording. Authored optional lessons and failure modes. Generated detours with provenance.
+Knowledge assessments, authored or asked for, with practice and retakes after a weak result.
 Assumed-concept review, and follow-up recommendations at the end of a course. Updating a
 course you have started to its newer version, when you ask for it: a plan you review, which
 keeps your progress, your `DESIGN.md` decisions and your generated lessons.
@@ -342,7 +351,8 @@ keeps your progress, your `DESIGN.md` decisions and your generated lessons.
   implemented, but no harness exercises it**
   ([belay#22](https://github.com/skomp/belay/issues/22)). The structural checks on
   `optional_lessons` and `failure_modes` are tested; the conversational behaviour around
-  them is not.
+  them is not. The same holds for assessments: `assesses` and the `## Assessments` record
+  are validated, and the question-and-answer loop is specified but not exercised.
 - **An update cannot tell who changed a file.** The instance keeps no copy of the course as
   it was when you started, so a lesson you worked in, or a `DESIGN.md`, that differs from
   the newer course is shown to you as a difference, and you decide what to keep.
@@ -392,9 +402,9 @@ One skill body serves both hosts.
 No pytest; three plain scripts, run from a checkout of this repository.
 
 ```
-python3 tests/test_validate_bundle.py     # 786 assertions
+python3 tests/test_validate_bundle.py     # 829 assertions
 python3 tests/test_catalogs.py            # 338 assertions
-python3 tests/test_plan_update.py         # 60 assertions
+python3 tests/test_plan_update.py         # 63 assertions
 ```
 
 **Those numbers are properties of this commit, not of your machine.** A clean
@@ -412,9 +422,9 @@ BELAY_SWEEP_SIBLING_REPOS=1 python3 tests/test_validate_bundle.py
 ```
 
 Those are separate checkouts at their own revisions, so what they contribute is
-reported on its own line and never added to the total above — `and 22 more against
+reported on its own line and never added to the total above — `and 24 more against
 sibling repositories outside this commit` on the machine this was measured on. The
-headline stays 786 either way. Run it before publishing a bundle; a plain `python3
+headline stays 829 either way. Run it before publishing a bundle; a plain `python3
 tests/test_validate_bundle.py` is the check that a commit of *this* repository is
 sound.
 

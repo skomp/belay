@@ -3255,6 +3255,212 @@ def m_disclosure_file_exists_setup_only(root: Path) -> None:
     ], f"setup_validators parsed to {parsed.get('setup_validators')!r}"
 
 
+# -- checks 31 and 32: assessments (belay#33)
+#
+# The broker baseline declares four `covers` concepts and two `assumes`
+# concepts, so it is the smallest bundle in which an assessment can be
+# declared correctly. Its one lesson becomes an assessment by gaining
+# `assesses`; nothing else marks one.
+
+BROKER_LESSON = "lessons/00-retained-log.md"
+BROKER_VALIDATORS = "validators: [go-build, go-test]\n"
+TIMES = "\u00d7"  # the count sign the record uses, kept out of the source
+
+
+def _declare_assesses(root: Path, literal: str) -> None:
+    """Give the broker's lesson an `assesses:` line, written as given."""
+    edit(
+        root / BROKER_LESSON,
+        BROKER_VALIDATORS,
+        BROKER_VALIDATORS + f"assesses: {literal}\n",
+    )
+
+
+def m_assesses_valid(root: Path) -> None:
+    _declare_assesses(root, "[retained-event-logs, partition-offsets]")
+
+
+def m_assesses_misspelled(root: Path) -> None:
+    _declare_assesses(root, "[retained-event-logs, partition-ofsets]")
+
+
+def m_assesses_an_assumed_concept(root: Path) -> None:
+    """An assumed concept has no standard of the course's own to judge by."""
+    _declare_assesses(root, "[go-programming]")
+
+
+def m_assesses_is_a_string(root: Path) -> None:
+    _declare_assesses(root, "retained-event-logs")
+
+
+def m_assesses_is_empty(root: Path) -> None:
+    _declare_assesses(root, "[]")
+
+
+def m_assesses_holds_a_number(root: Path) -> None:
+    _declare_assesses(root, "[retained-event-logs, 7]")
+
+
+def m_assesses_without_covers(root: Path) -> None:
+    """The cli bundle declares no `covers` at all, so nothing can resolve."""
+    edit(
+        root / "lessons/00-hello-args.md",
+        "title: ",
+        "assesses: [command-line-arguments]\ntitle: ",
+    )
+
+
+def m_generated_lesson_assesses_a_typo(root: Path) -> None:
+    """A generated lesson is an assessment by the same frontmatter rule."""
+    edit(
+        root / "lessons.generated/lifetimes-and-borrows.md",
+        "kind: side-lesson\n",
+        "kind: side-lesson\nassesses: [borrowing]\n",
+    )
+
+
+def m_generated_kind_practice(root: Path) -> None:
+    """`practice` is the third generated kind; checks 14 and 15 accept it."""
+    edit(
+        root / "lessons.generated/lifetimes-and-borrows.md",
+        "kind: side-lesson\n",
+        "kind: practice\n",
+    )
+    edit(
+        root / "STATE.md",
+        "lifetimes-and-borrows.md` \u2014 side-lesson,",
+        "lifetimes-and-borrows.md` \u2014 practice,",
+    )
+
+
+ASSESSMENT_ROWS = (
+    f"- `{BROKER_LESSON}` \u2014 partial \u2014 last taken 2026-09-19,\n"
+    f"  attempt 2; not demonstrated: partition-offsets {TIMES}2,\n"
+    f"  retained-event-logs\n"
+    f"- _scope:_ `the course so far` \u2014 passed \u2014 last taken 2026-09-20,\n"
+    f"  attempt 1\n"
+)
+
+
+def _record_assessments(root: Path, rows: str = ASSESSMENT_ROWS) -> None:
+    """Make the broker's lesson an assessment and record rows for it.
+
+    For the broker baseline in instance mode, which run_case has already
+    turned into an instance.
+    """
+    m_assesses_valid(root)
+    assert (root / "STATE.md").is_file(), "expected an instance to record into"
+    append(root / "STATE.md", "\n## Assessments\n\n" + rows)
+
+
+def _replace_rows(root: Path, rows: str) -> None:
+    _record_assessments(root, rows)
+
+
+def m_assessments_well_formed(root: Path) -> None:
+    _record_assessments(root)
+
+
+def m_assessment_skipped(root: Path) -> None:
+    _replace_rows(root, f"- `{BROKER_LESSON}` \u2014 skipped \u2014 on 2026-09-19\n")
+
+
+def m_assessment_passed(root: Path) -> None:
+    _replace_rows(
+        root, f"- `{BROKER_LESSON}` \u2014 passed \u2014 last taken 2026-09-19, attempt 1\n"
+    )
+
+
+def m_assessment_state_unknown(root: Path) -> None:
+    _replace_rows(root, f"- `{BROKER_LESSON}` \u2014 failed \u2014 on 2026-09-19\n")
+
+
+def m_assessment_row_names_no_lesson(root: Path) -> None:
+    _replace_rows(root, "- `lessons/07-durability.md` \u2014 passed \u2014 on 2026-09-19\n")
+
+
+def m_assessment_row_names_a_plain_lesson(root: Path) -> None:
+    """A path row for a lesson that is not an assessment."""
+    _record_assessments(root, f"- `{BROKER_LESSON}` \u2014 passed \u2014 on 2026-09-19\n")
+    edit(root / BROKER_LESSON, "assesses: [retained-event-logs, partition-offsets]\n", "")
+
+
+def m_assessment_recorded_twice(root: Path) -> None:
+    _replace_rows(
+        root,
+        ASSESSMENT_ROWS + f"- `{BROKER_LESSON}` \u2014 passed \u2014 on 2026-09-21\n",
+    )
+
+
+def m_assessment_bullet_not_a_record(root: Path) -> None:
+    _replace_rows(root, "- the learner did well on the durability quiz\n")
+
+
+def m_assessment_count_of_one(root: Path) -> None:
+    _replace_rows(
+        root,
+        f"- `{BROKER_LESSON}` \u2014 partial \u2014 attempt 1; not demonstrated: "
+        f"partition-offsets {TIMES}1\n",
+    )
+
+
+def m_assessment_count_ascii_x(root: Path) -> None:
+    """`x3` after a space is accepted as well as the multiplication sign."""
+    _replace_rows(
+        root,
+        f"- `{BROKER_LESSON}` \u2014 partial \u2014 attempt 3; not demonstrated: "
+        f"partition-offsets x3\n",
+    )
+
+
+def m_assessment_partial_without_concepts(root: Path) -> None:
+    _replace_rows(root, f"- `{BROKER_LESSON}` \u2014 partial \u2014 attempt 1\n")
+
+
+def m_assessment_concept_is_an_answer(root: Path) -> None:
+    """The row records concept ids, never what the learner said."""
+    _replace_rows(
+        root,
+        f"- `{BROKER_LESSON}` \u2014 partial \u2014 attempt 1; not demonstrated: "
+        f"said offsets are per topic\n",
+    )
+
+
+def m_assessment_scope_path_missing(root: Path) -> None:
+    _replace_rows(
+        root, "- _scope:_ `lessons/03-replication.md` \u2014 partial \u2014 attempt 1; "
+        "not demonstrated: topic-partitions\n",
+    )
+
+
+def m_assessment_scope_names_a_lesson(root: Path) -> None:
+    """A self-quiz on a lesson that is not itself an assessment is fine."""
+    _replace_rows(
+        root, f"- _scope:_ `{BROKER_LESSON}` \u2014 stopped \u2014 attempt 1\n",
+    )
+
+
+def m_assessment_optional_lesson(root: Path) -> None:
+    """An assessment listed in `optional_lessons` is recorded by its path."""
+    append(
+        root / "tutorial.yaml",
+        "\ncovers:\n"
+        "  grapheme-clusters:\n"
+        "    summary: A user-perceived character can be several code points.\n",
+    )
+    edit(
+        root / "lessons/what-is-a-character.md",
+        "optional: true\n",
+        "optional: true\nassesses: [grapheme-clusters]\n",
+    )
+    append(
+        root / "STATE.md",
+        "\n## Assessments\n\n"
+        "- `lessons/what-is-a-character.md` \u2014 stopped \u2014 last taken "
+        "2026-09-12, attempt 1\n",
+    )
+
+
 # --------------------------------------------------------------------------
 # The case table
 # --------------------------------------------------------------------------
@@ -4117,6 +4323,72 @@ CASES: list[Case] = [
          m_version_2_1, kind="silent"),
     Case("28: and so is an INSTANCE's, with the stamped copy", 28, "cli",
          "instance", m_materialized_version_good, kind="silent"),
+    # ---- check 31: `assesses` (belay#33)
+    Case("31: assesses names a misspelled concept id", 31, "broker", "bundle",
+         m_assesses_misspelled, "'partition-ofsets'", where=BROKER_LESSON),
+    Case("31: assesses names an assumed concept, not a covered one", 31,
+         "broker", "bundle", m_assesses_an_assumed_concept, "'go-programming'",
+         where=BROKER_LESSON),
+    Case("31: assesses is a bare string", 31, "broker", "bundle",
+         m_assesses_is_a_string, "'retained-event-logs'", where=BROKER_LESSON),
+    Case("31: assesses is an empty list", 31, "broker", "bundle",
+         m_assesses_is_empty, "assesses is []", where=BROKER_LESSON),
+    Case("31: assesses holds a number", 31, "broker", "bundle",
+         m_assesses_holds_a_number, "names 7", where=BROKER_LESSON),
+    Case("31: assesses in a bundle that declares no covers", 31, "cli",
+         "bundle", m_assesses_without_covers, "'command-line-arguments'",
+         where="lessons/00-hello-args.md"),
+    Case("31: a generated lesson's assesses is checked too", 31, "generated",
+         "instance", m_generated_lesson_assesses_a_typo, "'borrowing'",
+         where="lessons.generated/lifetimes-and-borrows.md"),
+    Case("31: a valid assesses is NOT reported", 31, "broker", "bundle",
+         m_assesses_valid, kind="silent"),
+    Case("31: and NOT in the instance either", 31, "broker", "instance",
+         m_assesses_valid, kind="silent"),
+    Case("31: a bundle with no assesses at all is NOT reported", 31,
+         "automaton", "bundle", lambda root: None, kind="silent"),
+    # ---- checks 14 and 15: `kind: practice` is a known generated kind
+    Case("14: a generated lesson of kind 'practice' is NOT reported", 14,
+         "generated", "instance", m_generated_kind_practice, kind="silent"),
+    Case("15: and its after: resolves like any other kind's", 15,
+         "generated", "instance", m_generated_kind_practice, kind="silent"),
+    # ---- check 32: STATE.md's '## Assessments' record (belay#33)
+    Case("32: a well-formed record, path and scope rows, is NOT reported", 32,
+         "broker", "instance", m_assessments_well_formed, kind="silent"),
+    Case("32: a 'skipped' row is NOT reported", 32, "broker", "instance",
+         m_assessment_skipped, kind="silent"),
+    Case("32: a 'passed' row is NOT reported", 32, "broker", "instance",
+         m_assessment_passed, kind="silent"),
+    Case("32: an ASCII 'x3' count is NOT reported", 32, "broker", "instance",
+         m_assessment_count_ascii_x, kind="silent"),
+    Case("32: a scope row naming an existing lesson is NOT reported", 32,
+         "broker", "instance", m_assessment_scope_names_a_lesson, kind="silent"),
+    Case("32: a row for an optional assessment is NOT reported", 32,
+         "generated", "instance", m_assessment_optional_lesson, kind="silent"),
+    Case("32: an instance with no '## Assessments' section is NOT reported", 32,
+         "broker", "instance", m_assesses_valid, kind="silent"),
+    Case("32: a row in an unknown state", 32, "broker", "instance",
+         m_assessment_state_unknown, "'failed'"),
+    Case("32: a path row naming no lesson in the manifest", 32, "broker",
+         "instance", m_assessment_row_names_no_lesson,
+         "'lessons/07-durability.md' is neither"),
+    Case("32: a path row naming a lesson that is not an assessment", 32,
+         "broker", "instance", m_assessment_row_names_a_plain_lesson,
+         "declares no 'assesses'"),
+    Case("32: one assessment recorded twice", 32, "broker", "instance",
+         m_assessment_recorded_twice, "recorded twice"),
+    Case("32: a bullet that is not a record", 32, "broker", "instance",
+         m_assessment_bullet_not_a_record, "is not a record"),
+    Case("32: a count of one", 32, "broker", "instance",
+         m_assessment_count_of_one, "'partition-offsets' is '1'"),
+    Case("32: a partial row naming no concept", 32, "broker", "instance",
+         m_assessment_partial_without_concepts, "'partial' with no"),
+    Case("32: an answer recorded where a concept id belongs", 32, "broker",
+         "instance", m_assessment_concept_is_an_answer,
+         "'said offsets are per topic'"),
+    Case("32: a scope that reads as a path and names no lesson", 32, "broker",
+         "instance", m_assessment_scope_path_missing,
+         "'lessons/03-replication.md'"),
 ]
 
 
@@ -8296,6 +8568,103 @@ def test_disclosure_block() -> None:
     )
 
 
+def _assessment_instance(tmp: Path, mutate: Mutator) -> Path:
+    """A broker instance with `mutate` applied, as run_case would build it."""
+    root = fresh("broker", tmp)
+    to_instance(root)
+    mutate(root)
+    return root
+
+
+def test_skipped_and_passed_are_distinguishable() -> None:
+    """A skipped assessment must never read back as a passed one (belay#33).
+
+    Three layers, each able to fail on its own: the two words are distinct
+    states of the format; each reads back from a STATE.md as itself, through
+    the parser check 32 uses; and both instances are valid, so the
+    difference is in the record and not in one of them being rejected. A
+    state word outside the four is a finding, which is the positive control
+    that the reader is not simply accepting anything.
+    """
+    print("\nskipped and passed are distinguishable in the instance:")
+    record(
+        "skipped" in vb.ASSESSMENT_STATES
+        and "passed" in vb.ASSESSMENT_STATES
+        and len(set(vb.ASSESSMENT_STATES)) == len(vb.ASSESSMENT_STATES),
+        "skipped and passed are two distinct states of the format",
+        f"ASSESSMENT_STATES = {vb.ASSESSMENT_STATES}",
+    )
+    states: dict[str, list[str]] = {}
+    codes: dict[str, int] = {}
+    for name, mutate in (
+        ("skipped", m_assessment_skipped),
+        ("passed", m_assessment_passed),
+    ):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = _assessment_instance(Path(tmpdir), mutate)
+            _, body = vb.split_frontmatter((root / "STATE.md").read_text())
+            lines = vb.section_lines(body, vb.ASSESSMENT_SECTION) or []
+            states[name] = [
+                rec["state"] for _, rec in vb.parse_assessment_records(lines) if rec
+            ]
+            codes[name] = vb.validate(root, "instance").exit_code()
+    record(
+        states == {"skipped": ["skipped"], "passed": ["passed"]},
+        "each row reads back as the state that was written",
+        f"read back {states!r}",
+    )
+    record(
+        codes == {"skipped": 0, "passed": 0},
+        "both instances validate clean, so the difference is the record's",
+        f"exit codes {codes!r}",
+    )
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = _assessment_instance(Path(tmpdir), m_assessment_state_unknown)
+        report = vb.validate(root, "instance")
+    record(
+        any(f.check == 32 for f in report.findings),
+        "a state outside the four is a check 32 finding",
+        f"findings = {[str(f) for f in report.findings]}",
+    )
+
+
+def test_assessment_checks_status() -> None:
+    """Checks 31 and 32 say n/a, not ran, where there is nothing to check."""
+    print("\nassessment checks report n/a on a course with no assessment:")
+    for name, path in BASELINES.items():
+        report = vb.validate(path, "bundle")
+        status = report.status.get(31, ("missing", ""))[0]
+        record(
+            status == vb.NOT_APPLICABLE,
+            f"{name}: check 31 is n/a on a bundle that declares no assesses",
+            f"status = {report.status.get(31)!r}",
+        )
+    report = vb.validate(ALL_BASELINES["generated"], "instance")
+    record(
+        report.status.get(32, ("missing", ""))[0] == vb.NOT_APPLICABLE,
+        "generated: check 32 is n/a on an instance with no Assessments section",
+        f"status = {report.status.get(32)!r}",
+    )
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = _assessment_instance(Path(tmpdir), m_assessments_well_formed)
+        report = vb.validate(root, "instance")
+    record(
+        report.status.get(31, ("", ""))[0] == vb.RAN
+        and report.status.get(32, ("", ""))[0] == vb.RAN
+        and report.exit_code() == 0,
+        "broker with an assessment: checks 31 and 32 both RAN, and pass",
+        f"31 = {report.status.get(31)!r}, 32 = {report.status.get(32)!r}, "
+        f"exit {report.exit_code()}",
+    )
+    record(
+        31 not in vb.INSTANCE_ONLY and 31 not in vb.BUNDLE_ONLY
+        and 32 in vb.INSTANCE_ONLY and not {31, 32} & vb.WARNING_ONLY,
+        "check 31 runs in both modes, check 32 in instance mode only, and "
+        "neither is warning-only",
+        f"INSTANCE_ONLY = {vb.INSTANCE_ONLY}, BUNDLE_ONLY = {vb.BUNDLE_ONLY}",
+    )
+
+
 def test_the_total_is_reproducible_from_this_commit() -> None:
     """The reported total must not depend on what else the machine holds.
 
@@ -8417,6 +8786,8 @@ def main() -> int:
     test_a_misspelled_required_key_is_reported_twice()
     test_no_manifest_in_reach_gains_an_unknown_field_warning()
     test_no_real_bundle_ships_a_stamped_template()
+    test_skipped_and_passed_are_distinguishable()
+    test_assessment_checks_status()
     test_the_total_is_reproducible_from_this_commit()
     test_check_coverage()
 

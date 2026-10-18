@@ -445,6 +445,33 @@ def make_plan(instance: Path, bundle: Path) -> Plan:
                     f"applying, and say so."
                 )
 
+    # -- an Assessments row naming a lesson that would no longer be an
+    # assessment (belay#33). Check 32 requires a path row to name a lesson
+    # that declares `assesses`, and a scope that reads as a path to name a
+    # lesson the instance has, so either row would fail validation after
+    # the update. The row is the learner's record; the plan only says so.
+    new_listed = set(new_lessons) | new_optional
+    lines = vb.section_lines(body, vb.ASSESSMENT_SECTION) or []
+    for _, row in vb.parse_assessment_records(lines):
+        if row is None:
+            continue
+        path = row["path"]
+        if row["scope"]:
+            if ("/" in path or path.endswith(".md")) and path not in new_listed:
+                plan.notes.append(
+                    f"STATE.md's Assessments section records a quiz scoped to "
+                    f"{path}, which the new bundle no longer has. Rewrite that "
+                    f"scope in words when applying, and say so."
+                )
+            continue
+        fm = _frontmatter(bundle / path) if path in new_listed else None
+        if fm is None or vb.ASSESSES_KEY not in fm:
+            plan.notes.append(
+                f"STATE.md's Assessments section records {path}, which is no "
+                f"longer an assessment in the new bundle. Remove that row when "
+                f"applying, and say so."
+            )
+
     plan.kept = ["STATE.md"] + (
         [vb.GENERATED_DIR + "/"] if (instance / vb.GENERATED_DIR).is_dir() else []
     )

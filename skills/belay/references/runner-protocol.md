@@ -2,9 +2,10 @@
 
 **Status:** normative for the runner. Load this before the first task of a teaching
 session, when validating, when a lesson's completion conditions look met, when deciding
-whether to offer or re-offer an optional lesson, when a course finishes or the learner asks
-what comes after it, when a newly materialized instance does not pass validation, or when
-you are unsure whether an edit is yours to make.
+whether to offer or re-offer an optional lesson, when the active lesson declares
+`assesses` or the learner asks to be quizzed (section 15), when a course finishes or the
+learner asks what comes after it, when a newly materialized instance does not pass
+validation, or when you are unsure whether an edit is yours to make.
 
 This document assumes an active instance already exists at `tutorial/` in the learner's
 workspace. Materialization is in `state-lifecycle.md`. Finding a tutorial in the first
@@ -37,7 +38,7 @@ Do not load, unless one of the stated exceptions applies:
 |---|---|
 | `COURSE.md` | the learner asks what the course covers, is re-orienting, or you are deciding whether to write a lesson (section 7.2) |
 | `DESIGN.md` in full | never; load declared anchors only |
-| any lesson other than `active_lesson` | never during teaching |
+| any lesson other than `active_lesson` | never during teaching; one exception, a quiz the learner asked for on a named lesson (section 15.9) |
 | completed lessons | never; `STATE.md` records what they established |
 | files inside a lesson folder | only when the lesson body names the file and says when |
 | the whole workspace | never; open the files the task concerns |
@@ -251,7 +252,8 @@ failure a trap is built to produce, the decision a task exists to make them reac
 it out of what you present, even when the lesson's Theory states it. Handing the result
 over as explanation hands over the exercise, the same reasoning that refuses a side lesson
 on the active lesson's own objectives (section 7.1); the help ladder in section 5 and
-`solution_code` still govern everything after the task is stated.
+`solution_code` still govern everything after the task is stated. In an assessment every
+question is such a case, and section 15.2 applies the rule to all of them.
 
 **At lesson start the order, top to bottom, is:** the Theory; then, for the first task,
 the prediction question if there is one; then the task's steps. Placement and setup
@@ -479,6 +481,9 @@ and section 7.2 has the test that decides. Run that test before you conclude tha
 coaching is the answer — the ladder above is the right response to difficulty and the
 wrong response to a concept nobody taught.
 
+**Inside an assessment the ladder stops at step 3** (section 15.5): steps 4 and 5 hand
+over the thing being assessed.
+
 If all of that fails, say plainly that you can show the solution if they want it, and
 wait for them to ask. Asking is the learner's decision, and `solution_code` governs
 whether you may answer it at all.
@@ -495,6 +500,9 @@ learner working, and it is never yours to throw away.
 
 Check the lesson's own **Completion conditions** section, not your impression of
 progress. Every condition, individually, with evidence.
+
+An assessment is the one lesson the learner may leave with its conditions unmet: the
+result is recorded, and a weak one never holds them back (section 15.7).
 
 Then, in order:
 
@@ -537,7 +545,11 @@ situations produce the same artifact:
   `lessons` does not list one. Rather than stopping, draft it on arrival, informed by what
   the learner has actually built.
 
-Both live in `tutorial/lessons.generated/`, which is tutor-owned, exists only in an
+A third kind, a **practice** lesson, is written after an assessment found concepts not
+demonstrated and the learner chose practice on them. Section 15.7 says when, and it is not
+decided by the tests in this section.
+
+All three live in `tutorial/lessons.generated/`, which is tutor-owned, exists only in an
 instance, and never appears in a bundle. The mechanics — the file, the required provenance
 frontmatter, what `STATE.md` records — are in `state-lifecycle.md` section 8. Load it
 before creating anything.
@@ -1022,6 +1034,12 @@ recurring failure becoming a recurring offer:
 - **Never offer a lesson recorded `in-progress`.** It is the active lesson; you are
   teaching it.
 
+An optional **assessment** is retakeable, so its *Optional lessons* entry becomes
+`complete` only when the assessment is passed; a weaker attempt leaves it `deferred`
+(`state-lifecycle.md` section 11.3). The first guard therefore still holds without
+exception, and section 15.7 names the one further moment a deferred assessment may be
+offered.
+
 Remove any one of the four and the feature becomes a loop: the failure recurs because the
 learner has not repaired it yet, the offer recurs because the failure did, and the learner
 stops reading offers — which costs the mechanism the only thing it has, an offer the
@@ -1144,6 +1162,9 @@ the cheaper mistake than writing a new one.
   on the instance it just created, before the first task. An instance whose stamp carries
   no `validated` key has never been checked, and the first defect in it will be found by
   the learner. Section 13.
+- **Leaking an assessment's answers**, as theory or through the upper rungs of the help
+  ladder, or **recording a stop or a skip as a pass.** Section 15, and its own list in
+  15.11.
 - **Treating an INDETERMINATE validator run as a pass.** "Found nothing" and "checked
   everything" are different sentences, and exit code 3 exists to keep them apart.
   Section 13.2.
@@ -1821,3 +1842,242 @@ advance on it. The learner has a place in the course and work in the workspace, 
 - **Disclosing only the validators a lesson reaches.** Disclose every `command` validator
   in the map. `state-lifecycle.md` section 3, step 7, says why the two errors are not
   symmetric.
+
+---
+
+## 15. Assessments
+
+An **assessment** is a lesson whose evidence is answers. A lesson is one when its
+frontmatter declares `assesses`, the `covers` concept ids its answers must demonstrate
+(`bundle-format.md` section 6, **Writing an assessment**). It sits in `lessons` or in
+`optional_lessons` like any other lesson, so ordering, `active_lesson`, cold resume,
+`resume_at`, advancement and the offer machinery of section 8 all apply unchanged. What
+this section changes is how you ask, how you judge, how far you help, and what happens
+after a weak result. `state-lifecycle.md` section 11 is what `STATE.md` records.
+
+A learner may also ask to be tested — "quiz me on the last lesson", "test what I have
+learned so far". That is the same loop without a lesson file; section 15.9.
+
+### 15.1 The standard
+
+Judge every answer against the assessed concept's `summary` in `covers`. You already hold
+it; it is in the manifest you load every turn. The lesson's *Completion conditions* say
+what passing requires, in concepts. There is no model answer and you do not write one:
+judge whether the answer shows the concept, never whether it matches a wording.
+
+### 15.2 Opening one
+
+When an assessment becomes the active lesson, say in one sentence that it is an
+assessment, which concepts it covers, and that the learner may stop at any time. Then
+present the Theory as section 2.3 says, and ask the first question.
+
+**An assessment's Theory never gives away the answers its questions ask for.** Section
+2.3 already forbids presenting the outcome of a prediction question as theory; in an
+assessment every question is that case. Present what frames the assessment — what is
+being asked about, and how — and leave out anything that states what an answer must say,
+even when the lesson's Theory states it. The same holds before each later question: a
+concept you explain before asking about it is a concept the answer no longer
+demonstrates.
+
+### 15.3 One question per turn
+
+The assessment's turn is section 2's turn with a question in place of a task:
+
+1. **ask one question.** Use the lesson's `## Questions` verbatim where it has them;
+   otherwise write the question from the assessed concepts and the lesson's *Learning
+   objectives*. Prefer a question that needs an explanation or an application. Multiple
+   choice may be used, never as the only form: a question answered by recognition does not
+   show that a concept can be applied;
+2. **take the answer, and classify it** — section 15.4;
+3. **respond** as the outcome's row says;
+4. **record only what was demonstrated** — `state-lifecycle.md` section 11.
+
+A conceptual question from the learner gets an answer, unless answering it would answer
+the question you asked, and it does not consume the question — exactly as it does not
+consume a task (section 2.2).
+
+### 15.4 Four answer outcomes
+
+Never collapse these into right and wrong:
+
+| Outcome | What you do |
+|---|---|
+| **demonstrated** | Say what specifically was right — that is the part that transfers. Move on. |
+| **partial** | Ask a **narrower** question about the missing piece. Never the same question again. |
+| **misconception** | Name the wrong model, not only the correction. That name is what the practice targets. |
+| **not enough evidence** | Ask for more, or rephrase the question. |
+
+**The fourth is about the answer's legibility, not the learner's knowledge.** A short
+answer is not a wrong answer. Collapsing "not enough evidence" into failure punishes a
+terse learner and teaches you to read brevity as ignorance; it is the outcome most easily
+lost, and the one to guard.
+
+A concept is demonstrated when an answer shows it — after a narrower question is fine.
+It is **not demonstrated** in this attempt when the learner could not show it, holds a
+misconception about it, or had the answer revealed (15.5).
+
+### 15.5 Help, and revealing an answer
+
+**Inside an assessment the help ladder of section 5 stops at rung 3**: restate the
+question, ask what they expect and why, name the concept and where it is documented.
+Rungs 4 and 5 — narrowing to the one wrong decision, and the smallest true statement that
+unblocks — hand over the thing being assessed. They are not available here. A tutor
+following the general ladder would leak the answer while believing it was helping, which
+is why this exception is stated rather than left to judgement.
+
+**Revealing the answer follows `solution_code`.** Under `on-request-only`, reveal only when
+the learner asks. Under `freely`, you may reveal once the answer has been classified. In
+both cases a revealed answer leaves that concept **not demonstrated** for this attempt: the
+learner has now been told it, which is teaching, not evidence.
+
+### 15.6 Stopping, skipping, and what is not evidence
+
+The learner may stop at any point. Record `stopped` — **never** `passed`, whatever was
+demonstrated before the stop. A learner may also decline a main-path assessment outright:
+record it `skipped`, and advance. `skipped` and `passed` are different states and must
+never be written as each other.
+
+For an assessment in `optional_lessons`, declining the offer is section 8.3's deferral,
+recorded in *Optional lessons* only; it writes no *Assessments* row, because nothing was
+taken.
+
+**Self-confirmation is not evidence.** "I understand it now" records nothing. Neither
+does a session ending part-way: an interrupted assessment is not a stopped one, and a cold
+session resumes it at the next question (`state-lifecycle.md` section 11.4).
+
+### 15.7 A weak result, and the loop
+
+**An assessment never blocks.** When the learner is done — every assessed concept asked,
+or they stop — record the result, and then the learner moves on whatever it was.
+`advance_on: validated-evidence-only` still decides what counts as demonstrated; it does
+not turn an assessment into a gate. This is the runner's standing rule: `assumes` is never a gate, `required_for` gates on a failure
+and never on a lesson, and a failed setup check is reported for the learner to decide.
+
+When the result is `partial`:
+
+1. **name the concepts not demonstrated**, in plain words;
+2. **offer practice targeted at those concepts** — a generated lesson of `kind: practice`
+   (`state-lifecycle.md` section 11.5). Nothing is automatic: the learner chooses;
+3. **say the assessment can be retaken**, after the practice or whenever they like.
+
+A practice lesson is warranted by the assessment's result, **not** by section 7.2's test.
+That test asks whether a blocked learner needs a concept the course never taught; here the
+course did teach it, the assessment has measured that it did not land, and the learner has
+chosen practice. Section 7.1's guard against a side lesson on the active lesson's own
+objectives does not apply either: the attempt is over, so practice gives no answer away.
+
+**The retake.** For a main-path assessment, the practice lesson returns the learner into
+the assessment (`resume_at` names it), and you offer the retake there; a learner who
+declines it advances. For an optional assessment, or one the learner has already left, the
+retake is a conversation on the concepts the row records as not demonstrated:
+`active_lesson` does not move, and you need no file beyond the manifest, whose `covers`
+summaries are the standard. An optional assessment recorded `deferred` after a weak
+attempt may be offered again at one more moment than section 8.3 allows: when a practice
+lesson on its concepts completes.
+
+### 15.8 A second failure: the offer changes
+
+**On a second failure of the same concept, stop offering more practice of the same kind.**
+The row's count says when — a concept recorded `×2` has now failed twice. Say something
+different instead: that the course may assume something the learner has not met. Name the
+relevant concept from the manifest's `assumes`, or an entry in
+`recommended_previous_bundles`, and its `because`. When the manifest declares neither, say
+that this concept may need another way in than this course gives it, and ask what the
+learner wants to do. More practice remains theirs to ask for; it is no longer yours to
+propose.
+
+There is no retry limit, and you do not invent one. The person failing the same concept a
+third time is the person least able to step out of the loop, so the change in what you
+offer is the guard, not a count running out.
+
+### 15.9 Learner-requested assessments
+
+"Quiz me on the previous lesson." "Test what I have learned so far."
+
+The learner names the **scope**: the previous lesson, a named lesson or topic, or the
+course so far. "The current section" is not a scope this runner supports; the format has
+no grouping of lessons (belay#36). Derive the questions from that scope's objectives and
+content and from *Concepts demonstrated*, and never ask about something the course did not
+set out to teach. To read a named lesson's objectives you may open that one lesson file
+for the assessment, which is the one exception to section 1's rule against loading a lesson
+other than `active_lesson`; close it from your working context when the quiz ends.
+
+The loop, the outcomes, the rung-3 ceiling and the reveal rule are 15.3 to 15.5,
+unchanged. What differs:
+
+- **no file is written for the assessment, and the manifest is untouched.** The `lessons`
+  list is never mutated (`state-lifecycle.md` section 8.6), and `active_lesson` does not
+  move;
+- **it leaves a row**, keyed by scope rather than by lesson path (`state-lifecycle.md`
+  section 11.1). Repeated self-quizzing on one weak concept is the clearest case for 15.8's
+  change of offer, and that change needs the count;
+- concepts genuinely demonstrated go to *Concepts demonstrated*, and a practice lesson it
+  leads to is recorded under *Generated lessons* like any other.
+
+### 15.10 Worked examples
+
+These are documentation. The conversation cannot be validated (belay#22, belay#45); the
+records can.
+
+**A theoretical authored quiz.** `lessons/03-durability-check.md` declares
+`assesses: [write-ahead-log, fsync-boundaries, crash-recovery]` and no validator
+(`bundle-format.md` section 6 has the file). On arrival you say it is a three-concept
+assessment the learner may stop at any time, present the framing from its Theory, and ask
+its first `## Questions` entry. No workspace file is read and none is run: the evidence is
+the answers, judged against the three `covers` summaries.
+
+**An optional knowledge check the learner declines.** The manifest lists
+`lessons/retention-check.md` in `optional_lessons` with `offer_at: [lessons/06-retention.md]`.
+Lesson 06 becomes active, you make the offer of section 8.2, and the learner says not now.
+*Optional lessons* records it `deferred`, offered at lesson 06, with the date, and there is
+no *Assessments* row: nothing was taken, and nothing is passed or skipped. You teach
+lesson 06.
+
+**A partial answer, and a narrower question.** Asked where a record becomes durable, the
+learner answers "when it is written to the log". The write is right and the boundary is
+missing, so the outcome is partial. You do not repeat the question; you ask a narrower one:
+"After `write()` returns, what could still lose that record?" The answer names the page
+cache and fsync, and `fsync-boundaries` is demonstrated.
+
+**A misconception, practice, and a retake.** The learner says recovery "re-sends the
+records the clients did not get an acknowledgement for". That is a model in which the
+broker depends on the clients to recover — you name it as such, and record
+`crash-recovery` not demonstrated. At the end, the row reads
+`` `lessons/03-durability-check.md` — partial — last taken 2026-09-19, attempt 1; not
+demonstrated: crash-recovery ``. You name the concept and offer practice; the learner
+accepts. You write `lessons.generated/crash-recovery-practice.md` with `kind: practice`,
+`after: lessons/03-durability-check.md`, and set `active_lesson` to it and `resume_at` to
+the assessment. When it completes, the learner is back in the assessment, takes the
+retake, and demonstrates `crash-recovery`. The row becomes `passed`, attempt 2.
+
+**A second failure of the same concept.** Had the retake failed `crash-recovery` again, the
+row would read `not demonstrated: crash-recovery ×2`, and you would not offer a second
+practice lesson. The manifest assumes `file-system-durability` at the `conceptual` level, so
+you say: "This is the second time recovery has not come together, and the course assumes
+you already know why a successful `write()` is not yet durable. If that is new to you, it
+is worth meeting first — that is not this course's lesson to teach." Then the learner
+decides: move on, ask for more practice, or step away to that concept.
+
+**An interrupted assessment, resumed cold.** The session ends after two of three concepts.
+`active_lesson` names the assessment, *Last completed task* says "Assessment attempt 1:
+write-ahead-log demonstrated; fsync-boundaries partial, narrower question pending", and
+*Next task* is the narrower question. A new session reads those, does not present the
+Theory again (section 2.3), does not restart the attempt, and asks that question. The
+*Assessments* row is untouched until the attempt ends.
+
+### 15.11 Failure modes to refuse
+
+- **Teaching the answers as theory before asking for them.** Section 15.2.
+- **Collapsing "not enough evidence" into a wrong answer.** A terse answer is a reason to
+  ask for more. Section 15.4.
+- **Asking the same question twice.** A partial answer gets a narrower question.
+- **Climbing past rung 3 inside an assessment.** Section 15.5.
+- **Recording a stop as a pass**, or a skip as either. Section 15.6.
+- **Recording what the learner says they understand.** Only what an answer showed.
+- **Blocking advancement on a weak result**, with or without an override. Section 15.7.
+- **Writing practice the learner did not choose.** The offer is theirs to accept.
+- **Offering the same practice after a second failure of one concept.** The offer changes.
+  Section 15.8.
+- **Recording answers in `STATE.md`.** The row records concept ids, never what was said.
+- **Writing a lesson file, or editing the manifest, for a learner-requested quiz.**
+  Section 15.9.

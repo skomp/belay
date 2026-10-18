@@ -1,8 +1,8 @@
 # Knowledge assessments — Design
 
 **Date:** 2026-09-19
-**Last amended:** 2026-09-29
-**Status:** approved in brainstorm, not implemented
+**Last amended:** 2026-10-16
+**Status:** implemented — see §10 for the decisions the implementation added
 **Issue:** belay#33
 **Does not close:** belay#34, which stays open and narrower — see §9.
 
@@ -255,12 +255,11 @@ belay#34's attempt-level questions — hint counts, which checks failed repeated
 remediation improved the next result — are **not** answered here. §5.1 records per-concept
 failure counts for assessments because §4.4 needs them, and nothing further.
 
-### 5.3 Check 31
+### 5.3 Check 32
 
-**The numbers 30 and 31 are provisional.** 29 is the highest that exists today, and
-belay#51's `version` check also wants the next free one. Whichever lands first takes 30.
-Cite these two by name when writing anything else, not by number, until one of them is
-merged.
+This section first called the record check "check 31" and the `assesses` check "check 30",
+and said both numbers were provisional. belay#51's `version` check took 30, so `assesses`
+is **check 31** and the record is **check 32**; the numbers are corrected throughout.
 
 Instance mode, mirroring check 21: the `## Assessments` record is well-formed, every lesson
 path names a lesson in the manifest, every state is one of the four, and every `×N` is an
@@ -312,27 +311,27 @@ lesson still appears under `## Generated lessons` with its `reason:`.
 
 ## 7. Acceptance criteria
 
-- [ ] `bundle-format.md` documents `assesses`, the `## Questions` section, and what
+- [x] `bundle-format.md` documents `assesses`, the `## Questions` section, and what
       `## Completion conditions` means for an assessment.
-- [ ] Check 30: `assesses` is a non-empty list of strings and every id resolves in `covers`.
+- [x] Check 31: `assesses` is a non-empty list of strings and every id resolves in `covers`.
       A test proves it fires on a misspelled id; controls prove it is quiet on a valid
       bundle and on a bundle declaring no `assesses` at all.
-- [ ] `runner-protocol.md` documents the turn loop, the four answer outcomes, the rung-3
+- [x] `runner-protocol.md` documents the turn loop, the four answer outcomes, the rung-3
       ceiling on the help ladder, and the reveal policy.
-- [ ] `runner-protocol.md` documents the remediation loop and §4.4's escalation.
-- [ ] `state-lifecycle.md` documents `## Assessments`, its four states and the `_scope:_`
+- [x] `runner-protocol.md` documents the remediation loop and §4.4's escalation.
+- [x] `state-lifecycle.md` documents `## Assessments`, its four states and the `_scope:_`
       form, and states that an assessment's completion is not terminal.
-- [ ] `kind: practice` joins `GENERATED_KINDS`, and checks 14 and 15 accept it.
-- [ ] Check 31 validates the `## Assessments` record, with a positive control per rule.
-- [ ] A worked example: a theoretical authored quiz needing no repository artifact.
-- [ ] A worked example: an optional knowledge check the learner declines.
-- [ ] A worked example: a partially correct answer leading to a narrower question.
-- [ ] A worked example: a misconception leading to an offered practice lesson, and a retake.
-- [ ] A worked example: a second failure of the same concept, where the offer changes.
-- [ ] A worked example: an interrupted assessment resuming in a cold session.
-- [ ] A test proves `skipped` and `passed` are distinguishable in the instance.
-- [ ] Every bundle valid today stays valid.
-- [ ] Both suites pass, in both PyYAML configurations.
+- [x] `kind: practice` joins `GENERATED_KINDS`, and checks 14 and 15 accept it.
+- [x] Check 32 validates the `## Assessments` record, with a positive control per rule.
+- [x] A worked example: a theoretical authored quiz needing no repository artifact.
+- [x] A worked example: an optional knowledge check the learner declines.
+- [x] A worked example: a partially correct answer leading to a narrower question.
+- [x] A worked example: a misconception leading to an offered practice lesson, and a retake.
+- [x] A worked example: a second failure of the same concept, where the offer changes.
+- [x] A worked example: an interrupted assessment resuming in a cold session.
+- [x] A test proves `skipped` and `passed` are distinguishable in the instance.
+- [x] Every bundle valid today stays valid.
+- [x] Both suites pass, in both PyYAML configurations.
 
 ---
 
@@ -365,3 +364,41 @@ lesson still appears under `## Generated lessons` with its `reason:`.
   same testability problem those two issues describe: the structure can be validated and the
   conversation cannot. Nothing here closes that, and the worked examples in §7 are
   documentation rather than tests.
+
+---
+
+## 10. Implementation notes
+
+Implemented on 2026-10-16 (belay#33). The worked examples of §7 live in
+`references/runner-protocol.md` §15.10, where the tutor reads them, and the authored quiz
+also in `references/bundle-format.md` §6, **Writing an assessment**, where an author does.
+The record is `references/state-lifecycle.md` §11.
+
+The design left these open, and the implementation settled them:
+
+- **An optional assessment's *Optional lessons* entry becomes `complete` only when it is
+  passed.** Any other result leaves it `deferred`. That keeps `complete` terminal, as
+  §9.2 of the state lifecycle requires, while §4.3 makes the assessment retakeable. A
+  deferred assessment may be offered again when a practice lesson on its concepts
+  completes, which is one moment more than the anti-nag rule otherwise allows.
+- **Declining an optional assessment's offer writes no `## Assessments` row.** It is a
+  deferral, and `skipped` is for a main-path assessment declined outright.
+- **The `×N` count runs across consecutive failures.** The row lists only what the last
+  attempt did not show, so a concept demonstrated in between drops off it and a later
+  failure starts again without a count.
+- **A path row must name a lesson that declares `assesses`.** A quiz the learner asked for
+  on an ordinary lesson is a `_scope:_` row. Check 32 enforces both, and checks a scope
+  against the instance's lessons only when it reads as a path.
+- **A practice lesson's `after:` is the assessment when it is on the main path**, as §4.2
+  shows, and otherwise the `lessons` entry the learner stands in, because check 15
+  requires `after:` to be an entry in `lessons`. For the same reason `resume_at` cannot
+  name an optional assessment, so the retake of an optional one is a conversation, as is a
+  retake of any assessment the learner has already left.
+- **A quiz the learner asks for on a named lesson may open that lesson**, the one
+  exception to the runner's rule against loading a lesson other than `active_lesson`.
+  Without it, the questions could not be drawn from the objectives, as §6.2 requires.
+- **The help ladder's ceiling and the theory rule.** belay#64's rule that a lesson's
+  Theory is presented before its first task is in `runner-protocol.md` §2.3; §15.2 applies
+  its "never the answer" clause to every question of an assessment.
+- **`plan_update.py` notes an `## Assessments` row** that an update would leave naming a
+  lesson that is no longer an assessment, so the learner can remove or reword it.
