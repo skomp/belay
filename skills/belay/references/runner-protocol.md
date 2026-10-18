@@ -196,21 +196,20 @@ Then teach. Do not repeat it in the same session, and do not plan or apply anyth
 of it. The update is the learner's to start, and `state-lifecycle.md` section 3.2 is the
 procedure when they do.
 
-### A resume settles what git sees, once
+### A resume checks how progress is kept, once
 
 **Once, at the start of a resumed session, run
-`scripts/instance_git.py apply --if-undecided <workspace>`.** It changes something only
-when this checkout has no recorded choice: an instance made before the policy existed, or
-a fresh clone. When the learner chose to track their progress, it leaves that alone. Say
-one sentence before the first task when it prints `applied:` or `recorded:`, and nothing
-when it prints `unchanged:` or that the workspace is not a git repository.
-`state-lifecycle.md` section 3.3 has the policy, the commands, and what each line means.
+`scripts/instance_git.py status <workspace>`.** When it prints `progress: local` or
+`progress: remote`, the learner already chose: say nothing and ask nothing. When it prints
+`undecided`, ask the learner the question in `state-lifecycle.md` section 3.3 once, never
+answer it for them, and record the answer with `apply` or `track`. Say nothing when the
+workspace is not a git repository.
 
 ### A resume with no `STATE.md`
 
 **When the instance is stamped and holds neither `STATE.md` nor `STATE.template.md`, it is
-an instance without progress**: a clone, or a second learner. Run the `instance_git.py`
-step above first, then follow `state-lifecycle.md` section 7.1 before the first task. It
+an instance without progress**: the learner chose local and opened another checkout, never
+committed `STATE.md`, or deleted it. Run the `status` step above first, then follow `state-lifecycle.md` section 7.1 before the first task. It
 asks the learner one question, start from the first lesson or say where they are, and
 never guesses a position. An instance that still holds `STATE.template.md` is a
 materialization to finish instead (`state-lifecycle.md` section 3).
@@ -655,7 +654,7 @@ A requested lesson is an ordinary generated lesson in every other respect: the s
 structure, the same provenance frontmatter, the same completion conditions, the same
 placement by `after:`. Record in `reason:` that the learner asked for it, and the concept
 they asked about, in your words: never a quote of the learner or a personal detail, because
-a generated lesson is committed course material (`state-lifecycle.md` sections 3.3 and 8.2).
+the repository may be pushed to a public remote (`state-lifecycle.md` sections 3.3 and 8.2).
 
 **The request usually arrives part-way through a lesson**, because that is when the
 learner notices what they are missing. Take the detour from where they are and send them

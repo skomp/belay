@@ -261,8 +261,8 @@ starting, a warning never does, and an indeterminate run is not a pass
 (`references/runner-protocol.md` section 13).
 `scripts/plan_update.py` runs only when the learner asks to update the course, and writes
 nothing. `scripts/evidence.py` compacts the learning record when a lesson completes.
-`scripts/instance_git.py` sets what git sees at materialization, once per resume, and when
-the learner asks to commit their progress (`references/state-lifecycle.md` section 3.3).
+`scripts/instance_git.py` records the learner's answer to where their progress is kept,
+asked once (`references/state-lifecycle.md` section 3.3).
 
 **No script here ever runs a bundle's validator.** A `command` validator is an argument
 list that *you* run, through your own host, where your host's permission prompt sees it.
@@ -282,8 +282,8 @@ that a course is safe.
   (`references/state-lifecycle.md` sections 8.3 and 9.3).
 - **The instance directory holds `STATE.template.md`** — materialization did not finish.
   Load `references/state-lifecycle.md` and complete it before teaching.
-- **A stamped instance has neither `STATE.md` nor `STATE.template.md`** — a clone or a
-  second learner. Never guess a position: `references/state-lifecycle.md` section 7.1.
+- **A stamped instance has neither `STATE.md` nor `STATE.template.md`** — the learner's
+  progress is not in this checkout. Never guess a position: `references/state-lifecycle.md` section 7.1.
 - **A learner-owned file changed in a way you cannot account for** — say so and ask. Do
   not revert it, stash it, or discard it. It is almost certainly the learner working.
 - **A bundle `source.type` the runner does not implement** (`git`, `archive`) — fail

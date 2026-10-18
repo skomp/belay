@@ -155,9 +155,9 @@ def test_apply_appends(tmp: Path) -> None:
     record(again.returncode == 0 and again.stdout.startswith("unchanged:"),
            "a second apply says unchanged", again.stdout)
     record(exclude.read_bytes() == after, "a second apply adds no duplicate")
-    resume = run("apply", "--if-undecided", str(ws))
-    record(exclude.read_bytes() == after and resume.stdout.startswith("unchanged:"),
-           "the resume run after apply changes nothing", resume.stdout)
+    status = run("status", str(ws))
+    record("progress:     local" in status.stdout and exclude.read_bytes() == after,
+           "after apply, status says local and changes nothing", status.stdout)
 
 
 def test_track_removes_only_belay(tmp: Path) -> None:
@@ -187,10 +187,10 @@ def test_track_removes_only_belay(tmp: Path) -> None:
     record(all(p in seen for p in LOCAL), "after track, STATE.md shows again", repr(seen))
     record(nothing_staged(ws), "track stages nothing")
 
-    resume = run("apply", "--if-undecided", str(ws))
-    record(resume.returncode == 0 and exclude.read_bytes() == after,
-           "the resume run does not undo track", resume.stdout)
-    record(resume.stdout.startswith("unchanged:"), "and says why", resume.stdout)
+    status = run("status", str(ws))
+    record(status.returncode == 0 and exclude.read_bytes() == after
+           and "progress:     remote" in status.stdout,
+           "status reads the recorded choice as remote and changes nothing", status.stdout)
 
     again = run("track", str(ws))
     record(exclude.read_bytes() == after and again.stdout.startswith("unchanged:"),
@@ -254,7 +254,7 @@ def test_not_git(tmp: Path) -> None:
     ws = tmp / "plain"
     materialize(ws)
     before = sorted(p.relative_to(ws) for p in ws.rglob("*"))
-    for command in (["apply"], ["apply", "--if-undecided"], ["track"], ["status"]):
+    for command in (["apply"], ["track"], ["status"]):
         result = run(*command, str(ws))
         record(result.returncode == 0, f"{' '.join(command)}: exit 0", result.stderr)
         lines = result.stdout.strip().splitlines()
@@ -318,20 +318,44 @@ def test_already_committed(tmp: Path) -> None:
     materialize(ws)
     git(ws, "add", "tutorial/STATE.md")
     git(ws, "commit", "-q", "-m", "learner commits progress")
-    exclude = exclude_of(ws)
-    before = exclude.read_bytes() if exclude.exists() else b""
-    resume = run("apply", "--if-undecided", str(ws))
-    record(resume.stdout.startswith("recorded:"),
-           "the resume run reads a committed STATE.md as a choice to track", resume.stdout)
-    data = exclude.read_bytes()
-    record(data.startswith(before) and b"is tracked" in data and b"personal course" not in data,
-           "it records the marker, not the block", repr(data))
+    status = run("status", str(ws))
+    record("progress:     undecided" in status.stdout
+           and "tutorial/STATE.md: committed" in status.stdout,
+           "a committed STATE.md is not a recorded choice: status says undecided",
+           status.stdout)
     explicit = run("apply", str(ws))
     record("note: tutorial/STATE.md is already committed" in explicit.stdout,
            "an explicit apply says an exclude cannot hide a tracked file", explicit.stdout)
     record(git(ws, "ls-files", "tutorial/STATE.md").stdout.strip() == "tutorial/STATE.md",
            "and does not untrack it")
     record(nothing_staged(ws), "nothing is staged")
+
+
+def test_track_records_choice_without_block(tmp: Path) -> None:
+    print("remote is recorded though no block was ever applied")
+    ws = new_repo(tmp / "remote")
+    materialize(ws)
+    exclude = exclude_of(ws)
+    if exclude.exists():
+        exclude.unlink()
+    before = run("status", str(ws)).stdout
+    record("progress:     undecided" in before, "a fresh instance is undecided", before)
+    result = run("track", str(ws))
+    record(result.returncode == 0 and result.stdout.startswith("tracked:"),
+           "track on an undecided instance succeeds", result.stdout + result.stderr)
+    data = exclude.read_bytes()
+    record(b"is tracked" in data and b"personal course" not in data,
+           "it appends the marker and no block", repr(data))
+    after = run("status", str(ws)).stdout
+    record("progress:     remote" in after,
+           "status then reports the choice, so the tutor does not ask again", after)
+    seen = porcelain(ws)
+    record(all(p in seen for p in LOCAL), "STATE.md and EVENTS.jsonl show in git status", repr(seen))
+    record(nothing_staged(ws), "nothing is staged")
+    run("apply", str(ws))
+    switched = run("status", str(ws)).stdout
+    record("progress:     local" in switched and b"is tracked" not in exclude.read_bytes(),
+           "a later apply switches to local and removes the marker", switched)
 
 
 def test_edited_block(tmp: Path) -> None:
@@ -362,7 +386,7 @@ def test_status(tmp: Path) -> None:
            "after apply: local, and STATE.md ignored", out)
     run("track", str(ws))
     out = run("status", str(ws)).stdout
-    record("progress:     tracked" in out, "after track: tracked", out)
+    record("progress:     remote" in out, "after track: remote", out)
 
 
 def test_documents() -> None:
@@ -372,12 +396,12 @@ def test_documents() -> None:
     lifecycle = (SKILL / "references" / "state-lifecycle.md").read_text(encoding="utf-8")
     protocol = (SKILL / "references" / "runner-protocol.md").read_text(encoding="utf-8")
     readme = (REPO / "README.md").read_text(encoding="utf-8")
-    record("scripts/instance_git.py apply" in lifecycle,
-           "state-lifecycle.md tells materialization to run apply")
-    record("instance_git.py apply --if-undecided" in protocol,
-           "runner-protocol.md tells a resume to run the undecided apply")
-    record("info/exclude" in readme and "instance_git.py track" in readme,
-           "README.md names the mechanism and the opt-in")
+    record("scripts/instance_git.py apply" in lifecycle and "scripts/instance_git.py track" in lifecycle,
+           "state-lifecycle.md maps both answers to a command")
+    record("instance_git.py status" in protocol and "--if-undecided" not in protocol + lifecycle,
+           "runner-protocol.md tells a resume to read status, and the flag is gone")
+    record("info/exclude" in readme and "remote" in readme and "local" in readme,
+           "README.md names the two choices and the mechanism")
     record("belay#35's question" not in lifecycle,
            "the provisional answer in section 12 is gone")
     source = SCRIPT.read_text(encoding="utf-8")
@@ -400,6 +424,7 @@ def main() -> int:
             test_worktree,
             test_subdirectory_workspace,
             test_already_committed,
+            test_track_records_choice_without_block,
             test_edited_block,
             test_status,
         ):

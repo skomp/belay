@@ -1103,9 +1103,9 @@ def instance_without_progress(entries: Any, manifest: Any) -> bool:
 
     Three facts, all required: the manifest carries the `instance:` stamp,
     and the directory holds neither STATE.md nor STATE.template.md. That is
-    what a clone sees when STATE.md stays in one checkout's exclude file
-    (section 3.3, belay#35), and what a second learner sees in a shared
-    repository. It is still a check 7 FINDING, because a course does not
+    what a learner sees who chose local progress (section 3.3, belay#35)
+    and opened another checkout, or who never committed or deleted STATE.md.
+    It is still a check 7 FINDING, because a course does not
     start without STATE.md; the finding differs only in naming the case and
     the procedure that repairs it (belay#70).
 
@@ -1157,8 +1157,9 @@ def check_state_files(root: Path, mode: str, manifest: Any, report: Report) -> N
                 "STATE.md",
                 "this is an instance without progress: tutorial.yaml carries "
                 "the instance stamp and there is neither STATE.md nor "
-                "STATE.template.md. A clone of a repository that keeps "
-                "progress local, or a second learner, sees exactly this. The "
+                "STATE.template.md. Either the learner chose local progress "
+                "and opened another checkout, or never committed STATE.md, "
+                "or deleted it. The "
                 "course material is intact; do not materialize it again and "
                 "do not guess a position. Follow "
                 f"{NO_PROGRESS_PROCEDURE}, which asks the learner where they "

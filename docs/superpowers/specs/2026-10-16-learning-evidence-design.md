@@ -1,7 +1,7 @@
 # The learning-evidence record — Design
 
 **Date:** 2026-10-16
-**Last amended:** 2026-10-16
+**Last amended:** 2026-10-18
 **Status:** implemented — `state-lifecycle.md` §12 (format), `runner-protocol.md` §16 (when
 to write and read), `scripts/evidence.py`, validator check 33, `tests/test_evidence.py`
 **Issue:** belay#34
@@ -106,8 +106,9 @@ paid for by compressing a catalogue passage `catalogue-format.md` §6 and §7 al
 
 ### 2.7 Version control
 
-belay#35's question, which also covers `STATE.md`. Provisional answer: the learner may
-commit the record, since it holds no content.
+Decided in belay#35 (2026-10-18; `state-lifecycle.md` section 3.3): `EVENTS.jsonl` follows
+`STATE.md`, and the learner chooses once whether both are committed and pushed or stay
+local.
 
 ## 3. Where this departs from the brief it was built to
 

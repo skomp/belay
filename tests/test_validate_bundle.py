@@ -8301,7 +8301,7 @@ def test_instance_without_progress_agrees_with_the_procedure() -> None:
     """belay#70: the validator's verdict on an instance without progress.
 
     The case is a stamped instance with neither STATE.md nor
-    STATE.template.md - a clone, or a second learner. state-lifecycle.md
+    STATE.template.md - progress that is not in this checkout. state-lifecycle.md
     section 7.1 says a course does not start on it, the tutor builds STATE.md
     from the section 2 shape, and then validates the instance. So the
     validator must: report it as a check 7 finding that points at the

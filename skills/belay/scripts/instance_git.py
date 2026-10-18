@@ -2,27 +2,27 @@
 """Which instance files git sees: the version-control policy (belay#35).
 
 Usage:
-    instance_git.py apply <workspace>                  keep the learner's progress
-                                                       out of git in this checkout
-    instance_git.py apply --if-undecided <workspace>   the same, only when no choice
-                                                       has been recorded yet (resume)
-    instance_git.py track <workspace>                  the learner opts in to
-                                                       committing their progress
-    instance_git.py status <workspace>                 say what is in force
+    instance_git.py apply <workspace>     the learner chose "local": keep their
+                                          progress out of git in this checkout
+    instance_git.py track <workspace>     the learner chose "remote": record that
+                                          their progress is committed and pushed
+    instance_git.py status <workspace>    say what is in force; "undecided" means the
+                                          tutor has not asked the learner yet
     instance_git.py --help
 
 The policy, references/state-lifecycle.md section 3.3:
 
-  * committed, shared course material: tutorial/tutorial.yaml, COURSE.md,
-    DESIGN.md, lessons/ and lessons.generated/. Nothing here touches them, so
-    they appear in `git status` as untracked files like any other new file.
-  * local by default, personal progress: tutorial/STATE.md and
-    tutorial/EVENTS.jsonl.
+  * course material, always ordinary committed content: tutorial/tutorial.yaml,
+    COURSE.md, DESIGN.md, lessons/ and lessons.generated/. Nothing here
+    touches them, so they appear in `git status` as untracked files like any
+    other new file.
+  * progress, the learner's choice, asked once: tutorial/STATE.md and
+    tutorial/EVENTS.jsonl. "remote" commits them with the learner's work and
+    pushes them. "local" keeps them on this machine.
 
-The rule goes in the checkout's own exclude file, never in .gitignore: a
-personal preference does not belong in a file every clone shares, and a team
-repository with several learners keeps each learner's progress in their own
-checkout. The file is found with `git rev-parse --git-path info/exclude`,
+A course repository belongs to one learner. The local rule goes in the
+checkout's own exclude file, never in .gitignore: it is a preference about one
+machine, and .gitignore reaches every clone. The file is found with `git rev-parse --git-path info/exclude`,
 which is right in a linked worktree and in a submodule, where `.git` is not a
 directory. In a linked worktree that file is the main repository's, so the
 rule covers every worktree of that repository.
@@ -30,10 +30,10 @@ rule covers every worktree of that repository.
 The exclude file is also where the learner's choice is recorded, because it
 is per checkout like the choice itself. `apply` appends a marked block;
 `track` removes exactly that block and appends one marker line saying the
-learner chose to track. `apply --if-undecided`, run once on resume, sees
-either one and changes nothing, so a resume never undoes `track`. A plain
-`apply` is the learner opting back out: it removes the marker line and
-appends the block.
+learner chose "remote", so `track` records a choice even when no block was
+ever applied. `status` reports "undecided" only when neither is there, and that
+is the one case in which the tutor asks. A later `apply` is the learner
+changing their mind: it removes the marker line and appends the block.
 
 Every edit is append-only, or removes exactly lines this script wrote. Lines
 written by anyone else are never rewritten or reordered. When the file's last
@@ -258,31 +258,20 @@ def _say_tracked(paths: list[str]) -> None:
               f"git rm --cached {p}")
 
 
-def cmd_apply(repo: Repo, if_undecided: bool) -> int:
+def cmd_apply(repo: Repo) -> int:
     data = read_exclude(repo)
     lines = data.splitlines(keepends=True)
     block = find_block(lines, repo)
     marker = find_marker(lines, repo)
     names = " and ".join(repo.local_paths())
+    committed = _already_tracked(repo)
 
     if block is not None:
-        if marker is not None and not if_undecided:
+        if marker is not None:
             data = b"".join(remove(lines, marker))
             write_exclude(repo, data)
         print(f"unchanged: {names} are already kept out of git in this checkout "
               f"({repo.exclude}).")
-        return EXIT_OK
-
-    if marker is not None and if_undecided:
-        print(f"unchanged: the learner chose to track {names} ({repo.exclude}).")
-        return EXIT_OK
-
-    committed = _already_tracked(repo)
-    if if_undecided and committed:
-        write_exclude(repo, append(data, [tracked_line(repo)]))
-        print(f"recorded: {', '.join(committed)} is already committed, so this "
-              f"checkout tracks its course progress. To keep it local instead: "
-              f"instance_git.py apply, then git rm --cached the file.")
         return EXIT_OK
 
     if marker is not None:
@@ -312,8 +301,8 @@ def cmd_track(repo: Repo) -> int:
         data = b"".join(lines)
     write_exclude(repo, data)
     ignored = [p for p in repo.local_paths() if is_ignored(repo, p)]
-    print(f"tracked: {names} now show in git status, to commit when you choose. "
-          f"To keep them local again: instance_git.py apply.")
+    print(f"tracked: {names} are the learner's to commit and push, and the choice is "
+          f"recorded. To keep them local instead: instance_git.py apply.")
     for p in ignored:
         print(f"note: {p} is still ignored by another rule: "
               f"git check-ignore -v {p} names it.")
@@ -327,7 +316,7 @@ def cmd_status(repo: Repo) -> int:
     if block is not None:
         choice = "local (belay's block is in the exclude file)"
     elif marker is not None:
-        choice = "tracked (the learner chose to commit their progress)"
+        choice = "remote (the learner chose to commit and push their progress)"
     else:
         choice = "undecided (no belay block and no recorded choice)"
     print(f"exclude file: {repo.exclude}")
@@ -348,17 +337,14 @@ def cmd_status(repo: Repo) -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="instance_git.py",
-        description="Keep a Belay learner's personal progress (tutorial/STATE.md, "
-        "tutorial/EVENTS.jsonl) out of git in this checkout, or let the learner "
-        "track it. Writes only the checkout's info/exclude; never stages or commits.",
+        description="Record how a Belay learner's progress (tutorial/STATE.md, "
+        "tutorial/EVENTS.jsonl) is kept: local, out of git in this checkout, or "
+        "remote, committed and pushed by the learner. Writes only the checkout's "
+        "info/exclude; never stages, commits or pushes.",
     )
     parser.add_argument("command", choices=("apply", "track", "status"))
     parser.add_argument("workspace", help="the workspace root, the directory holding tutorial/")
-    parser.add_argument("--if-undecided", action="store_true",
-                        help="apply only when no choice is recorded yet (the resume run)")
     args = parser.parse_args(argv)
-    if args.if_undecided and args.command != "apply":
-        parser.error("--if-undecided goes with apply")
     workspace = Path(args.workspace).resolve()
     if not workspace.is_dir():
         print(f"error: {workspace} is not a directory", file=sys.stderr)
@@ -371,7 +357,7 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_OK
     try:
         if args.command == "apply":
-            return cmd_apply(repo, args.if_undecided)
+            return cmd_apply(repo)
         if args.command == "track":
             return cmd_track(repo)
         return cmd_status(repo)
