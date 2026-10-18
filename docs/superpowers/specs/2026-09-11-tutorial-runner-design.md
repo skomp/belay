@@ -1618,6 +1618,44 @@ normative.
   session start; the tutor *uses* a title in progress reports and a description or
   objectives only on request (`runner-protocol.md` section 17).
 
+## 15h. No output style ships with the plugin
+
+Decided 2026-10-16, for belay#30. Evaluated, and refused for now.
+
+- **Decision.** Belay ships no Claude Code output style, forced or opt-in.
+  `skills/belay/SKILL.md` stays the single authority for the teaching contract on every
+  host.
+- **What was measured.** A spike on 2026-09-13 (Claude Code 2.1.259, `claude -p` with
+  `--plugin-dir` and `--settings '{"outputStyle":...}'`; the branch is gone and the issue
+  comment is the record) established four facts. A custom style changes behaviour: asked
+  for a function, the default wrote it and the style withheld it and taught. A style is
+  ambient, in force with no skill invoked. A plugin can ship one in `output-styles/`. And
+  `force-for-plugin: true` applies it automatically with no setting at all.
+- **Why not forced.** `force-for-plugin` applies whenever the plugin is *loaded*, not when
+  a course is *running*. The spike showed the forced style refusing an ordinary chore, a
+  typo fix in a `pkg.json`, and leaving the file broken. A boundary clause repaired it, but
+  a skill never needed one because a skill is not loaded during a chore; every sentence
+  moved into a style must survive work that has nothing to do with learning.
+- **Why not opt-in.** A style the learner selects in `/config` is one more thing to switch
+  on at the start of a course and off at the end, per course.
+- **Why not either.** Every option that ships a style puts the teaching contract in two
+  places for two hosts, because Codex has no output styles. This repository has a record of
+  that drifting (see `CLAUDE.md`, the first rule). Of the spike's three options, generated
+  from `SKILL.md` at release (option 1) is the only acceptable form; a style that only
+  reinforces (option 2) can drift silently; a style authoritative for Claude Code with a
+  Codex copy in `SKILL.md` (option 3) is refused.
+- **Revisit only on a measurement.** Reopen if an experiment shows a style plus `SKILL.md`,
+  both live in a real course, holds the contract measurably better than `SKILL.md` alone.
+  That is the spike's untested question (the docs say nothing about precedence between a
+  style and a skill), and it is runnable without a release with `claude -p --plugin-dir`
+  and `--settings`. If adopted, the style is **generated from `SKILL.md` at release**, never
+  hand-written.
+- **The trial file.** `~/.claude/output-styles/tutor.md` exists on the maintainer's machine.
+  It is the user's, it is inert until selected in `/config`, and removing it is the user's
+  choice. Nothing in this repository reads or depends on it.
+
+---
+
 ---
 
 ## 16. Deferred: telemetry feedback
