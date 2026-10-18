@@ -1047,10 +1047,10 @@ belay/
 ├── skills/belay/
 │   ├── SKILL.md
 │   ├── references/{bundle-format,catalogue-format,runner-protocol,state-lifecycle}.md
-│   ├── scripts/{validate_bundle.py,catalogs.py,plan_update.py,yamlite.py}
+│   ├── scripts/{validate_bundle.py,catalogs.py,plan_update.py,evidence.py,yamlite.py}
 │   ├── catalog/builtin.yaml
 │   └── examples/rust-cli-basics/
-├── tests/{fixtures/,test_validate_bundle.py,test_catalogs.py,test_plan_update.py}
+├── tests/{fixtures/,test_validate_bundle.py,test_catalogs.py,test_plan_update.py,test_evidence.py}
 ├── docs/superpowers/specs/
 └── README.md
 ```
@@ -1544,10 +1544,20 @@ into a frontmatter field**, and do not add frontmatter that quotes learner code.
 `reason` needs to stay human-readable, that is fine — it simply belongs to the content
 layer and is not transmitted by default.
 
-Other signals worth emitting eventually, all already present or derivable in `STATE.md`:
-which lesson a learner stalls on, repeated validation failures per lesson, elapsed time
-per lesson, and the lesson at which a course is abandoned. Abandonment is probably the
-single most valuable number and nothing currently records it.
+Other signals worth emitting eventually: which lesson a learner stalls on, repeated
+validation failures per lesson, elapsed time per lesson, and the lesson at which a course
+is abandoned. Abandonment is probably the single most valuable number.
+
+**Amended 2026-10-16 (belay#34).** These were first described as "already present or
+derivable in `STATE.md`". They were not: a repeated failure left no trace once the task
+passed, and an abandoned course looked like one in progress. They are now collected
+locally, in the learning record `tutorial/EVENTS.jsonl` (`state-lifecycle.md` section 12;
+design in `2026-10-16-learning-evidence-design.md`). It holds only this table's signal
+layer — concept ids, validator names, lesson paths, enumerated outcomes, counts and dates,
+never learner content — and it is evidence only: `STATE.md` stays the authority for
+progress. Abandonment is still not an event; it is derived from the last event's date and
+`STATE.md`. Transmitting any of it stays unbuilt, and the open questions below are
+unchanged.
 
 Open questions, none urgent: consent and its revocation; whether an instance carries a
 stable anonymous id or is unlinkable between reports; whether a self-hosted receiver is
@@ -1594,15 +1604,16 @@ real files. One repository cannot satisfy both without duplication.
 | `belay-bundles` repository | **done** — holds five bundles and its own `catalog.yaml` |
 | `rust-automaton-db` bundle | **done** — imported, corrected, verified |
 | `automaton-db/tutorial/` instance + `STATE.md` | **done** — uncommitted |
-| Validator (`skills/belay/scripts/validate_bundle.py`) | **done** — 32 bundle checks + 7 catalogue checks |
-| Validator test suite | **done** — 829 assertions on a clean checkout, the same on any machine; every check proven firing or warning. `BELAY_SWEEP_SIBLING_REPOS=1` adds the published bundles, counted separately (belay#37) |
+| Validator (`skills/belay/scripts/validate_bundle.py`) | **done** — 33 bundle checks + 7 catalogue checks |
+| Validator test suite | **done** — 846 assertions on a clean checkout, the same on any machine; every check proven firing or warning. `BELAY_SWEEP_SIBLING_REPOS=1` adds the published bundles, counted separately (belay#37) |
 | Optional lessons (`optional_lessons`, `failure_modes`) | **done** — 2026-09-12, §6; checks 18-21 |
 | First-load banner + `teaching_method` | **done** — 2026-09-13, released in 0.6.0; `state-lifecycle.md` §3 step 7, check 27; belay#23 |
 | Offer / defer / re-offer behaviour | **untested** — no harness exercises it; belay#22 |
 | Knowledge assessments (`assesses`, `## Assessments`, `kind: practice`) | **done** — 2026-10-16, belay#33; `runner-protocol.md` §15, `state-lifecycle.md` §11, checks 31-32. The question-and-answer loop is untested, as above |
+| Learning-evidence record (`tutorial/EVENTS.jsonl`, `skills/belay/scripts/evidence.py`) | **done** — 2026-10-16, belay#34; `state-lifecycle.md` §12, `runner-protocol.md` §16, check 33 (warning only); `tests/test_evidence.py`, 65 assertions. Whether the tutor writes the events in conversation is untested, as above |
 | Multi-catalogue support (`skills/belay/scripts/catalogs.py`) | **done** — 2026-09-12, §7 |
 | Catalogue test suite (`tests/test_catalogs.py`) | **done** — 338 assertions; every failure kind proven firing |
-| Instance update (`skills/belay/scripts/plan_update.py`, `state-lifecycle.md` §3.2) | **done** — 2026-10-14, belay#50, §15c; `tests/test_plan_update.py`, 63 assertions |
+| Instance update (`skills/belay/scripts/plan_update.py`, `state-lifecycle.md` §3.2) | **done** — 2026-10-14, belay#50, §15c; `tests/test_plan_update.py`, 67 assertions |
 | Shared YAML reader (`skills/belay/scripts/yamlite.py`) | **done** — the only reader; the PyYAML preference was removed 2026-09-13, belay#29 |
 | `catalog.yaml` inside `belay-bundles` | **done** — 2026-09-12, §15 item 6; generated by `belay-authoring`'s `catalog.py` |
 | `SKILL.md` (the runner control plane) | **done** |

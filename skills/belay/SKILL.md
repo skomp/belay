@@ -23,8 +23,8 @@ Four exceptions, and no others:
 
 - the instance's `ownership_policy` is `on-request` and the learner explicitly asks, or
   it is `unrestricted`;
-- the path is tutor-owned (`tutorial/STATE.md`, `tutorial/DESIGN.md`, and whatever else
-  `tutor_owned` lists);
+- the path is tutor-owned (`tutorial/STATE.md`, `tutorial/DESIGN.md`,
+  `tutorial/EVENTS.jsonl`, and whatever else `tutor_owned` lists);
 - you are **creating** a file the bundle declares in `supplies`, which is placement rather
   than the learner's work. Create-only, declared paths only, never a file that already
   exists, and never something to ask about — not even under `on-request`;
@@ -90,10 +90,8 @@ may configure many catalogues, and any of them may live in a Git repository, so 
 `scripts/catalogs.py discover` once at the start of a discovery request and act on what
 it prints. It refreshes, merges by first-match-wins precedence, and reports each source.
 
-Pass on what it reports about its sources: which catalogue supplied an entry and which
-were shadowed, which were served from cache and how stale, and which failed and by kind.
-One failed catalogue never fails discovery, and stale results are never presented as
-current — `references/catalogue-format.md` sections 6 and 7.
+Pass on what it reports about its sources, as `references/catalogue-format.md` sections 6
+and 7 require.
 
 Present what you find as a **selection, not as prose**: options the learner picks from,
 narrowed one facet at a time when there are too many, never narrowed to zero, always with
@@ -252,10 +250,10 @@ not before.
 |---|---|
 | `references/catalogue-format.md` | no active instance was found and you must find a tutorial to offer; the learner asks what tutorials are available; the learner wants to add a catalogue or register a course; a catalogue failed to refresh |
 | `references/state-lifecycle.md` | materializing a new instance; the first time this session you are about to change `STATE.md`; a task completes; a lesson completes; an offer of an optional lesson is accepted or deferred; the learner acknowledges the assumed-concept review; you need to advance `active_lesson`; an assessment ends or is interrupted; you are about to write a generated lesson; the learner asks to update the course (section 3.2) |
-| `references/runner-protocol.md` | before the first task of a teaching session; when validating; when completion conditions look met; when unsure whether an edit is yours to make; when considering whether to write a lesson; when deciding whether to offer or re-offer an optional lesson; when the active lesson declares `assesses`, or the learner asks to be quizzed; when a course declares `assumes`; when a course declares `setup_validators`, or a setup check fails, or the learner asks whether a course is safe to run; when a course finishes or the learner asks what comes after it |
+| `references/runner-protocol.md` | before the first task of a teaching session; when validating; when completion conditions look met; when unsure whether an edit is yours to make; when considering whether to write a lesson; when deciding whether to offer or re-offer an optional lesson; when the active lesson declares `assesses`, or the learner asks to be quizzed; when a course declares `assumes`; when a course declares `setup_validators`, or a setup check fails, or the learner asks whether a course is safe to run; when a course finishes or the learner asks what comes after it; when the learner asks how they have done |
 | `references/bundle-format.md` | authoring, importing or repairing a **bundle**, including promoting a generated lesson into one. Not needed to teach. |
 
-Three scripts, and a learner's session runs them — each at one moment, never per turn.
+Four scripts, and a learner's session runs them — each at one moment, never per turn.
 `scripts/catalogs.py` belongs to discovery; a resume never runs it.
 `scripts/validate_bundle.py --instance <workspace>/tutorial` checks the instance
 materialization has just created, before the first task: a finding stops the course from
@@ -263,7 +261,7 @@ starting, a warning never does, and an indeterminate run is not a pass.
 `references/state-lifecycle.md` section 3.1 has the step, `references/runner-protocol.md`
 section 13 the outcomes, the report, and what a run without `--instance` does.
 `scripts/plan_update.py` runs only when the learner asks to update the course, and writes
-nothing.
+nothing. `scripts/evidence.py` compacts the learning record when a lesson completes.
 
 **No script here ever runs a bundle's validator.** A `command` validator is an argument
 list that *you* run, through your own host, where your host's permission prompt sees it.

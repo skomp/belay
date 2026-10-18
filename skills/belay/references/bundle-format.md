@@ -306,7 +306,8 @@ normal contents. **Do not add `tutorial/lessons/**`**: lesson copies are read-on
 instance, because all progress belongs in `STATE.md` and a lesson carrying progress is
 rejected by the same rule as section 3. **Do not add `tutorial/lessons.generated/**`**
 either: that directory belongs to an instance you cannot see from here, and the runner
-treats it as tutor-owned without being told (section 8).
+treats it as tutor-owned without being told (section 8). The same holds for
+`tutorial/EVENTS.jsonl`, the learner's evidence record (`state-lifecycle.md` section 12).
 
 **One narrow exemption exists, and it exists only for declared supplies.** Under
 `tutor-must-not-edit-learner-owned` the tutor MAY **create** a file a `supplies` entry

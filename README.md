@@ -249,6 +249,7 @@ my-project/
     ├── COURSE.md
     ├── DESIGN.md
     ├── STATE.md         ← your progress
+    ├── EVENTS.jsonl     how you got there: attempts, hints, answers (evidence only)
     ├── lessons/
     └── lessons.generated/   detours, if any were written
 ```
@@ -311,7 +312,7 @@ python3 skills/belay/scripts/validate_bundle.py --instance path/to/project/tutor
 python3 skills/belay/scripts/validate_bundle.py --catalog path/to/catalog.yaml
 ```
 
-32 bundle checks and 7 catalogue checks. Your run and the runner's run are the same checks
+33 bundle checks and 7 catalogue checks. Your run and the runner's run are the same checks
 over the same files, which is the point: a bundle that passes here starts cleanly there. It
 checks structure — that references resolve, that no progress leaked into the course, that
 every lesson is reachable. It says nothing about whether the course is any good.
@@ -341,6 +342,8 @@ and per-source failure reporting. Materialising a course into a workspace and va
 before teaching. The teaching loop, ownership enforcement, validation outcomes and progress
 recording. Authored optional lessons and failure modes. Generated detours with provenance.
 Knowledge assessments, authored or asked for, with practice and retakes after a weak result.
+A learning record beside `STATE.md` — attempts, check failures, hints and answer outcomes,
+as identifiers and counts, never your code or your words — that you may read or delete.
 Assumed-concept review, and follow-up recommendations at the end of a course. Updating a
 course you have started to its newer version, when you ask for it: a plan you review, which
 keeps your progress, your `DESIGN.md` decisions and your generated lessons.
@@ -399,12 +402,13 @@ One skill body serves both hosts.
 
 ### Tests
 
-No pytest; three plain scripts, run from a checkout of this repository.
+No pytest; four plain scripts, run from a checkout of this repository.
 
 ```
-python3 tests/test_validate_bundle.py     # 829 assertions
+python3 tests/test_validate_bundle.py     # 846 assertions
 python3 tests/test_catalogs.py            # 338 assertions
-python3 tests/test_plan_update.py         # 63 assertions
+python3 tests/test_plan_update.py         # 67 assertions
+python3 tests/test_evidence.py            # 65 assertions
 ```
 
 **Those numbers are properties of this commit, not of your machine.** A clean
@@ -424,15 +428,15 @@ BELAY_SWEEP_SIBLING_REPOS=1 python3 tests/test_validate_bundle.py
 Those are separate checkouts at their own revisions, so what they contribute is
 reported on its own line and never added to the total above — `and 24 more against
 sibling repositories outside this commit` on the machine this was measured on. The
-headline stays 829 either way. Run it before publishing a bundle; a plain `python3
+headline stays 846 either way. Run it before publishing a bundle; a plain `python3
 tests/test_validate_bundle.py` is the check that a commit of *this* repository is
 sound.
 
-Every validator check and every catalogue failure kind is proven firing — or, for the two
+Every validator check and every catalogue failure kind is proven firing — or, for the three
 that only ever warn, proven warning — because a check that cannot report a positive is
 worse than no check.
 
-**Both suites pass whether or not PyYAML is installed.** The scripts parse YAML with the
+**Every suite passes whether or not PyYAML is installed.** The scripts parse YAML with the
 built-in restricted reader in `yamlite.py` and never use PyYAML, even where it is
 importable, so the verdict a bundle gets is a property of the bundle and not of the
 machine. `test_yaml_reader_ignores_the_environment` asserts that, by parsing an anchor, a

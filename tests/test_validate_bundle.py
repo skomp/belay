@@ -3461,6 +3461,68 @@ def m_assessment_optional_lesson(root: Path) -> None:
     )
 
 
+# -- check 33: the learning record, EVENTS.jsonl (warning only)
+
+# A record of two well-formed events. Every check-33 mutator starts from it,
+# so each case differs from the quiet one by exactly the line it names.
+EVENTS_VALID = (
+    '{"seq":1,"date":"2026-09-11","lesson":"lessons/00-hello-args.md",'
+    '"type":"lesson_started"}\n'
+    '{"seq":2,"date":"2026-09-11","lesson":"lessons/00-hello-args.md",'
+    '"type":"check","validator":"cargo-test","result":"fail"}\n'
+)
+
+
+def m_events_valid(root: Path) -> None:
+    (root / "EVENTS.jsonl").write_text(EVENTS_VALID)
+
+
+def m_events_empty(root: Path) -> None:
+    (root / "EVENTS.jsonl").write_text("")
+
+
+def m_events_truncated(root: Path) -> None:
+    """A write cut off part-way: the last line has no end and does not parse."""
+    (root / "EVENTS.jsonl").write_text(EVENTS_VALID + '{"seq":3,"date":"2026-09-1')
+
+
+def m_events_undeclared_field(root: Path) -> None:
+    """A field outside the declared set - here, the learner's code."""
+    (root / "EVENTS.jsonl").write_text(
+        EVENTS_VALID
+        + '{"seq":3,"date":"2026-09-11","lesson":"lessons/00-hello-args.md",'
+        '"type":"check","validator":"cargo-test","result":"pass",'
+        '"code":"fn main() {}"}\n'
+    )
+
+
+def m_events_free_text_concept(root: Path) -> None:
+    """A sentence where a concept id belongs is not a concept id."""
+    (root / "EVENTS.jsonl").write_text(
+        EVENTS_VALID
+        + '{"seq":3,"date":"2026-09-11","lesson":"lessons/00-hello-args.md",'
+        '"type":"answer","concept":"said args start at one",'
+        '"outcome":"misconception"}\n'
+    )
+
+
+def m_events_seq_repeats(root: Path) -> None:
+    (root / "EVENTS.jsonl").write_text(
+        EVENTS_VALID
+        + '{"seq":2,"date":"2026-09-12","lesson":"lessons/00-hello-args.md",'
+        '"type":"hint","rung":1}\n'
+    )
+
+
+def m_events_clock_time(root: Path) -> None:
+    """A date with a clock time is more identifying than the format allows."""
+    (root / "EVENTS.jsonl").write_text(
+        EVENTS_VALID
+        + '{"seq":3,"date":"2026-09-11T14:02:11","lesson":'
+        '"lessons/00-hello-args.md","type":"hint","rung":1}\n'
+    )
+
+
 # --------------------------------------------------------------------------
 # The case table
 # --------------------------------------------------------------------------
@@ -4389,6 +4451,26 @@ CASES: list[Case] = [
     Case("32: a scope that reads as a path and names no lesson", 32, "broker",
          "instance", m_assessment_scope_path_missing,
          "'lessons/03-replication.md'"),
+    # ---- check 33 (warning only: the record is evidence, never progress)
+    Case("33 (control): a well-formed learning record is quiet", 33, "cli",
+         "instance", m_events_valid, kind="silent"),
+    Case("33 (control): an empty learning record is quiet", 33, "cli",
+         "instance", m_events_empty, kind="silent"),
+    Case("33: a truncated last line warns, and the course still passes", 33,
+         "cli", "instance", m_events_truncated, "truncated write",
+         kind="warns", where="EVENTS.jsonl, line 3"),
+    Case("33: an undeclared field warns", 33, "cli", "instance",
+         m_events_undeclared_field, "undeclared field 'code'", kind="warns",
+         where="EVENTS.jsonl, line 3"),
+    Case("33: free text where a concept id belongs warns", 33, "cli",
+         "instance", m_events_free_text_concept, "is not a concept id",
+         kind="warns", where="EVENTS.jsonl, line 3"),
+    Case("33: a seq that does not increase warns", 33, "cli", "instance",
+         m_events_seq_repeats, "seq 2 does not follow seq 2", kind="warns",
+         where="EVENTS.jsonl, line 3"),
+    Case("33: a clock time in date warns", 33, "cli", "instance",
+         m_events_clock_time, "no clock time", kind="warns",
+         where="EVENTS.jsonl, line 3"),
 ]
 
 
@@ -8665,6 +8747,47 @@ def test_assessment_checks_status() -> None:
     )
 
 
+def test_learning_record_check_status() -> None:
+    """Check 33 is n/a without a record, instance-only, and warning-only."""
+    print("\nlearning record check reports n/a where there is no record:")
+    for name, path in ALL_BASELINES.items():
+        mode = "instance" if name in INSTANCE_BASELINES else "bundle"
+        report = vb.validate(path, mode)
+        status = report.status.get(33, ("missing", ""))[0]
+        expected = vb.NOT_APPLICABLE if mode == "instance" else "missing"
+        record(
+            status == expected,
+            f"{name}: check 33 is {'n/a' if mode == 'instance' else 'not run'} "
+            f"in {mode} mode with no EVENTS.jsonl",
+            f"status = {report.status.get(33)!r}",
+        )
+    record(
+        33 in vb.INSTANCE_ONLY and 33 in vb.WARNING_ONLY,
+        "check 33 runs in instance mode only, and only ever warns",
+        f"INSTANCE_ONLY = {vb.INSTANCE_ONLY}, WARNING_ONLY = {vb.WARNING_ONLY}",
+    )
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = fresh("cli", Path(tmpdir))
+        to_instance(root)
+        (root / "EVENTS.jsonl").write_text(
+            "".join(
+                f'{{"seq":{n},"date":"2026-09-11","lesson":'
+                f'"lessons/00-hello-args.md","type":"hint","rung":9}}\n'
+                for n in range(1, 21)
+            )
+        )
+        report = vb.validate(root, "instance")
+    warned = [w for w in report.warnings if w.check == 33]
+    record(
+        len(warned) == vb.LEARNING_RECORD_WARNINGS_SHOWN + 1
+        and "15 further problem(s)" in warned[-1].message
+        and report.exit_code() == 0,
+        "twenty bad lines give five named warnings and one count, and exit 0",
+        f"{len(warned)} warnings, exit {report.exit_code()}: "
+        f"{[w.message[:60] for w in warned]}",
+    )
+
+
 def test_the_total_is_reproducible_from_this_commit() -> None:
     """The reported total must not depend on what else the machine holds.
 
@@ -8788,6 +8911,7 @@ def main() -> int:
     test_no_real_bundle_ships_a_stamped_template()
     test_skipped_and_passed_are_distinguishable()
     test_assessment_checks_status()
+    test_learning_record_check_status()
     test_the_total_is_reproducible_from_this_commit()
     test_check_coverage()
 
