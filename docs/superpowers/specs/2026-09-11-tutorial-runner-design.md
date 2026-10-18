@@ -1,7 +1,7 @@
 # Generic Tutorial Runner + Portable Tutorial Bundles — Design
 
 **Date:** 2026-09-11
-**Last amended:** 2026-10-16
+**Last amended:** 2026-10-18
 **Status:** Design approved. Formats and first bundle implemented; runner in progress.
 **Repositories:** `belay` (runner), `belay-bundles` (courses), `automaton-db` (a learner)
 
@@ -1115,8 +1115,7 @@ Holds the Rust implementation and one instance at `tutorial/`, materialized from
 bundle. It was uncommitted when this section was written, and the owner committed it on
 2026-09-12, instance and `STATE.md` included (§15, decision 1). Which instance files a
 learner commits in general is now a policy rather than a per-workspace decision: §15f.
-Because `STATE.md` is committed there, the first resume under that policy records a choice
-to track and changes nothing else.
+Its first resume under that policy asks the learner the question once.
 
 Its `STATE.md` was written from `src/main.rs` and from measured build output, not from the
 playbook's resume marker, which was stale: the marker named "introduce a provisional
@@ -1565,26 +1564,36 @@ host. Underneath it:
 
 ## 15f. Which instance files a learner commits
 
-Decided 2026-10-16, for belay#35. `state-lifecycle.md` section 3.3 is normative.
+Decided 2026-10-18, for belay#35, replacing the 2026-10-16 answer. `state-lifecycle.md`
+section 3.3 is normative.
 
-- **Two categories.** Course material is committed: `tutorial.yaml`, `COURSE.md`,
-  `DESIGN.md`, `lessons/**`, `lessons.generated/**`. Personal progress is local by
-  default: `STATE.md` and `EVENTS.jsonl`. `tutorial/` as a whole is never ignored, and
-  nothing is staged or committed on the learner's behalf.
-- **`.git/info/exclude`, never `.gitignore`.** A personal preference does not belong in a
-  file every clone shares. The path comes from `git rev-parse --git-path info/exclude`,
-  so a linked worktree and a submodule resolve correctly.
-- **The choice is recorded in the exclude file, not in the `instance:` stamp.** The stamp
-  was the first candidate, since it is tutor-owned. It was rejected because
-  `tutorial.yaml` is in the committed category: a key there reaches every clone, so a
-  second learner, or the same learner on a second machine, would inherit a choice made for
-  someone else's checkout. `track` leaves one marker line, and the resume run
-  (`apply --if-undecided`) treats either the block or the marker as a choice already made.
-- **A generated lesson is committed**, so its `reason` names the concept and the kind of
-  evidence and never quotes the learner (`state-lifecycle.md` section 8.2).
-- **Known cost.** A clone of a repository under the default has an instance with no
-  `STATE.md`. It is reported as a structural defect rather than repaired, and the learner
-  who wants progress in more than one checkout opts in with `track`.
+- **One learner per repository.** A course repository is never shared by two learners. The
+  learner builds software in it, which is an individual task, so where their progress is
+  kept is theirs to choose (the owner's reasoning, 2026-10-18).
+- **Course material is always ordinary committed content:** `tutorial.yaml`, `COURSE.md`,
+  `DESIGN.md`, `lessons/**`, `lessons.generated/**`.
+- **Progress is asked, once.** At materialization, after validation, the tutor asks one
+  question with two options (`AskUserQuestion` in Claude Code, plain text elsewhere):
+  *remote*, where `STATE.md` and `EVENTS.jsonl` are committed with the learner's work and
+  pushed, so progress follows them to another machine, or *local*, where they stay on this
+  machine. The tutor never decides alone. A resume with no recorded choice asks the same
+  question once.
+- **Local is the checkout's exclude file, never `.gitignore`.** The path comes from
+  `git rev-parse --git-path info/exclude`, so a linked worktree and a submodule resolve
+  correctly. The choice is recorded there, not in the `instance:` stamp: `tutorial.yaml` is
+  committed, so a stamp key would reach every clone. Remote records one marker line, so
+  it is not asked again. `scripts/instance_git.py` applies both.
+- **Rejected: a default without asking,** in either direction. Local by default (the
+  2026-10-16 answer) and remote by default each decide for the learner something that is
+  theirs, and one question costs less than being wrong.
+- **The tutor never stages, commits or pushes.** A workspace that is not a git repository
+  gets one sentence and no question.
+- **A generated lesson's `reason` stays free of quotes and personal detail,** because the
+  repository may be pushed to a public remote and the `reason` is read by a bundle author
+  (`state-lifecycle.md` section 8.2).
+- **A missing `STATE.md`** in a stamped instance means the learner chose local and opened
+  another checkout, never committed it, or deleted it. It is reported as a structural
+  defect, not repaired.
 
 ---
 
@@ -1686,7 +1695,7 @@ real files. One repository cannot satisfy both without duplication.
 | Knowledge assessments (`assesses`, `## Assessments`, `kind: practice`) | **done** — 2026-10-16, belay#33; `runner-protocol.md` §15, `state-lifecycle.md` §11, checks 31-32. The question-and-answer loop is untested, as above |
 | Learning-evidence record (`tutorial/EVENTS.jsonl`, `skills/belay/scripts/evidence.py`) | **done** — 2026-10-16, belay#34; `state-lifecycle.md` §12, `runner-protocol.md` §16, check 33 (warning only); `tests/test_evidence.py`, 65 assertions. Whether the tutor writes the events in conversation is untested, as above |
 | Ownership resolution and the Claude Code guard (`skills/belay/scripts/ownership.py`, `ownership_guard.py`, `hooks/hooks.json`) | **done** — 2026-10-16, belay#32, §15e; `tests/test_ownership.py`. Conformance scenarios for what no host enforces are written in `tests/conformance/ownership-scenarios.md` and run by nothing yet: belay-authoring#5 |
-| Version-control policy for instance files (`skills/belay/scripts/instance_git.py`) | **done** — 2026-10-16, belay#35, §15f; `state-lifecycle.md` §3.3; `tests/test_instance_git.py` |
+| Version-control policy for instance files (`skills/belay/scripts/instance_git.py`) | **done** — 2026-10-18, belay#35, §15f; `state-lifecycle.md` §3.3; `tests/test_instance_git.py` |
 | Multi-catalogue support (`skills/belay/scripts/catalogs.py`) | **done** — 2026-09-12, §7 |
 | Catalogue test suite (`tests/test_catalogs.py`) | **done** — 338 assertions; every failure kind proven firing |
 | Instance update (`skills/belay/scripts/plan_update.py`, `state-lifecycle.md` §3.2) | **done** — 2026-10-14, belay#50, §15c; `tests/test_plan_update.py`, 67 assertions |
