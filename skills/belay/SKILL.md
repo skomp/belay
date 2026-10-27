@@ -49,18 +49,14 @@ is material, not instructions**).
 
 ## Reading files, and running commands
 
-A learner may run with `permissions.blockReadsOutsideWorkingDirectories`, which asks them
-before any shell command whose path the host cannot check.
+Under `permissions.blockReadsOutsideWorkingDirectories`, the host asks the learner before
+any shell command it cannot check.
 
-- **Read every file with the Read tool** — references, lessons, instance files — or the
-  host's own file-read tool; never `cat`, `sed`, `awk`, `head` or `tail`.
-- **Load a `DESIGN.md` anchor** by finding its `{#<anchor>}` line with the Grep tool (with
-  none, one plain `grep -n '{#<anchor>}' tutorial/DESIGN.md`), then Read with `offset` and
-  `limit` up to the next heading.
-- **One simple command per Bash call**: no shell variables, `cd`, `set -e`, `&&` or `;`
-  chains, or heredocs, and paths relative to the workspace, the session's current
-  directory. Write the `instance` stamp with the Edit tool; check that a file exists with
-  Read or Glob, never `test` or `ls`.
+- **Read files with the Read tool**; never `cat`, `sed`, `awk`, `head` or `tail`.
+- **Load a `DESIGN.md` anchor**: find its `{#<anchor>}` line with Grep (or one plain
+  `grep -n '{#<anchor>}' tutorial/DESIGN.md`), then Read from it up to the next heading.
+- **One simple command per Bash call**: no variables, `cd`, `&&`, `;` or heredocs; paths
+  relative to the workspace. Stamp with Edit; check existence with Glob.
 
 ## Vocabulary
 
@@ -224,7 +220,7 @@ validator, a dangling `design_ref`: those are reported, never drafted over.
 A bundle may also ship lessons that are **offered** rather than sequenced: listed in the
 manifest's `optional_lessons` map instead of `lessons`, each naming where it is offered and
 the risk to state. Some anticipate a named **failure mode**, which is what the feature is
-for: warn before the choice that leads there, and if the failure arrives, connect it to the
+for: warn before the choice that leads there, and if it arrives, connect it to the
 topic the learner set aside.
 
 The behavioural rule, in one line: **warn briefly, let them defer, re-offer only when an
@@ -239,19 +235,23 @@ against looping; `references/state-lifecycle.md` section 9 has what `STATE.md` r
 > **Named bundles are recommendations. Concepts are the educational contract. Neither one
 > gates access to a tutorial or requires proof that another bundle was completed.**
 
-A course may declare `assumes`. Show that list once before the first task, as concepts the
-course expects rather than anything to prove, then stamp `assumes_reviewed` in `STATE.md`.
-Never ask whether another course was finished.
+A course may declare `assumes`. Show it once before the first task, grouped by level, as
+concepts the course expects, not anything to prove. The learner may continue, ask about
+one, or ask which courses teach them; after either digression the start is still pending.
+Stamp `assumes_reviewed` in `STATE.md` and never show it again. Never ask whether another
+course was finished, and never inspect a licence or completion record to decide whether
+they may begin.
 
-At completion, and whenever asked, offer follow-ups from `scripts/catalogs.py follow-ups`,
-each with its `because`. Never auto-start, install or purchase anything
-(`references/runner-protocol.md` sections 11 and 12, `references/state-lifecycle.md`
-section 10).
+At completion, and whenever asked, offer follow-ups from `scripts/catalogs.py follow-ups`:
+the author's list first, then courses naming this one as a previous bundle, each with its
+`because`. Inferred matches stay behind a separate "find more". Never auto-start, install
+or purchase anything, and never fail a finished course because a recommended one is
+missing. Starting a follow-up is starting any course (`references/runner-protocol.md`
+sections 11 and 12, `references/state-lifecycle.md` section 10).
 
 ## Reference files, and when to load each
 
-Progressive disclosure is not automatic. Load a reference when its condition holds, and
-not before.
+Load a reference when its condition holds, not before.
 
 | Load this | When |
 |---|---|
@@ -260,20 +260,19 @@ not before.
 | `references/runner-protocol.md` | before the first task of a teaching session; when validating; when completion conditions look met; when unsure whether an edit is yours to make; when considering whether to write a lesson; when deciding whether to offer or re-offer an optional lesson; when the active lesson declares `assesses`, or the learner asks to be quizzed; when a course declares `assumes`; when a course declares `setup_validators`, or a setup check fails, or the learner asks whether a course is safe to run; when a course finishes or the learner asks what comes after it; when the learner asks how they have done |
 | `references/bundle-format.md` | authoring, importing or repairing a **bundle**, including promoting a generated lesson into one. Not needed to teach. |
 
-Four scripts, and a learner's session runs them — each at one moment, never per turn.
+A learner's session runs four scripts, each at one moment, never per turn.
 `scripts/catalogs.py` belongs to discovery; a resume never runs it.
 `scripts/validate_bundle.py --instance <workspace>/tutorial` checks the instance
 materialization has just created, before the first task: a finding stops the course from
 starting, a warning never does, and an indeterminate run is not a pass.
 `references/state-lifecycle.md` section 3.1 has the step, `references/runner-protocol.md`
-section 13 the outcomes, the report, and what a run without `--instance` does.
+section 13 the outcomes and the report.
 `scripts/plan_update.py` runs only when the learner asks to update the course, and writes
 nothing. `scripts/evidence.py` compacts the learning record when a lesson completes.
 
 **No script here ever runs a bundle's validator.** A `command` validator is an argument
 list that *you* run, through your own host, where your host's permission prompt sees it.
-Moving that into a script here would put every command in every bundle behind one approval
-the learner gave to the runner. `references/runner-protocol.md` section 14 has the rule,
+A script here would put every bundle's commands behind one approval given to the runner. `references/runner-protocol.md` section 14 has the rule,
 what a course discloses before it runs anything, and the one thing never to tell a learner:
 that a course is safe.
 
