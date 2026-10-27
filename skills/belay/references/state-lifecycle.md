@@ -323,11 +323,11 @@ exists, it is stamped, no file has been placed outside `tutorial/`, and no learn
 started. A defect found here costs a conversation. The same defect found at lesson 7 costs
 a learner their place in a course they cannot finish.
 
-Run `scripts/validate_bundle.py --instance <the instance directory>`. The script path is
-relative to this skill's directory, the same way `scripts/catalogs.py` is reached
-(`catalogue-format.md` section 4); the argument is the `tutorial/` directory step 1
-created. It needs Python 3 and nothing else, it reads only the instance, and it contacts
-nothing.
+Run `belay-validate --instance tutorial` from the workspace root; the argument is the
+`tutorial/` directory step 1 created. `belay-validate` is a command the plugin puts on the
+host's `PATH`, reached the same way as `belay-catalogs` (`catalogue-format.md` section 4;
+`runner-protocol.md` section 1 has the fallback for a host without it). It needs Python 3
+and nothing else, it reads only the instance, and it contacts nothing.
 
 The position in the sequence is fixed at both ends. The run comes **after** step 5, because
 instance mode reports a finding against check 7 when the `instance:` stamp is absent — an
@@ -491,7 +491,7 @@ Resolve the bundle: the source the learner names, or the path in the stamp's
 `materialized_from`. Then run:
 
 ```
-scripts/plan_update.py <the instance directory> <the bundle directory>
+belay-plan-update <the instance directory> <the bundle directory>
 ```
 
 The script reads both directories and writes nothing. It prints the two versions, the bump
@@ -1448,10 +1448,10 @@ it.
 **The cap is 2,000 lines.** An event is 90 to 160 bytes, so a full record is at most about
 320 KB. A course of 23 lessons at 30 to 60 events each fits uncompacted; the cap is reached
 by a learner who struggles long or retakes often. Nobody reads the file whole into a
-conversation: `scripts/evidence.py summary` reads it and prints counts.
+conversation: `belay-evidence summary` reads it and prints counts.
 
 At each lesson completion, after writing `lesson_completed`, run
-`scripts/evidence.py compact tutorial`. Under the cap it changes nothing but repairs
+`belay-evidence compact tutorial`. Under the cap it changes nothing but repairs
 (12.4). Over the cap it replaces every event of each **completed** lesson by one `summary`
 event, placed where that lesson's last event was, with its `seq` and `date`, so the file
 stays in order without renumbering. A lesson is completed when it has a
@@ -1473,7 +1473,7 @@ as a warning, never a finding.
 |---|---|
 | missing | normal before the first event. The next event starts the file, at `seq` 1 or wherever you are counting from |
 | empty | normal; it holds no events yet |
-| truncated — the last line has no line end and does not parse | an interrupted write. Run `scripts/evidence.py compact tutorial` before the next append: it drops that line. Appending without it would join the new line to the fragment and lose both |
+| truncated — the last line has no line end and does not parse | an interrupted write. Run `belay-evidence compact tutorial` before the next append: it drops that line. Appending without it would join the new line to the fragment and lose both |
 | inconsistent — a line is not an event, or `seq` does not increase | `compact` drops lines that are not events and renumbers from 1 in file order, and says so. Read the last line again before the next append |
 
 When you would have used the record and it cannot answer — it is missing, or `summary`

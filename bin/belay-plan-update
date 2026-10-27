@@ -1,0 +1,13 @@
+#!/bin/sh
+# belay-plan-update: runs skills/belay/scripts/plan_update.py from this plugin, so the tutor
+# calls a bare command instead of naming a path in the plugin cache.
+# Arguments, output and exit status pass through unchanged (exec).
+self=$0
+while [ -L "$self" ]; do
+  link=$(readlink "$self") || break
+  case $link in
+    /*) self=$link ;;
+    *) self=$(dirname "$self")/$link ;;
+  esac
+done
+exec python3 "$(dirname "$self")/../skills/belay/scripts/plan_update.py" "$@"

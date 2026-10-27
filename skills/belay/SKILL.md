@@ -98,7 +98,7 @@ existing instance on your own judgement.
 **No instance exists** — discover. Load `references/catalogue-format.md` now; it governs
 where catalogues live, how entries are matched, and how choices are presented. A learner
 may configure many catalogues, and any of them may live in a Git repository, so run
-`scripts/catalogs.py discover` once at the start of a discovery request and act on what
+`belay-catalogs discover` once at the start of a discovery request and act on what
 it prints. It refreshes, merges by first-match-wins precedence, and reports each source.
 
 Pass on what it reports about its sources, as `references/catalogue-format.md` sections 6
@@ -111,7 +111,7 @@ a way to see everything. Section 9 of that file carries the procedure.
 The rule that matters most is unchanged: read catalogue metadata only. Do not open
 anything under a candidate's bundle path until the learner has chosen.
 
-After the learner chooses, `scripts/catalogs.py resolve <id>` gives the bundle
+After the learner chooses, `belay-catalogs resolve <id>` gives the bundle
 directory — that is the first moment anything under a bundle path may be opened. Then
 materialize the instance. Load `references/state-lifecycle.md` before you create any
 file — it defines the copy, the `STATE.template.md`-to-`STATE.md` conversion, and the
@@ -242,7 +242,7 @@ Stamp `assumes_reviewed` in `STATE.md` and never show it again. Never ask whethe
 course was finished, and never inspect a licence or completion record to decide whether
 they may begin.
 
-At completion, and whenever asked, offer follow-ups from `scripts/catalogs.py follow-ups`:
+At completion, and whenever asked, offer follow-ups from `belay-catalogs follow-ups`:
 the author's list first, then courses naming this one as a previous bundle, each with its
 `because`. Inferred matches stay behind a separate "find more". Never auto-start, install
 or purchase anything, and never fail a finished course because a recommended one is
@@ -261,14 +261,14 @@ Load a reference when its condition holds, not before.
 | `references/bundle-format.md` | authoring, importing or repairing a **bundle**, including promoting a generated lesson into one. Not needed to teach. |
 
 A learner's session runs four scripts, each at one moment, never per turn.
-`scripts/catalogs.py` belongs to discovery; a resume never runs it.
-`scripts/validate_bundle.py --instance <workspace>/tutorial` checks the instance
+`belay-catalogs` belongs to discovery; a resume never runs it.
+`belay-validate --instance tutorial` checks the instance
 materialization has just created, before the first task: a finding stops the course from
 starting, a warning never does, and an indeterminate run is not a pass.
 `references/state-lifecycle.md` section 3.1 has the step, `references/runner-protocol.md`
 section 13 the outcomes and the report.
-`scripts/plan_update.py` runs only when the learner asks to update the course, and writes
-nothing. `scripts/evidence.py` compacts the learning record when a lesson completes.
+`belay-plan-update` runs only when the learner asks to update the course, and writes
+nothing. `belay-evidence` compacts the learning record when a lesson completes.
 
 **No script here ever runs a bundle's validator.** A `command` validator is an argument
 list that *you* run, through your own host, where your host's permission prompt sees it.

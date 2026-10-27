@@ -200,11 +200,12 @@ The tutor can show you what is registered at any point, and from a checkout of t
 repository you can run the same thing yourself without fetching anything:
 
 ```
-python3 skills/belay/scripts/catalogs.py status
+bin/belay-catalogs status
 ```
 
-An installed plugin carries the same scripts inside its own directory rather than at that
-path, so ask the tutor unless you have the repository cloned.
+An installed plugin carries the same commands inside its own directory, on the tutor's
+`PATH` but not on your shell's, so ask the tutor unless you have the repository cloned
+([The commands](#the-commands)).
 
 `discover` refreshes and lists; `resolve`, `covers`, `follow-ups` and `prepare` answer
 "which course is this", "who teaches this concept", "what comes next" and "what should I
@@ -293,6 +294,31 @@ needs them:
 | [`runner-protocol.md`](skills/belay/references/runner-protocol.md) | the turn loop, validation outcomes, ownership, detours, offers |
 | [design specification](docs/superpowers/specs/2026-09-11-tutorial-runner-design.md) | the architecture, the measured host facts, and the designs that were rejected |
 
+### The commands
+
+The tutor runs four scripts, each at one moment and never per turn. Each has a small
+wrapper in [`bin/`](bin), and the tutor calls the wrapper by its bare name:
+
+| Command | Runs | When |
+|---|---|---|
+| `belay-catalogs` | `skills/belay/scripts/catalogs.py` | discovery: refresh and list courses, resolve the one you chose, follow-ups |
+| `belay-validate` | `skills/belay/scripts/validate_bundle.py` | checks a new instance before the first task; authors check bundles and catalogues with it |
+| `belay-plan-update` | `skills/belay/scripts/plan_update.py` | you asked to update a course; it plans and writes nothing |
+| `belay-evidence` | `skills/belay/scripts/evidence.py` | a lesson completed; it compacts `tutorial/EVENTS.jsonl` |
+
+A wrapper only starts its script with `python3`, passing the arguments, the output and the
+exit status through unchanged. It exists for the permission prompt. Claude Code puts an
+enabled plugin's `bin/` directory on the `PATH` of its Bash tool, so the command names no
+path inside the plugin cache, and under `permissions.blockReadsOutsideWorkingDirectories`
+a bare command whose arguments stay inside your workspace starts without asking you.
+Started as `python3 <plugin cache>/.../catalogs.py`, the same script asks every time. An
+argument that names a path outside the workspace, such as a bundle directory in a cache,
+still asks.
+
+After installing or updating the plugin, start a new session: `/reload-plugins` is
+reported not to refresh the `PATH`. On a host that does not put plugin `bin/` on `PATH` — the Codex skill
+route below — the tutor falls back to `python3 <skill dir>/scripts/<script>.py`.
+
 ---
 
 ## Write a course
@@ -307,10 +333,12 @@ a small worked example carrying both lesson forms and two optional lessons.
 Check your work before you ship it:
 
 ```
-python3 skills/belay/scripts/validate_bundle.py path/to/bundle
-python3 skills/belay/scripts/validate_bundle.py --instance path/to/project/tutorial
-python3 skills/belay/scripts/validate_bundle.py --catalog path/to/catalog.yaml
+bin/belay-validate path/to/bundle
+bin/belay-validate --instance path/to/project/tutorial
+bin/belay-validate --catalog path/to/catalog.yaml
 ```
+
+Run them from a checkout of this repository ([The commands](#the-commands)).
 
 33 bundle checks and 7 catalogue checks. Your run and the runner's run are the same checks
 over the same files, which is the point: a bundle that passes here starts cleanly there. It
@@ -398,17 +426,20 @@ That is why the Codex instructions above clone to `~/.local/share/belay` rather 
 a directory you work in. If you *are* developing the runner, point the symlink at your
 working checkout deliberately.
 
-One skill body serves both hosts.
+One skill body serves both hosts. The skill route installs no plugin `bin/`, so on Codex the
+tutor runs the scripts by their path instead of the `belay-*` commands
+([The commands](#the-commands)).
 
 ### Tests
 
-No pytest; four plain scripts, run from a checkout of this repository.
+No pytest; five plain scripts, run from a checkout of this repository.
 
 ```
 python3 tests/test_validate_bundle.py     # 846 assertions
 python3 tests/test_catalogs.py            # 338 assertions
 python3 tests/test_plan_update.py         # 67 assertions
 python3 tests/test_evidence.py            # 65 assertions
+python3 tests/test_bin_wrappers.py        # 57 assertions
 ```
 
 **Those numbers are properties of this commit, not of your machine.** A clean

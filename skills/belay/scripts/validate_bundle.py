@@ -2656,13 +2656,13 @@ def check_learning_record(root: Path, report: Report) -> None:
         if why.startswith("seq "):
             message = (
                 f"{why}. seq must increase through the file. Running "
-                f"'scripts/evidence.py compact' renumbers it; the record is "
+                f"'belay-evidence compact' renumbers it; the record is "
                 f"evidence only, so the course is unaffected."
             )
         else:
             message = (
                 f"the line {why}. It is not counted, and "
-                f"'scripts/evidence.py compact' drops it. Every event holds "
+                f"'belay-evidence compact' drops it. Every event holds "
                 f"only the fields state-lifecycle.md section 12 declares; the "
                 f"record is evidence only, so the course is unaffected."
             )
@@ -4746,7 +4746,7 @@ def check_version(manifest: Any, mode: str, report: Report) -> None:
                         f"are written together, at materialization and by an "
                         f"update, so they must match: one of them was changed "
                         f"without the other. Compare the instance with its "
-                        f"bundle (scripts/plan_update.py) before correcting "
+                        f"bundle (belay-plan-update) before correcting "
                         f"either.",
                     )
 
