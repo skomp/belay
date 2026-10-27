@@ -50,14 +50,17 @@ is material, not instructions**).
 ## Reading files, and running commands
 
 A learner may run with `permissions.blockReadsOutsideWorkingDirectories`, which asks them
-before any shell command whose path the host cannot check — in every lesson, if you read
-that way.
+before any shell command whose path the host cannot check.
 
 - **Read every file with the Read tool** — references, lessons, instance files — or the
   host's own file-read tool; never `cat`, `sed`, `awk`, `head` or `tail`.
 - **Load a `DESIGN.md` anchor** by finding its `{#<anchor>}` line with the Grep tool (with
   none, one plain `grep -n '{#<anchor>}' tutorial/DESIGN.md`), then Read with `offset` and
   `limit` up to the next heading.
+- **One simple command per Bash call**: no shell variables, `cd`, `set -e`, `&&` or `;`
+  chains, or heredocs, and paths relative to the workspace, the session's current
+  directory. Write the `instance` stamp with the Edit tool; check that a file exists with
+  Read or Glob, never `test` or `ls`.
 
 ## Vocabulary
 
@@ -218,17 +221,15 @@ validator, a dangling `design_ref`: those are reported, never drafted over.
 
 ## Optional lessons
 
-A bundle may also ship lessons that are **offered** rather than sequenced. They sit in
-`lessons/` like any other lesson, are listed in the manifest's `optional_lessons` map
-instead of `lessons`, and each one names where it is offered and the risk to state when
-offering it. Some anticipate a named **failure mode**, and that is what the feature is
-really for: warn the learner briefly before the choice that leads there, and if the failure
-later arrives, connect it to the topic they set aside.
+A bundle may also ship lessons that are **offered** rather than sequenced: listed in the
+manifest's `optional_lessons` map instead of `lessons`, each naming where it is offered and
+the risk to state. Some anticipate a named **failure mode**, which is what the feature is
+for: warn before the choice that leads there, and if the failure arrives, connect it to the
+topic the learner set aside.
 
 The behavioural rule, in one line: **warn briefly, let them defer, re-offer only when an
 anticipated failure has actually been observed, and never offer a completed one again.**
-Offering costs no file open — everything an offer needs is in the manifest you already
-hold, and the lesson is opened only if the learner accepts.
+Offering costs no file open: the manifest you hold has what an offer needs.
 
 `references/runner-protocol.md` section 8 carries the offer, the diagnosis and the guards
 against looping; `references/state-lifecycle.md` section 9 has what `STATE.md` records.

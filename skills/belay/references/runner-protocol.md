@@ -297,9 +297,9 @@ Run each validator the lesson declares, by name, resolving each name in the mani
 
 | `kind` | How to run it | Success |
 |---|---|---|
-| `command` | run the declared argument list in the workspace root | exit status zero |
-| `file-exists` | check the declared path | it exists |
-| `file-contains` | check the declared path against the declared pattern | it matches |
+| `command` | run the declared argument list in the workspace root, as one simple command | exit status zero |
+| `file-exists` | check the declared path with Glob or Read | it exists |
+| `file-contains` | check the declared path against the declared pattern with Grep or Read | it matches |
 | `git-diff` | inspect the working-tree diff | judge against completion conditions |
 | `manual` | ask the learner for evidence | judge against completion conditions |
 
@@ -2118,7 +2118,9 @@ never from here; advancement is section 6, never a count of `check` events.
 ### 16.1 What you write, and at which point
 
 One line per event, appended at the point in the turn where the event happens. Several
-events from one turn may go in one append, in the order they happened.
+events from one turn may go in one append, in the order they happened. Append with the Edit
+tool, after the last line you read, or create the file with the Write tool when it is
+absent — never `echo >>` or a here-document in a shell (`SKILL.md`, the command rule).
 
 | At | Append |
 |---|---|
