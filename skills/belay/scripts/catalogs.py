@@ -2729,7 +2729,9 @@ def source_from_stamp(instance: Path) -> tuple[Path, str]:
     ):
         raise Refusal(
             f"the stamp's materialized_from is {locator!r}; this runner reads "
-            f"only a 'local:' path"
+            f"only a 'local:' path. An instance stamped before 0.11.0 can name "
+            f"a Git source here: belay-plan-update takes the source from the "
+            f"catalogues instead with --from-catalogs"
         )
     path = expand(locator[len(LOCAL_PREFIX):])
     if not path.is_absolute():
