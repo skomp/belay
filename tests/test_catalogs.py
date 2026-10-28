@@ -2909,6 +2909,439 @@ def test_catalog_check_coverage() -> None:
 
 
 # --------------------------------------------------------------------------
+# materialize and place-supplies (belay#76)
+# --------------------------------------------------------------------------
+#
+# Both commands read a bundle source that is outside the learner's workspace,
+# inside their own process, and are never handed its path: under
+# permissions.blockReadsOutsideWorkingDirectories, a path outside the
+# workspace on the command line is what makes the host ask the learner. Each
+# case runs from a workspace directory, as the tutor does.
+
+BUNDLE_FIXTURE = HERE / "fixtures" / "rust-cli-basics"
+
+SUPPLIES_DECLARATION = """
+supplies:
+  - from: supplies/Cargo.toml
+    to: Cargo.toml
+    describe: The starter Cargo manifest, so lesson 00 begins with code
+  - from: supplies/src/
+    to: src
+    describe: The starter sources
+"""
+
+
+def tree_digest(root: Path) -> str:
+    """Names, kinds and bytes of everything under root, for 'nothing changed'."""
+    import hashlib
+
+    h = hashlib.sha256()
+    if not root.exists():
+        return "absent"
+    for path in sorted(root.rglob("*")):
+        h.update(str(path.relative_to(root)).encode())
+        if path.is_symlink():
+            h.update(b"L" + os.readlink(path).encode())
+        elif path.is_file():
+            h.update(b"F" + path.read_bytes())
+        else:
+            h.update(b"D")
+    return h.hexdigest()
+
+
+def supplied_bundle(root: Path) -> Path:
+    """The fixture bundle, with manifest-scope supplies under supplies/."""
+    shutil.copytree(BUNDLE_FIXTURE, root)
+    (root / "supplies" / "src").mkdir(parents=True)
+    (root / "supplies" / "Cargo.toml").write_text(
+        '[package]\nname = "tally"\nversion = "0.1.0"\n', encoding="utf-8"
+    )
+    (root / "supplies" / "src" / "main.rs").write_text(
+        "fn main() { /* the bundle's skeleton */ }\n", encoding="utf-8"
+    )
+    (root / "supplies" / "src" / "lib.rs").write_text(
+        "pub fn count() -> usize { 0 }\n", encoding="utf-8"
+    )
+    with (root / "tutorial.yaml").open("a", encoding="utf-8") as handle:
+        handle.write(SUPPLIES_DECLARATION)
+    return root
+
+
+def local_catalogue(env: "Env", bundle: Path) -> None:
+    catalog = env.write_catalog(
+        "catalogues/user.yaml", catalog_doc(("rust-cli-basics", str(bundle)))
+    )
+    env.write_config(file_config(("mine", catalog)))
+
+
+@contextmanager
+def in_directory(directory: Path):
+    old = os.getcwd()
+    os.chdir(directory)
+    try:
+        yield
+    finally:
+        os.chdir(old)
+
+
+def run_in(env: "Env", workspace: Path, *argv: str) -> tuple[int, str]:
+    with in_directory(workspace):
+        return env.run(*argv)
+
+
+def instance_stamp(instance: Path) -> dict:
+    document = cat.load_yaml((instance / "tutorial.yaml").read_text(), "t")
+    stamp = document.get("instance") if isinstance(document, dict) else None
+    return stamp if isinstance(stamp, dict) else {}
+
+
+def validate_instance(instance: Path) -> tuple[int, str]:
+    proc = subprocess.run(
+        [sys.executable, "-B", str(SCRIPTS / "validate_bundle.py"), "--instance", str(instance)],
+        capture_output=True,
+        text=True,
+    )
+    return proc.returncode, proc.stdout + proc.stderr
+
+
+def expect_copy(label: str, bundle: Path, instance: Path) -> None:
+    """Every file materialization copies holds the bundle's bytes."""
+    import plan_update
+
+    files = plan_update.bundle_owned_files(bundle)
+    record(
+        len(files) > 5 and any(f.startswith("lessons/") for f in files),
+        f"{label}: the control - the bundle has lessons to copy",
+        repr(files),
+    )
+    wrong = []
+    for rel in files:
+        mine = instance / rel
+        if not mine.is_file():
+            wrong.append(f"{rel} missing")
+        elif rel == "tutorial.yaml":
+            if not mine.read_bytes().startswith((bundle / rel).read_bytes()):
+                wrong.append("tutorial.yaml does not begin with the bundle's bytes")
+        elif mine.read_bytes() != (bundle / rel).read_bytes():
+            wrong.append(f"{rel} differs")
+    record(not wrong, f"{label}: every copied file holds the bundle's bytes", "; ".join(wrong))
+    record(
+        (instance / "STATE.md").read_bytes() == (bundle / "STATE.template.md").read_bytes(),
+        f"{label}: STATE.md is the bundle's STATE.template.md",
+    )
+    record(
+        not (instance / "STATE.template.md").exists(),
+        f"{label}: the instance holds no STATE.template.md",
+    )
+
+
+def test_materialize_from_a_local_catalogue() -> None:
+    print("\nmaterialize, from a local catalogue:")
+    with temp_env() as env:
+        bundle = env.root / "bundles" / "rust-cli-basics"
+        shutil.copytree(BUNDLE_FIXTURE, bundle)
+        local_catalogue(env, bundle)
+        workspace = env.root / "workspace"
+        workspace.mkdir()
+        code, out = run_in(env, workspace, "materialize", "rust-cli-basics")
+        record(code == 0, "materialize exits 0", f"exit {code}\n{out}")
+        instance = workspace / "tutorial"
+        expect_copy("local", bundle, instance)
+        record(
+            sorted(p.name for p in workspace.iterdir()) == ["tutorial"],
+            "nothing but tutorial/ is left in the workspace (no staging directory)",
+            repr(sorted(p.name for p in workspace.iterdir())),
+        )
+        stamp = instance_stamp(instance)
+        record(
+            stamp
+            == {
+                "materialized_from": f"local:{bundle}",
+                "materialized_version": "1.0",
+                "materialized_at": cat.today_stamp(),
+                "runner_version": 1,
+            },
+            "the stamp records the source, \"1.0\" for an absent version, today, "
+            "and runner_version 1",
+            repr(stamp),
+        )
+        record(
+            'materialized_version: "1.0"' in (instance / "tutorial.yaml").read_text(),
+            "  and materialized_version is written quoted",
+        )
+        code, report = validate_instance(instance)
+        record(code == 0, "the new instance validates in instance mode", report[-600:])
+
+        # A declared version is copied exactly.
+        bundle2 = env.root / "bundles" / "versioned"
+        shutil.copytree(BUNDLE_FIXTURE, bundle2)
+        text = (bundle2 / "tutorial.yaml").read_text()
+        (bundle2 / "tutorial.yaml").write_text(
+            text.replace("id: rust-cli-basics\n", 'id: rust-cli-basics\nversion: "2.10"\n', 1)
+        )
+        local_catalogue(env, bundle2)
+        workspace2 = env.root / "workspace2"
+        workspace2.mkdir()
+        code, out = run_in(env, workspace2, "materialize", "rust-cli-basics")
+        record(
+            code == 0
+            and instance_stamp(workspace2 / "tutorial").get("materialized_version") == "2.10",
+            "a declared version is copied exactly: \"2.10\", not 2.1",
+            f"exit {code} {instance_stamp(workspace2 / 'tutorial')!r}",
+        )
+        code, report = validate_instance(workspace2 / "tutorial")
+        record(code == 0, "  and that instance validates (check 30 sees one version)", report[-600:])
+
+
+def test_materialize_refuses_and_writes_nothing() -> None:
+    print("\nmaterialize refuses, and leaves the workspace as it was:")
+    with temp_env() as env:
+        bundle = env.root / "bundles" / "rust-cli-basics"
+        shutil.copytree(BUNDLE_FIXTURE, bundle)
+        local_catalogue(env, bundle)
+        workspace = env.root / "workspace"
+        (workspace / "tutorial").mkdir(parents=True)
+        (workspace / "tutorial" / "STATE.md").write_text("the learner's progress\n")
+        before = tree_digest(workspace)
+        code, out = run_in(env, workspace, "materialize", "rust-cli-basics")
+        record(
+            code == cat.EXIT_REFUSED and "already exists" in out,
+            "an existing tutorial/ is refused, exit 3",
+            f"exit {code}\n{out}",
+        )
+        record(tree_digest(workspace) == before, "  and the existing instance is untouched")
+        shutil.rmtree(workspace / "tutorial")
+
+        cases = []
+        code, out = run_in(env, workspace, "materialize", "no-such-course")
+        cases.append(("an id no catalogue supplies", code, out))
+        (bundle / "STATE.template.md").rename(bundle / "kept-aside")
+        code, out = run_in(env, workspace, "materialize", "rust-cli-basics")
+        cases.append(("a bundle without STATE.template.md", code, out))
+        (bundle / "kept-aside").rename(bundle / "STATE.template.md")
+        secret = env.root / "secret.txt"
+        secret.write_text("not the course's to copy\n")
+        (bundle / "lessons" / "leak.txt").symlink_to(secret)
+        code, out = run_in(env, workspace, "materialize", "rust-cli-basics")
+        cases.append(("a symbolic link leading outside the bundle", code, out))
+        (bundle / "lessons" / "leak.txt").unlink()
+        with (bundle / "tutorial.yaml").open("a") as handle:
+            handle.write("instance:\n  materialized_from: local:x\n")
+        code, out = run_in(env, workspace, "materialize", "rust-cli-basics")
+        cases.append(("a bundle that carries an instance stamp", code, out))
+        for label, code, out in cases:
+            record(
+                code == cat.EXIT_REFUSED and "refused:" in out,
+                f"{label} is refused, exit 3",
+                f"exit {code}\n{out}",
+            )
+            record(
+                list(workspace.iterdir()) == [],
+                f"  and the workspace is still empty after: {label}",
+            )
+        text = (bundle / "tutorial.yaml").read_text()
+        (bundle / "tutorial.yaml").write_text(text[: text.index("instance:\n")])
+        code, out = run_in(env, workspace, "materialize", "rust-cli-basics")
+        record(code == 0, "the control: the repaired bundle materializes", f"exit {code}\n{out}")
+
+
+def test_materialize_and_supplies_from_a_git_catalogue() -> None:
+    print("\nmaterialize and place-supplies, from a git catalogue's cached clone:")
+    with temp_env() as env:
+        source = supplied_bundle(env.root / "authoring" / "rust-cli-basics")
+        files = {
+            str(p.relative_to(source.parent)): p.read_text(encoding="utf-8")
+            for p in source.rglob("*")
+            if p.is_file()
+        }
+        files["catalog.yaml"] = catalog_doc(("rust-cli-basics", "rust-cli-basics"))
+        url = make_repo(env.root / "remote", files)
+        env.write_config(git_config("bundles", url))
+        code, out = env.run("discover")
+        record(code == 0, "discover fetches the repository", f"exit {code}\n{out}")
+        clone_bundle = env.cache / "catalogs" / "bundles" / "repo" / "rust-cli-basics"
+        record(clone_bundle.is_dir(), "  the bundle is in the cache clone", str(clone_bundle))
+
+        workspace = env.root / "workspace"
+        workspace.mkdir()
+        # git must not be needed from here on: put a failing fake first on
+        # PATH, so a fetch would show up as an error rather than pass quietly.
+        with path_prefixed(env.bin, "fatal: materialize must not fetch\n"):
+            code, out = run_in(env, workspace, "materialize", "rust-cli-basics")
+        record(code == 0, "materialize from the clone exits 0, fetching nothing", f"exit {code}\n{out}")
+        instance = workspace / "tutorial"
+        expect_copy("git", clone_bundle, instance)
+        record(
+            instance_stamp(instance).get("materialized_from") == f"local:{clone_bundle}",
+            "the stamp names the bundle inside the cache clone",
+            repr(instance_stamp(instance)),
+        )
+        record(
+            not (workspace / "Cargo.toml").exists(),
+            "materialize places no supply: that waits for validation",
+        )
+        code, report = validate_instance(instance)
+        record(code == 0, "the instance validates before anything is placed", report[-600:])
+        with path_prefixed(env.bin, "fatal: place-supplies must not fetch\n"):
+            code, out = run_in(env, workspace, "place-supplies")
+        record(code == 0, "place-supplies from the clone exits 0", f"exit {code}\n{out}")
+        record(
+            (workspace / "Cargo.toml").read_bytes()
+            == (clone_bundle / "supplies" / "Cargo.toml").read_bytes()
+            and (workspace / "src" / "lib.rs").read_bytes()
+            == (clone_bundle / "supplies" / "src" / "lib.rs").read_bytes(),
+            "the supplies hold the clone's bytes",
+        )
+
+
+def test_place_supplies() -> None:
+    print("\nplace-supplies, from the source the stamp names:")
+    with temp_env() as env:
+        bundle = supplied_bundle(env.root / "bundles" / "rust-cli-basics")
+        local_catalogue(env, bundle)
+        workspace = env.root / "workspace"
+        (workspace / "src").mkdir(parents=True)
+        learner = "fn main() { println!(\"the learner's own\"); }\n"
+        (workspace / "src" / "main.rs").write_text(learner)
+        code, out = run_in(env, workspace, "materialize", "rust-cli-basics")
+        record(code == 0, "materialize a bundle that declares supplies", f"exit {code}\n{out}")
+        record(
+            (bundle / "supplies" / "src" / "main.rs").read_text() != learner,
+            "the control: the bundle's main.rs differs from the learner's, so an "
+            "overwrite would show",
+        )
+        code, out = run_in(env, workspace, "place-supplies")
+        record(code == 0, "place-supplies exits 0", f"exit {code}\n{out}")
+        record(
+            (workspace / "Cargo.toml").read_bytes()
+            == (bundle / "supplies" / "Cargo.toml").read_bytes(),
+            "a file entry is placed with the bundle's bytes",
+        )
+        record(
+            (workspace / "src" / "lib.rs").read_bytes()
+            == (bundle / "supplies" / "src" / "lib.rs").read_bytes(),
+            "a directory entry places its contents",
+        )
+        record(
+            (workspace / "src" / "main.rs").read_text() == learner,
+            "an existing target is byte-identical afterwards",
+        )
+        record(
+            "The starter Cargo manifest, so lesson 00 begins with code" in out
+            and "placed:        src/lib.rs" in out
+            and "already here:  src/main.rs" in out,
+            "the report says each describe line, what was placed and what was left alone",
+            out,
+        )
+        record(
+            not list((workspace / "tutorial").glob("Cargo.toml")),
+            "nothing is placed inside tutorial/",
+        )
+        before = tree_digest(workspace)
+        code, out = run_in(env, workspace, "place-supplies")
+        record(
+            code == 0 and out.count("say nothing about this entry") == 2,
+            "a second run finds every target present and says to say nothing",
+            out,
+        )
+        record(tree_digest(workspace) == before, "  and changes nothing")
+
+        # A relative locator resolves from the workspace root.
+        manifest = workspace / "tutorial" / "tutorial.yaml"
+        text = manifest.read_text()
+        relative = os.path.relpath(bundle, workspace)
+        manifest.write_text(text.replace(f"local:{bundle}", f"local:{relative}"))
+        (workspace / "Cargo.toml").unlink()
+        code, out = run_in(env, workspace, "place-supplies")
+        record(
+            code == 0 and (workspace / "Cargo.toml").is_file(),
+            f"a relative locator (local:{relative}) resolves from the workspace root",
+            f"exit {code}\n{out}",
+        )
+
+        # A file of the learner's in the way of a directory target.
+        shutil.rmtree(workspace / "src")
+        (workspace / "src").write_text("a file, not a directory\n")
+        code, out = run_in(env, workspace, "place-supplies")
+        record(
+            code == cat.EXIT_PARTIAL and "NOT placed" in out,
+            "a file in the way of a target is reported, exit 1",
+            f"exit {code}\n{out}",
+        )
+        record(
+            (workspace / "src").read_text() == "a file, not a directory\n",
+            "  and the file in the way is untouched",
+        )
+
+
+def test_place_supplies_refuses_and_writes_nothing() -> None:
+    print("\nplace-supplies refuses, and places nothing:")
+    with temp_env() as env:
+        bundle = supplied_bundle(env.root / "bundles" / "rust-cli-basics")
+        (env.root / "bundles" / "outside.txt").write_text("outside the bundle\n")
+        local_catalogue(env, bundle)
+        workspace = env.root / "workspace"
+        workspace.mkdir()
+        code, out = run_in(env, workspace, "place-supplies")
+        record(code == 2, "no tutorial/ in the current directory exits 2", f"exit {code}\n{out}")
+        code, out = run_in(env, workspace, "materialize", "rust-cli-basics")
+        manifest = workspace / "tutorial" / "tutorial.yaml"
+        good = manifest.read_text()
+        secret = env.root / "secret.txt"
+        secret.write_text("not the course's\n")
+
+        def declare(from_: str, to: str) -> str:
+            return good.replace(
+                "  - from: supplies/Cargo.toml\n    to: Cargo.toml\n",
+                f"  - from: {from_}\n    to: {to}\n",
+            )
+
+        cases = [
+            ("a 'from' that climbs out of the bundle", declare("../outside.txt", "outside.txt")),
+            ("an absolute 'from'", declare(str(env.root / "bundles" / "outside.txt"), "outside.txt")),
+            ("a 'to' inside tutorial/", declare("supplies/Cargo.toml", "tutorial/Cargo.toml")),
+            ("a 'to' that climbs out of the workspace", declare("supplies/Cargo.toml", "../Cargo.toml")),
+            ("a 'from' that is not in the bundle", declare("supplies/missing.toml", "Cargo.toml")),
+            ("the stamp is missing", good[: good.index("\ninstance:\n")] + "\n"),
+            ("the stamp names a source that is not there",
+             good.replace(f"local:{bundle}", f"local:{bundle}-gone")),
+            ("the stamp names a provider this runner lacks",
+             good.replace(f"local:{bundle}", "git:https://example.invalid/x")),
+            ("tutorial.yaml does not parse", good + "\n  : : [\n"),
+        ]
+        record(
+            all(text != good for _, text in cases),
+            "the control: every refusal case really changed the manifest",
+        )
+        for label, text in cases:
+            manifest.write_text(text)
+            before = tree_digest(workspace)
+            code, out = run_in(env, workspace, "place-supplies")
+            record(
+                code == cat.EXIT_REFUSED and "refused:" in out,
+                f"{label} is refused, exit 3",
+                f"exit {code}\n{out}",
+            )
+            record(tree_digest(workspace) == before, f"  and nothing was placed: {label}")
+        manifest.write_text(good)
+        (bundle / "supplies" / "src" / "leak.rs").symlink_to(secret)
+        code, out = run_in(env, workspace, "place-supplies")
+        record(
+            code == cat.EXIT_REFUSED and not (workspace / "Cargo.toml").exists(),
+            "a symbolic link in a supplied directory leading outside the bundle is "
+            "refused, before anything is placed",
+            f"exit {code}\n{out}",
+        )
+        (bundle / "supplies" / "src" / "leak.rs").unlink()
+        code, out = run_in(env, workspace, "place-supplies")
+        record(
+            code == 0 and (workspace / "Cargo.toml").is_file(),
+            "the control: with the link gone the same manifest places",
+            f"exit {code}\n{out}",
+        )
+
+
+# --------------------------------------------------------------------------
 
 
 def main() -> int:
@@ -2965,6 +3398,11 @@ def main() -> int:
         test_an_optional_lesson_count_of_zero_says_nothing_extra,
         test_a_bad_optional_lesson_count_is_refused_by_the_validator,
         test_a_cached_catalogue_is_said_so_before_nothing_matched,
+        test_materialize_from_a_local_catalogue,
+        test_materialize_refuses_and_writes_nothing,
+        test_materialize_and_supplies_from_a_git_catalogue,
+        test_place_supplies,
+        test_place_supplies_refuses_and_writes_nothing,
     ):
         try:
             test()

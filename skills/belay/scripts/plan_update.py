@@ -1,17 +1,34 @@
 #!/usr/bin/env python3
-"""Plan the update of a materialized instance from a newer copy of its bundle.
+"""Plan, show and apply the update of a materialized instance from its bundle.
 
 Usage:
-    plan_update.py <instance-dir> <bundle-dir>
+    plan_update.py <instance>                    plan the update
+    plan_update.py <instance> --diff <file>      show one file's difference
+    plan_update.py <instance> --apply [--take <file>]... [--take-replace]
+                                                 apply what the learner accepted
+    plan_update.py <instance> --check-version    is the instance behind?
     plan_update.py --help
 
-The learner asks for an update; this script says what that update would do,
-file by file, and does nothing else. It reads the instance and the bundle and
-WRITES NOTHING: no file in either directory, or anywhere else, is created,
-modified or removed by a run. The tutor shows the plan, the learner decides,
-the tutor copies, and the tutor then re-validates the instance.
-references/state-lifecycle.md section 3.2 is the procedure; this is the part
-of it that a session classifying files by eye would get wrong.
+The bundle is the source the instance stamp's `materialized_from` names, read
+inside this process. With --from-catalogs it is the instance's own tutorial id
+resolved through the learner's catalogues instead, exactly as
+`catalogs.py resolve` resolves it, from disk and without fetching. The tutor
+never passes a bundle path (belay#76): under
+permissions.blockReadsOutsideWorkingDirectories a path outside the workspace
+on the command line makes the host ask the learner. An optional second
+argument still names a bundle directory directly, for an author comparing a
+bundle inside the workspace, and for this script's tests.
+
+The learner asks for an update; the plan says what that update would do,
+file by file. The plan, --diff and --check-version WRITE NOTHING: no file in
+either directory, or anywhere else, is created, modified or removed by those
+runs. The tutor shows the plan and each difference, the learner decides, and
+--apply then copies exactly what the learner accepted, deletes the files the
+bundle no longer has, and rewrites the stamp. --apply writes only inside the
+instance, and nothing outside it. The tutor then re-validates the instance and
+places supplies. references/state-lifecycle.md section 3.2 is the procedure;
+this is the part of it that a session classifying files by eye would get
+wrong.
 
 What it compares is exactly what materialization copies (state-lifecycle.md
 section 3 step 2): tutorial.yaml (without the instance stamp), COURSE.md,
@@ -31,11 +48,16 @@ instance manifest already record, by the rule in state-lifecycle.md section
 answer is "the learner decides", never "replace".
 
 Exit codes (the shape validate_bundle.py uses):
-    0  nothing to do - same version, every file the same
-    1  a plan exists - show it to the learner
-    2  usage or I/O error - correct the invocation; never the learner's problem
-    3  refused - the update cannot be applied as things stand, and the
-       report says why. Nothing should be copied.
+    plan                0 nothing to do - same version, every file the same
+                        1 a plan exists - show it to the learner
+    --diff              0 the file is the same on both sides; 1 it differs
+    --apply             0 applied, or nothing to apply
+    --check-version     0 not behind; 1 behind
+    every mode          2 usage or I/O error - correct the invocation; never
+                          the learner's problem
+                        3 refused - the update cannot be applied as things
+                          stand, or the source cannot be resolved or read,
+                          and the report says why. Nothing was written.
 
 Stdlib only, Python 3.11, the same restricted YAML reader as the validator.
 """
@@ -43,7 +65,10 @@ Stdlib only, Python 3.11, the same restricted YAML reader as the validator.
 from __future__ import annotations
 
 import argparse
+import difflib
+import os
 import re
+import shutil
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -56,6 +81,7 @@ try:
 except ImportError:  # pragma: no cover - only when sys.path lacks this dir
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     import validate_bundle as vb
+import catalogs  # noqa: E402 - the stamp, the source and the locator
 
 # The classes. Each bundle-owned file gets exactly one.
 UNCHANGED = "unchanged"
@@ -524,21 +550,390 @@ def render(plan: Plan, stream=sys.stdout) -> None:
         w(f"note:      {note}\n")
 
 
+# -- the source -----------------------------------------------------------
+
+
+class Refused(Exception):
+    """The source cannot be resolved or read. Nothing was written."""
+
+
+@dataclass
+class Source:
+    bundle: Path
+    locator: str
+    how: str  # "the instance stamp" | "the catalogues" | "the command line"
+
+
+def resolve_source(args) -> Source:
+    """Where the bundle is, without the tutor ever naming it (belay#76)."""
+    instance = Path(args.instance)
+    if args.bundle is not None:
+        bundle = Path(args.bundle)
+        return Source(bundle, catalogs.locator_for(bundle), "the command line")
+    if not (instance / "tutorial.yaml").is_file():
+        raise UsageError(
+            f"{instance} has no tutorial.yaml, so it is not an instance. The "
+            f"argument is the instance (the tutorial/ directory)."
+        )
+    try:
+        if args.from_catalogs:
+            manifest = catalogs.read_manifest(
+                instance / "tutorial.yaml", "the instance manifest"
+            )
+            lookup = argparse.Namespace(
+                id=str(manifest.get("id")),
+                config=args.config,
+                cache_dir=args.cache_dir,
+                timeout=catalogs.DEFAULT_TIMEOUT,
+            )
+            entry = catalogs.find_entry(lookup)
+            bundle = Path(entry.resolved_path)
+            source = Source(bundle, catalogs.locator_for(bundle), "the catalogues")
+        else:
+            bundle, locator = catalogs.source_from_stamp(instance)
+            source = Source(bundle, locator, "the instance stamp")
+        catalogs.usable_source(source.bundle, source.locator)
+    except catalogs.Refusal as exc:
+        raise Refused(str(exc)) from exc
+    except catalogs.ConfigError as exc:
+        raise UsageError(str(exc)) from exc
+    return source
+
+
+# -- one file's difference ------------------------------------------------
+
+
+def strip_stamp(text: str) -> str:
+    """tutorial.yaml without its top-level `instance:` block.
+
+    The block is a top-level key: its own line, then every blank or indented
+    line after it, up to the next line that starts in column one.
+    """
+    out: list[str] = []
+    skipping = False
+    for line in text.splitlines(keepends=True):
+        if re.match(r"instance:\s*(#.*)?$", line.rstrip("\r\n")):
+            skipping = True
+            continue
+        if skipping and (not line.strip() or line[0] in " \t"):
+            continue
+        skipping = False
+        out.append(line)
+    return "".join(out).rstrip("\n") + "\n"
+
+
+def _text_of(path: Path, rel: str) -> str | None:
+    """The file as text for a diff, or None when it is not UTF-8 text."""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        return None
+    if rel == "tutorial.yaml":
+        text = strip_stamp(text)
+    return text
+
+
+def show_diff(plan: Plan, rel: str, stream=sys.stdout) -> int:
+    """A unified diff of one bundle-owned file: the instance, then the bundle."""
+    if rel not in plan.classes:
+        raise UsageError(
+            f"{rel} is not a file the update compares. The plan lists every "
+            f"one, by its path inside the instance."
+        )
+    cls = plan.classes[rel]
+    w = stream.write
+    w(f"file:      {rel}  ({cls})\n")
+    w(f"yours:     {plan.instance / rel}\n")
+    w(f'bundle:    version "{plan.new_version}"\n\n')
+    if cls == UNCHANGED:
+        w("The two copies are the same.\n")
+        return 0
+    old = _text_of(plan.instance / rel, rel) if cls != ADDED else ""
+    new = _text_of(plan.bundle / rel, rel) if cls != REMOVED else ""
+    if old is None or new is None:
+        sizes = [
+            (plan.instance / rel).stat().st_size if cls != ADDED else 0,
+            (plan.bundle / rel).stat().st_size if cls != REMOVED else 0,
+        ]
+        w(f"It is not text. Yours is {sizes[0]} bytes, the bundle's is "
+          f"{sizes[1]} bytes, and they differ.\n")
+        return 1
+    if rel == "tutorial.yaml" and cls != ADDED:
+        new = new.rstrip("\n") + "\n"
+    lines = difflib.unified_diff(
+        old.splitlines(keepends=True),
+        new.splitlines(keepends=True),
+        fromfile=f"tutorial/{rel} (yours)" if cls != ADDED else "/dev/null",
+        tofile=f"{rel} (bundle {plan.new_version})" if cls != REMOVED else "/dev/null",
+    )
+    for line in lines:
+        w(line if line.endswith("\n") else line + "\n\\ No newline at end of file\n")
+    return 1
+
+
+# -- applying what the learner accepted -----------------------------------
+
+
+# The validation keys an update removes (state-lifecycle.md section 3.2,
+# apply step 2). Section 3.1 writes them again when the instance is checked.
+VALIDATION_KEYS = ("validated", "validation", "validation_warnings", "validation_unchecked")
+
+
+def _stamp_value(key: str, value: Any) -> str:
+    if key == "materialized_version":
+        return '"' + str(value).replace("\\", "\\\\").replace('"', '\\"') + '"'
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if value is None:
+        return "null"
+    if isinstance(value, (int, float)):
+        return str(value)
+    if isinstance(value, list):
+        return "[" + ", ".join(_stamp_value("", item) for item in value) + "]"
+    return catalogs.yaml_scalar(str(value))
+
+
+def new_stamp(old: dict, locator: str, version: str, today: str) -> dict:
+    """The stamp after an update. Section 3.2 apply step 2, as a function."""
+    stamp: dict[str, Any] = {}
+    for key, value in old.items():
+        if key not in VALIDATION_KEYS:
+            stamp[key] = value
+    stamp["materialized_from"] = locator
+    stamp["materialized_version"] = version
+    stamp["materialized_at"] = today
+    stamp.setdefault("runner_version", catalogs.RUNNER_VERSION)
+    unchecked = old.get("validation_unchecked")
+    setup = [
+        item for item in (unchecked if isinstance(unchecked, list) else [])
+        if isinstance(item, str) and item.startswith("setup:")
+    ]
+    if setup and old.get("validation") == "not-certified":
+        # An update re-runs no setup check, so a failed one stays recorded.
+        stamp["validation"] = "not-certified"
+        stamp["validation_unchecked"] = setup
+    return stamp
+
+
+def render_stamp(stamp: dict) -> str:
+    return "instance:\n" + "".join(
+        f"  {key}: {_stamp_value(key, value)}\n" for key, value in stamp.items()
+    )
+
+
+@dataclass
+class Applied:
+    taken: list[str] = field(default_factory=list)
+    deleted: list[str] = field(default_factory=list)
+    kept: list[tuple[str, str]] = field(default_factory=list)
+    stamp: str = ""
+
+
+def check_takes(plan: Plan, take: list[str]) -> None:
+    allowed = (REPLACE, *DECIDE)
+    for rel in take:
+        cls = plan.classes.get(rel)
+        if rel == "tutorial.yaml" or cls in (ADDED, REMOVED):
+            raise UsageError(
+                f"--take {rel}: tutorial.yaml, the added files and the removed "
+                f"files are always applied together, so they are never named"
+            )
+        if cls not in allowed:
+            raise UsageError(
+                f"--take {rel}: the plan classes it {cls or 'not at all'}; "
+                f"only a {', '.join(allowed)} file is taken by choice"
+            )
+
+
+def apply_plan(
+    plan: Plan, take: list[str], take_replace: bool, source: Source, today: str
+) -> Applied:
+    """Copy what was accepted, delete what the bundle dropped, then restamp.
+
+    tutorial.yaml is written LAST. An apply interrupted before it leaves the
+    old stamp and the old manifest, so the next plan shows what is left
+    rather than an instance that claims a version it does not hold.
+    """
+    chosen = set(take)
+    if take_replace:
+        chosen |= {rel for rel, cls in plan.classes.items() if cls == REPLACE}
+    done = Applied()
+    for rel, cls in plan.classes.items():
+        if rel == "tutorial.yaml" or cls == UNCHANGED:
+            continue
+        if cls == REMOVED:
+            continue
+        if cls == ADDED or rel in chosen:
+            target = plan.instance / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(plan.bundle / rel, target)
+            done.taken.append(rel)
+        else:
+            done.kept.append((rel, cls))
+    lessons_dir = plan.instance / vb.LESSONS_DIR
+    for rel, cls in plan.classes.items():
+        if cls != REMOVED:
+            continue
+        target = plan.instance / rel
+        target.unlink()
+        done.deleted.append(rel)
+        parent = target.parent
+        while parent != lessons_dir and lessons_dir in parent.parents:
+            try:
+                parent.rmdir()  # only when empty
+            except OSError:
+                break
+            parent = parent.parent
+
+    old = _read_manifest(plan.instance)
+    old_stamp = old.get("instance") if isinstance(old, dict) else None
+    old_stamp = old_stamp if isinstance(old_stamp, dict) else {}
+    new_manifest = _read_manifest(plan.bundle)
+    version = catalogs.bundle_version(new_manifest if isinstance(new_manifest, dict) else {})
+    # From the stamp, source.locator is the stamp's own string, so a relative
+    # `local:` path stays relative. Any other source is recorded as it was
+    # resolved, which is "update materialized_from when the source changed".
+    stamp = new_stamp(old_stamp, source.locator, version, today)
+    done.stamp = render_stamp(stamp)
+    text = (plan.bundle / "tutorial.yaml").read_text(encoding="utf-8")
+    text = text.rstrip("\n") + "\n\n" + done.stamp
+    (plan.instance / "tutorial.yaml").write_text(text, encoding="utf-8")
+    done.taken.insert(0, "tutorial.yaml")
+    return done
+
+
+def render_applied(plan: Plan, done: Applied, stream=sys.stdout) -> None:
+    w = stream.write
+    w(f"instance:  {plan.instance}\n")
+    w(f'version:   "{plan.old_version}" -> "{plan.new_version}"\n')
+    w("outcome:   applied\n\nfiles:\n")
+    for rel in done.taken:
+        w(f"  taken    {rel}\n")
+    for rel in done.deleted:
+        w(f"  deleted  {rel}\n")
+    for rel, cls in done.kept:
+        w(f"  kept     {rel}  ({cls}; the learner's copy stays)\n")
+    w("\nstamp, rewritten at the end of tutorial/tutorial.yaml:\n")
+    for line in done.stamp.splitlines():
+        w(f"  {line}\n")
+    w("\nnext:      belay-validate --instance tutorial (section 3.1), then "
+      "belay-catalogs place-supplies,\n           then STATE.md "
+      "(state-lifecycle.md section 3.2, apply steps 3 to 5)\n")
+    for note in plan.notes:
+        w(f"note:      {note}\n")
+
+
+# -- is the instance behind? ----------------------------------------------
+
+
+def check_version(instance: Path, source: Source, stream=sys.stdout) -> int:
+    """runner-protocol.md section 1, **A resume may say the course has moved on**.
+
+    Reads the source manifest's `version` and nothing else. Exit 3 means
+    "cannot tell", and the tutor says nothing about it.
+    """
+    old = _read_manifest(instance)
+    new = _read_manifest(source.bundle)
+    if isinstance(old, str) or isinstance(new, str):
+        raise Refused("a manifest could not be read: "
+                      + (old if isinstance(old, str) else new))
+    stamp = old.get("instance") if isinstance(old.get("instance"), dict) else {}
+    have = stamp.get("materialized_version", old.get("version", vb.VERSION_ABSENT))
+    want = new.get("version", vb.VERSION_ABSENT)
+    have_v, want_v = vb.parse_version(have), vb.parse_version(want)
+    for label, parsed in (("the instance's", have_v), ("the source's", want_v)):
+        if isinstance(parsed, str):
+            raise Refused(f"{label} version is malformed: {parsed}")
+    behind = want_v > have_v
+    stream.write(
+        f'instance:  "{have_v[0]}.{have_v[1]}"\n'
+        f'source:    "{want_v[0]}.{want_v[1]}"  ({source.how})\n'
+        f"outcome:   {'behind' if behind else 'not behind'}\n"
+    )
+    return EXIT_PLAN if behind else EXIT_NOTHING
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="plan_update.py",
-        description="Plan, without applying, the update of a Belay instance "
-        "from its bundle. Writes nothing.",
+        description="Plan the update of a Belay instance from its bundle, show "
+        "one file's difference, or apply what the learner accepted. Only "
+        "--apply writes, and only inside the instance.",
     )
     parser.add_argument("instance", help="the instance (the tutorial/ directory)")
-    parser.add_argument("bundle", help="the bundle directory to update from")
+    parser.add_argument(
+        "bundle",
+        nargs="?",
+        help="a bundle directory to compare with. The tutor omits it: the "
+        "source is the one the instance stamp names",
+    )
+    parser.add_argument(
+        "--from-catalogs",
+        action="store_true",
+        help="take the bundle the catalogues offer for this course's id "
+        "instead of the one the stamp names; fetches nothing",
+    )
+    parser.add_argument("--config", default=catalogs.DEFAULT_CONFIG)
+    parser.add_argument("--cache-dir", default=catalogs.DEFAULT_CACHE_DIR)
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--diff", metavar="FILE", help="show one file's difference")
+    mode.add_argument("--apply", action="store_true", help="apply the update")
+    mode.add_argument(
+        "--check-version",
+        action="store_true",
+        help="say whether the source's version is later than the instance's",
+    )
+    parser.add_argument(
+        "--take",
+        action="append",
+        default=[],
+        metavar="FILE",
+        help="with --apply: a replace or decide-* file the learner accepted",
+    )
+    parser.add_argument(
+        "--take-replace",
+        action="store_true",
+        help="with --apply: take every replace file (a one-change-set review)",
+    )
     args = parser.parse_args(argv)
+    if (args.take or args.take_replace) and not args.apply:
+        print("error: --take and --take-replace go with --apply", file=sys.stderr)
+        return EXIT_USAGE
+    if args.bundle is not None and args.from_catalogs:
+        print("error: name a bundle, or --from-catalogs, not both", file=sys.stderr)
+        return EXIT_USAGE
+    instance = Path(args.instance)
     try:
-        plan = make_plan(Path(args.instance), Path(args.bundle))
+        source = resolve_source(args)
+        if args.check_version:
+            return check_version(instance, source)
+        plan = make_plan(instance, source.bundle)
+        if args.diff is not None:
+            return show_diff(plan, args.diff)
+        if args.apply:
+            if plan.exit_code() == EXIT_REFUSED:
+                render(plan)
+                sys.stdout.write("\nNothing was applied.\n")
+                return EXIT_REFUSED
+            if plan.exit_code() == EXIT_NOTHING:
+                render(plan)
+                return EXIT_NOTHING
+            check_takes(plan, args.take)
+            done = apply_plan(
+                plan, args.take, args.take_replace, source, catalogs.today_stamp()
+            )
+            render_applied(plan, done)
+            return EXIT_NOTHING
+    except Refused as exc:
+        print(f"refused:   {exc}")
+        print("Nothing was written.")
+        return EXIT_REFUSED
     except (UsageError, OSError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return EXIT_USAGE
     render(plan)
+    if source.how != "the command line":
+        sys.stdout.write(f"source:    {source.locator}  ({source.how})\n")
     return plan.exit_code()
 
 
