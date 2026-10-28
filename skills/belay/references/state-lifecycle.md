@@ -144,7 +144,9 @@ Steps, in order:
    and `tutorial_id` equals the manifest's `id`. The template should already satisfy
    both; if it does not, the bundle is defective — report it rather than silently
    correcting.
-5. **Stamp the instance.** Append one block to the *instance's* copy of `tutorial.yaml`:
+5. **Stamp the instance.** Append one block to the *instance's* copy of `tutorial.yaml`,
+   with the Edit tool (or the host's own file-edit tool), never `cat >>` and a here-document
+   in a shell (`SKILL.md`, the command rule):
 
    ```yaml
    instance:
@@ -171,8 +173,8 @@ Steps, in order:
    block; those keys are the one part of the stamp anything ever reads, and what
    reads them is a session deciding whether this instance was ever checked — never a
    teaching turn.
-6. **Verify the invariant**, by looking: the instance has `STATE.md` and does not have
-   `STATE.template.md`. Say that you checked. **Then validate the instance, before
+6. **Verify the invariant**, by looking with Glob or Read rather than `test` or `ls`: the
+   instance has `STATE.md` and does not have `STATE.template.md`. Say that you checked. **Then validate the instance, before
    step 7 and before anything is placed outside `tutorial/`: section 3.1.**
 7. **Draw the banner, then report what was created.** This is the moment the learner
    first meets the course, and it is the only moment the banner is drawn: the manifest's
@@ -578,7 +580,7 @@ Only what the learner accepted, in this order, while the bundle source is still 
 
 1. **Copy and delete.** Copy each accepted file from the bundle, and delete each `removed`
    file. For `tutorial.yaml`, copy the bundle's file and append the existing `instance:`
-   block again.
+   block again, with the Edit tool as in step 5.
 2. **Rewrite the stamp.** Set `materialized_version` to the bundle's `version`, in quotes,
    or to `"1.0"` when the bundle declares none, and set `materialized_at` to today. Update
    `materialized_from` when the source changed. The instance's own `version` and

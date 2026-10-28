@@ -30,8 +30,17 @@ Load, every turn:
 - the single lesson file named by `STATE.md`'s `active_lesson` — which is normally an
   entry in `lessons`, and may be a key in `optional_lessons` (section 8) or a file under
   `tutorial/lessons.generated/` (section 7);
-- only the `DESIGN.md` sections whose anchors are listed in that lesson's `design_refs`;
+- only the `DESIGN.md` sections whose anchors are listed in that lesson's `design_refs`.
+  For each anchor, find the line of `{#<anchor>}` with the Grep tool — on a host without
+  one, one plain `grep -n '{#<anchor>}' tutorial/DESIGN.md` — then Read from that line with
+  `offset` and `limit`, up to the next heading of the same level;
 - the learner's workspace files that the current task actually concerns.
+
+Every one of these is read with the Read tool, or the host's own file-read tool, and never
+with `cat`, `sed`, `awk`, `head` or `tail` in a shell. Under
+`permissions.blockReadsOutsideWorkingDirectories` a shell read whose path the host cannot
+check asks the learner first, and the `DESIGN.md` anchors alone are read in every lesson
+(`SKILL.md`, the read rule).
 
 Do not load, unless one of the stated exceptions applies:
 
@@ -288,9 +297,9 @@ Run each validator the lesson declares, by name, resolving each name in the mani
 
 | `kind` | How to run it | Success |
 |---|---|---|
-| `command` | run the declared argument list in the workspace root | exit status zero |
-| `file-exists` | check the declared path | it exists |
-| `file-contains` | check the declared path against the declared pattern | it matches |
+| `command` | run the declared argument list in the workspace root, as one simple command | exit status zero |
+| `file-exists` | check the declared path with Glob or Read | it exists |
+| `file-contains` | check the declared path against the declared pattern with Grep or Read | it matches |
 | `git-diff` | inspect the working-tree diff | judge against completion conditions |
 | `manual` | ask the learner for evidence | judge against completion conditions |
 
@@ -2109,7 +2118,9 @@ never from here; advancement is section 6, never a count of `check` events.
 ### 16.1 What you write, and at which point
 
 One line per event, appended at the point in the turn where the event happens. Several
-events from one turn may go in one append, in the order they happened.
+events from one turn may go in one append, in the order they happened. Append with the Edit
+tool, after the last line you read, or create the file with the Write tool when it is
+absent — never `echo >>` or a here-document in a shell (`SKILL.md`, the command rule).
 
 | At | Append |
 |---|---|
@@ -2122,7 +2133,10 @@ events from one turn may go in one append, in the order they happened.
 | section 6, a lesson completed — an assessment left at any result included | `lesson_completed`, then run `scripts/evidence.py compact tutorial` |
 
 `seq` is one more than the last event's. The first time in a session that you append, read
-**only the last line** of the file to learn it — never the whole file. When the file is
+**only the last line** of the file to learn it — never the whole file. Count its lines with
+the Grep tool in count mode (pattern `^`) — on a host without one, one plain
+`grep -c '' tutorial/EVENTS.jsonl` — then Read with that count as `offset` and a `limit` of
+1, never `tail` in a shell. When the file is
 absent, start at 1. When the last line does not parse, the previous write was cut off: run
 `scripts/evidence.py compact tutorial`, which drops it, and read the last line again.
 Do the same after any `compact` that says it renumbered.
