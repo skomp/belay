@@ -13,6 +13,12 @@ Usage:
                                     is already on disk; fetch nothing
     catalogs.py resolve <id>        print one merged entry and the bundle
                                     directory it resolves to; fetch nothing
+    catalogs.py materialize <id>    create tutorial/ in the current directory
+                                    from that bundle, and stamp it; fetch
+                                    nothing
+    catalogs.py place-supplies      place tutorial/tutorial.yaml's supplies
+                                    from the source its stamp names; never
+                                    overwrite; fetch nothing
     catalogs.py covers <query>      print the bundles that TEACH a concept
     catalogs.py follow-ups <id>     print what could be taken after a bundle
     catalogs.py prepare <id>        print what covers the concepts a bundle
@@ -34,6 +40,19 @@ Exit codes:
        and at least one entry is available
     2  usage, or the catalogue of catalogues is unusable
     3  no entry could be served at all
+
+`materialize` and `place-supplies` have their own, in the same shape:
+    0  done
+    1  place-supplies only: some targets could not be created, because a
+       file of the learner's is in the way; the report names each one
+    2  usage or I/O error, or the configuration is unusable
+    3  refused - the report says why, and nothing was written
+`materialize` refuses when tutorial/ already exists, when no catalogue
+supplies the id, and when the bundle is not usable. `place-supplies`
+refuses when the stamp is missing or names no readable local source, and
+when an entry is malformed or reaches outside the bundle or the workspace.
+Neither is ever given a bundle path (belay#76): a path outside the
+workspace on the command line is what makes the host ask the learner.
 
 Three rules this script exists to keep:
 
@@ -72,6 +91,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -2500,6 +2520,23 @@ def command_status(args, stream) -> int:
     return code
 
 
+def bundle_problems(bundle: Path) -> list[str]:
+    """Why `bundle` cannot be materialized from, or [] when it can.
+
+    The test `resolve` has always applied: a directory holding tutorial.yaml
+    and STATE.template.md. `materialize` and `place-supplies` apply the same
+    one, so the three commands cannot disagree about what a bundle is.
+    """
+    if not bundle.is_dir():
+        return [f"{bundle} is not a directory"]
+    problems: list[str] = []
+    if not (bundle / "tutorial.yaml").is_file():
+        problems.append(f"{bundle}/tutorial.yaml is missing")
+    if not (bundle / "STATE.template.md").is_file():
+        problems.append(f"{bundle}/STATE.template.md is missing")
+    return problems
+
+
 def command_resolve(args, stream) -> int:
     cache = Cache(expand(args.cache_dir))
     config = expand(args.config)
@@ -2529,16 +2566,7 @@ def command_resolve(args, stream) -> int:
 
     bundle = Path(match.resolved_path)
     present = bundle.is_dir()
-    manifest = (bundle / "tutorial.yaml").is_file() if present else False
-    template = (bundle / "STATE.template.md").is_file() if present else False
-    problems: list[str] = []
-    if not present:
-        problems.append(f"{bundle} is not a directory")
-    else:
-        if not manifest:
-            problems.append(f"{bundle}/tutorial.yaml is missing")
-        if not template:
-            problems.append(f"{bundle}/STATE.template.md is missing")
+    problems = bundle_problems(bundle)
     code = 0 if not problems else 1
 
     if args.json:
@@ -2585,6 +2613,579 @@ def command_resolve(args, stream) -> int:
             "Materialization may open it now.",
             file=stream,
         )
+    return code
+
+
+# --------------------------------------------------------------------------
+# Reading a bundle source: `materialize` and `place-supplies`
+# --------------------------------------------------------------------------
+#
+# belay#76. Under permissions.blockReadsOutsideWorkingDirectories the host
+# asks the learner before any command that NAMES a path outside the
+# workspace, and a bundle source always is one: a git catalogue's bundle sits
+# in the cache clone, a local one is usually a checkout beside the workspace.
+# A command that reads such a path inside its own process is not asked about.
+# So these two take a tutorial id, or read the instance stamp, and are never
+# given a bundle path. Both work on the current directory, which is the
+# workspace root, and on `tutorial/` inside it.
+#
+# Neither one fetches. `materialize` resolves exactly as `resolve` does, from
+# what `discover` left on disk, and `place-supplies` reads the source the
+# stamp names. Neither one runs anything a bundle declares
+# (runner-protocol.md section 14). Both check everything before they write
+# anything, so a refusal leaves the workspace exactly as it was.
+
+INSTANCE_DIR = "tutorial"
+LOCAL_PREFIX = "local:"
+RUNNER_VERSION = 1
+VERSION_ABSENT = "1.0"
+
+EXIT_DONE = 0
+EXIT_PARTIAL = 1
+EXIT_USAGE = 2
+EXIT_REFUSED = 3
+
+_PLAIN_SCALAR_RE = re.compile(r"[A-Za-z0-9_./~][A-Za-z0-9_./~+@:-]*")
+# A plain scalar YAML would read back as something other than a string.
+_LOOKS_TYPED_RE = re.compile(
+    r"[-+]?[0-9][0-9_.]*|true|false|yes|no|on|off|null|~", re.IGNORECASE
+)
+
+
+class Refusal(Exception):
+    """The command will not act, and has changed nothing."""
+
+
+def yaml_scalar(text: str) -> str:
+    """`text` as a YAML scalar: plain when that is unambiguous, else quoted.
+
+    A JSON string is a valid YAML double-quoted scalar, which is what makes
+    json.dumps the safe fallback for a path holding a space, a '#' or ': '.
+    """
+    if (
+        _PLAIN_SCALAR_RE.fullmatch(text)
+        and not text.endswith(":")
+        and not _LOOKS_TYPED_RE.fullmatch(text)
+    ):
+        return text
+    return json.dumps(text)
+
+
+def locator_for(bundle: Path) -> str:
+    """The provider-qualified form the stamp records (state-lifecycle.md 3.5)."""
+    return LOCAL_PREFIX + os.path.normpath(str(bundle.absolute()))
+
+
+def inside(root: Path, path: Path) -> bool:
+    """True when `path`, with every symbolic link followed, is under `root`.
+
+    escapes() answers the same question on the strings alone, which is right
+    for discovery and wrong here: a bundle fetched from a repository can carry
+    a symbolic link, and copying through one would hand the learner's
+    workspace a file from anywhere on the machine.
+    """
+    real_root = os.path.realpath(root)
+    real = os.path.realpath(path)
+    return real == real_root or real.startswith(real_root.rstrip(os.sep) + os.sep)
+
+
+def read_manifest(path: Path, what: str) -> dict:
+    text = read_text(path)
+    if text is None:
+        raise Refusal(f"{what} {path} could not be read as UTF-8 text")
+    try:
+        document = load_yaml(text, str(path))
+    except YamlError as exc:
+        raise Refusal(f"{what} {path} does not parse: {exc}") from exc
+    if not isinstance(document, dict):
+        raise Refusal(f"{what} {path} is not a mapping")
+    return document
+
+
+def read_stamp(instance: Path) -> dict:
+    manifest = read_manifest(instance / "tutorial.yaml", "the instance manifest")
+    stamp = manifest.get("instance")
+    if not isinstance(stamp, dict):
+        raise Refusal(
+            f"{instance / 'tutorial.yaml'} carries no 'instance:' stamp, so "
+            f"nothing records where this instance came from"
+        )
+    return stamp
+
+
+def source_from_stamp(instance: Path) -> tuple[Path, str]:
+    """The bundle directory the instance stamp names, and its locator.
+
+    A relative `local:` path is relative to the workspace root, which is the
+    instance's parent (state-lifecycle.md section 3 step 5). `local:` is the
+    only locator this runner reads; any other would be a provider it does not
+    have, and reaching one would mean contacting a host.
+    """
+    locator = read_stamp(instance).get("materialized_from")
+    if (
+        not isinstance(locator, str)
+        or not locator.startswith(LOCAL_PREFIX)
+        or not locator[len(LOCAL_PREFIX):]
+    ):
+        raise Refusal(
+            f"the stamp's materialized_from is {locator!r}; this runner reads "
+            f"only a 'local:' path"
+        )
+    path = expand(locator[len(LOCAL_PREFIX):])
+    if not path.is_absolute():
+        path = instance.absolute().parent / path
+    return Path(os.path.normpath(str(path))), locator
+
+
+def usable_source(bundle: Path, locator: str) -> None:
+    """Refuse a source that is not there or is not a bundle."""
+    problems = bundle_problems(bundle)
+    if problems:
+        raise Refusal(
+            f"the source {locator} is not usable: " + "; ".join(problems)
+        )
+    if (bundle / "STATE.md").exists():
+        raise Refusal(
+            f"the source {locator} holds STATE.md, so it is an instance, not "
+            f"a bundle"
+        )
+
+
+def bundle_version(manifest: dict) -> str:
+    """The bundle's `version` exactly as written, or "1.0" when absent."""
+    value = manifest.get("version")
+    if value is None:
+        return VERSION_ABSENT
+    return value if isinstance(value, str) else str(value)
+
+
+def stamp_block(locator: str, version: str, today: str) -> str:
+    return (
+        "instance:\n"
+        f"  materialized_from: {yaml_scalar(locator)}\n"
+        f"  materialized_version: {json.dumps(version)}\n"
+        f"  materialized_at: {today}\n"
+        f"  runner_version: {RUNNER_VERSION}\n"
+    )
+
+
+def today_stamp() -> str:
+    return datetime.now().date().isoformat()
+
+
+def find_entry(args) -> MergedEntry:
+    """The merged entry for args.id, read from disk. Fetches nothing."""
+    cache = Cache(expand(args.cache_dir))
+    run = gather(expand(args.config), cache, False, args.timeout)
+    match = next((e for e in run.entries if e.id == args.id), None)
+    if match is None:
+        available = ", ".join(e.id for e in run.entries) or "(none)"
+        raise Refusal(f"no catalogue supplies {args.id!r}. Available: {available}")
+    return match
+
+
+def _refuse(command: str, exc: Refusal, args, stream) -> int:
+    if args.json:
+        print(
+            json.dumps(
+                {"command": command, "refused": str(exc), "exit_code": EXIT_REFUSED},
+                indent=2,
+                sort_keys=True,
+            ),
+            file=stream,
+        )
+    else:
+        print(f"Belay catalogues - {command}", file=stream)
+        print("", file=stream)
+        print(f"refused: {exc}", file=stream)
+        print("Nothing was written.", file=stream)
+    return EXIT_REFUSED
+
+
+def _umask() -> int:
+    current = os.umask(0)
+    os.umask(current)
+    return current
+
+
+def command_materialize(args, stream) -> int:
+    """state-lifecycle.md section 3, steps 1, 2, 3 and 5, in one command.
+
+    Builds the instance in a hidden staging directory inside the workspace and
+    renames it into place, so an interrupted run never leaves a half-copied
+    `tutorial/` that a later session would take for an instance.
+    """
+    import plan_update  # the same file set the update compares
+
+    workspace = Path.cwd()
+    instance = workspace / INSTANCE_DIR
+    try:
+        if os.path.lexists(instance):
+            raise Refusal(
+                "tutorial/ already exists here. It is singular, and "
+                "materializing over it would destroy a learner's progress. "
+                "When it is this course and the learner wants its newer "
+                "version, that is an update (state-lifecycle.md section 3.2); "
+                "otherwise ask"
+            )
+        match = find_entry(args)
+        bundle = Path(match.resolved_path)
+        locator = locator_for(bundle)
+        usable_source(bundle, locator)
+        manifest = read_manifest(bundle / "tutorial.yaml", "the bundle manifest")
+        if "instance" in manifest:
+            raise Refusal(
+                f"the bundle's tutorial.yaml already carries an 'instance:' "
+                f"stamp, which only an instance has (validator check 7)"
+            )
+        files = plan_update.bundle_owned_files(bundle)
+        for rel in [*files, "STATE.template.md"]:
+            if not inside(bundle, bundle / rel):
+                raise Refusal(
+                    f"{rel} in the bundle is a symbolic link that leads "
+                    f"outside the bundle; nothing outside a bundle is copied"
+                )
+        version = bundle_version(manifest)
+        today = today_stamp()
+    except Refusal as exc:
+        return _refuse(f"materialize {args.id}", exc, args, stream)
+
+    staging = Path(
+        tempfile.mkdtemp(prefix=".tutorial-materializing-", dir=workspace)
+    )
+    try:
+        os.chmod(staging, 0o777 & ~_umask())
+        for rel in files:
+            target = staging / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(bundle / rel, target)
+        shutil.copyfile(bundle / "STATE.template.md", staging / "STATE.md")
+        manifest_copy = staging / "tutorial.yaml"
+        text = manifest_copy.read_text(encoding="utf-8")
+        if text and not text.endswith("\n"):
+            text += "\n"
+        block = stamp_block(locator, version, today)
+        manifest_copy.write_text(text + "\n" + block, encoding="utf-8")
+        if os.path.lexists(instance):
+            raise OSError(f"{instance} appeared while the instance was being built")
+        os.rename(staging, instance)
+    except (OSError, UnicodeDecodeError) as exc:
+        shutil.rmtree(staging, ignore_errors=True)
+        print(f"error: {exc}", file=sys.stderr)
+        print("Nothing was left behind in the workspace.", file=sys.stderr)
+        return EXIT_USAGE
+
+    lesson_files = [rel for rel in files if rel.startswith("lessons/")]
+    top = [rel for rel in files if not rel.startswith("lessons/")]
+    if args.json:
+        print(
+            json.dumps(
+                {
+                    "command": "materialize",
+                    "id": match.id,
+                    "catalog": match.catalog_id,
+                    "freshness": match.freshness,
+                    "instance": INSTANCE_DIR,
+                    "copied": files,
+                    "state": "STATE.md",
+                    "stamp": {
+                        "materialized_from": locator,
+                        "materialized_version": version,
+                        "materialized_at": today,
+                        "runner_version": RUNNER_VERSION,
+                    },
+                    "exit_code": EXIT_DONE,
+                },
+                indent=2,
+                sort_keys=True,
+            ),
+            file=stream,
+        )
+        return EXIT_DONE
+    print(f"Belay catalogues - materialize {match.id}", file=stream)
+    print("", file=stream)
+    print(f"  id:             {match.id}", file=stream)
+    print(f"  title:          {match.entry.get('title')}", file=stream)
+    print(f"  catalogue:      {match.catalog_id} ({match.origin})", file=stream)
+    print(f"  freshness:      {match.freshness}", file=stream)
+    for catalog_id, origin in match.shadowed:
+        print(
+            f"  OVERRIDES:      the {catalog_id} catalogue ({origin}) also "
+            f"carries {match.id}; it is shadowed by this one",
+            file=stream,
+        )
+    print("", file=stream)
+    print("Created tutorial/:", file=stream)
+    print(
+        f"  copied:  {', '.join(top)}, and {len(lesson_files)} file(s) under lessons/",
+        file=stream,
+    )
+    print(
+        "  state:   STATE.template.md became tutorial/STATE.md; the instance "
+        "holds no STATE.template.md",
+        file=stream,
+    )
+    print("  stamp:   appended to tutorial/tutorial.yaml", file=stream)
+    for line in block.splitlines():
+        print(f"             {line}", file=stream)
+    print("", file=stream)
+    print(
+        "Nothing was fetched, nothing outside tutorial/ was written, and "
+        "nothing the bundle declares was run. Next: state-lifecycle.md "
+        "section 3 step 4, then `belay-validate --instance tutorial`. Place "
+        "supplies after validation, with `belay-catalogs place-supplies`.",
+        file=stream,
+    )
+    return EXIT_DONE
+
+
+@dataclass
+class Supply:
+    """One manifest-scope `supplies` entry, planned before anything is written."""
+
+    index: int
+    from_: str
+    to: str
+    describe: str
+    pairs: list[tuple[Path, str]] = field(default_factory=list)  # (source, target rel)
+    placed: list[str] = field(default_factory=list)
+    present: list[str] = field(default_factory=list)
+    blocked: list[str] = field(default_factory=list)
+
+    def as_dict(self) -> dict:
+        return {
+            "from": self.from_,
+            "to": self.to,
+            "describe": self.describe,
+            "placed": self.placed,
+            "already_present": self.present,
+            "blocked": self.blocked,
+        }
+
+
+def _target_rel(to: str, rel: str | None) -> str:
+    base = "" if to == "." else to.rstrip("/")
+    if rel is None:
+        return base or "."
+    return f"{base}/{rel}" if base else rel
+
+
+def plan_supplies(workspace: Path, bundle: Path, manifest: dict) -> list[Supply]:
+    """Every manifest-scope entry with its file pairs, or a Refusal.
+
+    The rules are the validator's check 22 (bundle-format.md section 2,
+    **supplies** and **Where a `from` may point**), applied again here
+    because this is the moment the files are actually read: an instance
+    validated once may have been edited since, and a malformed entry must
+    stop the placement before the first file lands rather than after it.
+    """
+    import validate_bundle as vb
+
+    raw = manifest.get("supplies")
+    if raw in (None, []):
+        return []
+    if not isinstance(raw, list):
+        raise Refusal(
+            "tutorial.yaml's 'supplies' is not a list of entries (validator "
+            "check 22)"
+        )
+    planned: list[Supply] = []
+    for index, entry in enumerate(raw, start=1):
+        where = f"supplies entry {index}"
+        if not isinstance(entry, dict):
+            raise Refusal(f"{where} is not a mapping of from, to and describe")
+        unknown = sorted(set(entry) - {"from", "to", "describe"})
+        if unknown:
+            raise Refusal(f"{where} carries unknown key(s) {', '.join(unknown)}")
+        from_, to, describe = entry.get("from"), entry.get("to"), entry.get("describe")
+        if not isinstance(describe, str) or not describe.strip():
+            raise Refusal(f"{where} has no 'describe' line to tell the learner")
+        if not isinstance(from_, str) or not from_.rstrip("/"):
+            raise Refusal(f"{where}'s 'from' must be a non-empty path")
+        to_error = vb._supplies_to_error(to)
+        if to_error is not None:
+            raise Refusal(f"{where}: {to_error}")
+        bare = from_.rstrip("/")
+        if escapes(bundle, bare):
+            raise Refusal(
+                f"{where}'s 'from' {from_!r} leaves the bundle; supplies reach "
+                f"only as far as the bundle itself"
+            )
+        if bare.split("/", 1)[0] == vb.GENERATED_DIR:
+            raise Refusal(
+                f"{where}'s 'from' {from_!r} points inside "
+                f"{vb.GENERATED_DIR}/, which no bundle ships"
+            )
+        resolved, reason = vb.resolve_exact(bundle, bare)
+        if resolved is None:
+            raise Refusal(f"{where}'s 'from' {from_!r} does not resolve: {reason}")
+        if not inside(bundle, resolved):
+            raise Refusal(
+                f"{where}'s 'from' {from_!r} is a symbolic link that leads "
+                f"outside the bundle"
+            )
+        is_dir = resolved.is_dir()
+        if from_.endswith("/") != is_dir:
+            raise Refusal(
+                f"{where}'s 'from' {from_!r} "
+                + ("ends in '/' but names a file" if not is_dir
+                   else "names a directory, and a directory's 'from' must end in '/'")
+            )
+        supply = Supply(index, from_, str(to), describe.strip())
+        if not is_dir:
+            supply.pairs.append((resolved, _target_rel(str(to), None)))
+        else:
+            for current, dirs, names in os.walk(resolved):
+                here = Path(current)
+                for name in sorted(dirs):
+                    if (here / name).is_symlink():
+                        raise Refusal(
+                            f"{where}: {(here / name).relative_to(bundle)} is a "
+                            f"symbolic link to a directory, which placement "
+                            f"does not follow"
+                        )
+                dirs.sort()
+                for name in sorted(names):
+                    source = here / name
+                    if not inside(bundle, source):
+                        raise Refusal(
+                            f"{where}: {source.relative_to(bundle)} is a "
+                            f"symbolic link that leads outside the bundle"
+                        )
+                    rel = source.relative_to(resolved).as_posix()
+                    supply.pairs.append((source, _target_rel(str(to), rel)))
+        for _, target_rel in supply.pairs:
+            target = workspace / target_rel
+            ancestor = target
+            while not os.path.lexists(ancestor) and ancestor != workspace:
+                ancestor = ancestor.parent
+            if not inside(workspace, ancestor):
+                raise Refusal(
+                    f"{where}: the target {target_rel} would land outside the "
+                    f"workspace through a symbolic link"
+                )
+        planned.append(supply)
+    return planned
+
+
+def _blocked_by(workspace: Path, target: Path) -> str | None:
+    """The existing non-directory in the way of `target`'s parents, if any."""
+    current = target.parent
+    while current != workspace and current != current.parent:
+        if os.path.lexists(current) and not current.is_dir():
+            return current.relative_to(workspace).as_posix()
+        current = current.parent
+    return None
+
+
+def place(workspace: Path, supplies: list[Supply]) -> None:
+    """Create each missing target. Never overwrites: O_EXCL is the last word."""
+    for supply in supplies:
+        for source, target_rel in supply.pairs:
+            target = workspace / target_rel
+            if os.path.lexists(target):
+                supply.present.append(target_rel)
+                continue
+            blocker = _blocked_by(workspace, target)
+            if blocker is not None:
+                supply.blocked.append(f"{target_rel} (the file {blocker} is in the way)")
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            data = source.read_bytes()
+            try:
+                with open(target, "xb") as handle:
+                    handle.write(data)
+            except FileExistsError:
+                supply.present.append(target_rel)
+                continue
+            shutil.copymode(source, target)
+            supply.placed.append(target_rel)
+
+
+def command_place_supplies(args, stream) -> int:
+    """state-lifecycle.md section 3 step 8, from the source the stamp names."""
+    workspace = Path.cwd()
+    instance = workspace / INSTANCE_DIR
+    if not (instance / "tutorial.yaml").is_file():
+        print(
+            f"error: there is no {INSTANCE_DIR}/tutorial.yaml in {workspace}. "
+            f"Run this from the workspace root, after materialization",
+            file=sys.stderr,
+        )
+        return EXIT_USAGE
+    try:
+        bundle, locator = source_from_stamp(instance)
+        usable_source(bundle, locator)
+        manifest = read_manifest(instance / "tutorial.yaml", "the instance manifest")
+        supplies = plan_supplies(workspace, bundle, manifest)
+    except Refusal as exc:
+        return _refuse("place-supplies", exc, args, stream)
+    try:
+        place(workspace, supplies)
+    except OSError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return EXIT_USAGE
+    code = EXIT_PARTIAL if any(s.blocked for s in supplies) else EXIT_DONE
+
+    if args.json:
+        print(
+            json.dumps(
+                {
+                    "command": "place-supplies",
+                    "source": locator,
+                    "entries": [s.as_dict() for s in supplies],
+                    "exit_code": code,
+                },
+                indent=2,
+                sort_keys=True,
+            ),
+            file=stream,
+        )
+        return code
+    print("Belay catalogues - place-supplies", file=stream)
+    print("", file=stream)
+    print(f"  instance:  {INSTANCE_DIR}", file=stream)
+    print(f"  source:    {locator}  (the instance stamp's materialized_from)", file=stream)
+    print("", file=stream)
+    if not supplies:
+        print("tutorial.yaml declares no supplies. Nothing to place.", file=stream)
+        return code
+    for supply in supplies:
+        print(
+            f"entry {supply.index}: from {supply.from_} to {supply.to}",
+            file=stream,
+        )
+        print(f"  describe:      {supply.describe}", file=stream)
+        if not supply.placed and not supply.blocked:
+            print(
+                "  every target was already here and was left alone; say "
+                "nothing about this entry",
+                file=stream,
+            )
+        else:
+            for label, items in (
+                ("placed", supply.placed),
+                ("already here", supply.present),
+                ("NOT placed", supply.blocked),
+            ):
+                if items:
+                    print(f"  {label + ':':<14} {items[0]}", file=stream)
+                    for item in items[1:]:
+                        print(f"  {'':<14} {item}", file=stream)
+        print("", file=stream)
+    placed = sum(len(s.placed) for s in supplies)
+    present = sum(len(s.present) for s in supplies)
+    blocked = sum(len(s.blocked) for s in supplies)
+    print(
+        f"summary: {placed} placed, {present} already here and left alone, "
+        f"{blocked} not placed",
+        file=stream,
+    )
+    print(
+        "No file that already existed was changed. Report this as setup, not "
+        "as a lesson, and write nothing about it into STATE.md.",
+        file=stream,
+    )
     return code
 
 
@@ -2735,6 +3336,20 @@ def build_parser() -> argparse.ArgumentParser:
     )
     resolve.add_argument("id", help="the tutorial id the learner chose")
     resolve.set_defaults(run=command_resolve, offline=True)
+
+    materialize = sub.add_parser(
+        "materialize",
+        help="create tutorial/ in the current directory from a chosen tutorial",
+    )
+    materialize.add_argument("id", help="the tutorial id the learner chose")
+    materialize.set_defaults(run=command_materialize, offline=True)
+
+    place_supplies = sub.add_parser(
+        "place-supplies",
+        help="place tutorial.yaml's supplies from the source the instance "
+        "stamp names; never overwrites",
+    )
+    place_supplies.set_defaults(run=command_place_supplies, offline=True)
 
     covers = sub.add_parser(
         "covers", help="which bundles TEACH a concept (never which assume it)"

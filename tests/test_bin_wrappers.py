@@ -37,7 +37,7 @@ SCRIPTS = SKILL / "scripts"
 WRAPPERS = {
     "belay-catalogs": ("catalogs.py", "Fetch, cache and merge"),
     "belay-validate": ("validate_bundle.py", "Structurally validate a Belay"),
-    "belay-plan-update": ("plan_update.py", "Plan, without applying"),
+    "belay-plan-update": ("plan_update.py", "Plan the update of a Belay instance"),
     "belay-evidence": ("evidence.py", "Repair, compact or summarise"),
 }
 

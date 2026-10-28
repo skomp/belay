@@ -459,6 +459,280 @@ def test_writes_nothing(tmp: Path) -> None:
     record(digest(inst) != before, "writes nothing: the digest sees a rewrite")
 
 
+# --------------------------------------------------------------------------
+# The source from the stamp, --diff, --apply and --check-version (belay#76)
+# --------------------------------------------------------------------------
+#
+# The tutor never names the bundle: under
+# permissions.blockReadsOutsideWorkingDirectories a bundle path on the command
+# line makes the host ask the learner. Every case below runs the script the
+# way the tutor does - from the workspace root, with `tutorial` as the only
+# path - and make_pair's stamp, `local:../bundle`, is what finds the bundle.
+
+
+def run_ws(workspace: Path, *args: str) -> tuple[int, str]:
+    proc = subprocess.run(
+        [sys.executable, "-B", str(SCRIPT), "tutorial", *args],
+        cwd=workspace,
+        capture_output=True,
+        text=True,
+    )
+    return proc.returncode, proc.stdout + proc.stderr
+
+
+def stamp_of(inst: Path) -> dict:
+    manifest = pu._read_manifest(inst)
+    assert isinstance(manifest, dict), manifest
+    stamp = manifest.get("instance")
+    return stamp if isinstance(stamp, dict) else {}
+
+
+def validate_instance(inst: Path) -> int:
+    proc = subprocess.run(
+        [sys.executable, "-B", str(SCRIPTS / "validate_bundle.py"), "--instance", str(inst)],
+        capture_output=True,
+        text=True,
+    )
+    return proc.returncode
+
+
+def a_1_1_update(tmp: Path) -> tuple[Path, Path]:
+    """A MINOR update with one of each class the apply step acts on.
+
+    lessons/02 changes (not started: replace), lessons/01 changes (active:
+    decide-active), a loose file is added under lessons/, and a loose file
+    the instance holds there is gone from the bundle (removed).
+    """
+    inst, bundle = make_pair(tmp, active=L01)
+    set_version(bundle, "1.1")
+    append(bundle / L02, "\nThe bundle's new paragraph for lesson 02.\n")
+    append(bundle / L01, "\nThe bundle's new paragraph for lesson 01.\n")
+    (bundle / "lessons/extra.txt").write_text("added upstream\n")
+    (inst / "lessons/stale.txt").write_text("dropped upstream\n")
+    (inst / "lessons/old-assets").mkdir()
+    (inst / "lessons/old-assets/a.txt").write_text("in a folder the bundle dropped\n")
+    return inst, bundle
+
+
+@tmpcase
+def test_the_source_comes_from_the_stamp(tmp: Path) -> None:
+    inst, bundle = a_1_1_update(tmp)
+    ws = inst.parent
+    code, out = run_ws(ws)
+    record(code == pu.EXIT_PLAN, "stamp source: `tutorial` alone makes the plan",
+           f"exit {code}\n{out}")
+    record(code == run_cli(inst, bundle),
+           "stamp source: the same exit as naming the bundle directly")
+    record("local:../bundle" in out and "(the instance stamp)" in out,
+           "stamp source: the report names the locator and where it came from", out)
+    # The stamp is relative to the WORKSPACE, not to the current directory:
+    # run from somewhere else and it still finds the bundle.
+    proc = subprocess.run(
+        [sys.executable, "-B", str(SCRIPT), str(inst)],
+        cwd=tmp, capture_output=True, text=True,
+    )
+    record(proc.returncode == pu.EXIT_PLAN,
+           "stamp source: a relative locator resolves from the workspace root",
+           f"exit {proc.returncode}\n{proc.stdout}{proc.stderr}")
+
+
+@tmpcase
+def test_an_unusable_stamp_is_refused(tmp: Path) -> None:
+    inst, bundle = a_1_1_update(tmp)
+    ws = inst.parent
+    manifest = inst / "tutorial.yaml"
+    original = manifest.read_text()
+    cases = [
+        ("the stamp is missing", pu.strip_stamp(original)),
+        ("the stamp names a source that is not there",
+         original.replace("local:../bundle", "local:../no-such-bundle")),
+        ("the stamp names a provider this runner lacks",
+         original.replace("local:../bundle", "git:https://example.invalid/x")),
+        ("the manifest does not parse", original + "\n  : : [\n"),
+    ]
+    for label, text in cases:
+        manifest.write_text(text)
+        before = (digest(ws), digest(bundle))
+        for mode in ((), ("--diff", L02), ("--apply", "--take-replace"), ("--check-version",)):
+            code, out = run_ws(ws, *mode)
+            record(code == pu.EXIT_REFUSED,
+                   f"refused when {label}: {' '.join(mode) or 'plan'} exits 3",
+                   f"exit {code}\n{out}")
+        record((digest(ws), digest(bundle)) == before,
+               f"refused when {label}: nothing was written")
+    manifest.write_text(original)
+    code, _ = run_ws(ws)
+    record(code == pu.EXIT_PLAN, "refusals: the restored stamp plans again (the control)")
+
+
+@tmpcase
+def test_diff_shows_one_file(tmp: Path) -> None:
+    inst, bundle = a_1_1_update(tmp)
+    ws = inst.parent
+    code, out = run_ws(ws, "--diff", L02)
+    record(code == 1 and "+The bundle's new paragraph for lesson 02." in out,
+           "diff: a replace file differs, and the bundle's line is shown added",
+           f"exit {code}\n{out}")
+    code, out = run_ws(ws, "--diff", "COURSE.md")
+    record(code == 0 and "+" not in out.split("\n\n", 1)[1],
+           "diff: an unchanged file exits 0 and shows no change", f"exit {code}\n{out}")
+    code, out = run_ws(ws, "--diff", "tutorial.yaml")
+    record(code == 1 and '+version: "1.1"' in out,
+           "diff: the manifest's version change is shown", out)
+    record("materialized_from" not in out and "instance:" not in out,
+           "diff: the manifest is compared without the instance stamp", out)
+    code, out = run_ws(ws, "--diff", "lessons/extra.txt")
+    record(code == 1 and "+added upstream" in out,
+           "diff: an added file is shown against nothing", out)
+    code, out = run_ws(ws, "--diff", "lessons/stale.txt")
+    record(code == 1 and "-dropped upstream" in out,
+           "diff: a removed file is shown going away", out)
+    code, out = run_ws(ws, "--diff", "STATE.md")
+    record(code == pu.EXIT_USAGE, "diff: STATE.md is not a compared file, exit 2", out)
+
+
+@tmpcase
+def test_apply_takes_what_was_accepted(tmp: Path) -> None:
+    inst, bundle = a_1_1_update(tmp)
+    ws = inst.parent
+    l01_before = (inst / L01).read_bytes()
+    record(l01_before != (bundle / L01).read_bytes(),
+           "apply: the control - the active lesson really differs before the apply")
+    record((inst / "lessons/old-assets/a.txt").is_file(),
+           "apply: the control - the dropped folder is there before the apply")
+    code, out = run_ws(ws, "--apply", "--take-replace")
+    record(code == 0 and "outcome:   applied" in out, "apply: exit 0, applied",
+           f"exit {code}\n{out}")
+    record((inst / L02).read_bytes() == (bundle / L02).read_bytes(),
+           "apply: the replace file now holds the bundle's bytes")
+    record((inst / L01).read_bytes() == l01_before,
+           "apply: the decide-active file nobody took is the learner's copy, byte for byte")
+    record((inst / "lessons/extra.txt").read_bytes()
+           == (bundle / "lessons/extra.txt").read_bytes(),
+           "apply: the added file was copied")
+    record(not (inst / "lessons/stale.txt").exists(),
+           "apply: the removed file was deleted")
+    record(not (inst / "lessons/old-assets").exists() and (inst / "lessons").is_dir(),
+           "apply: a folder the deletions emptied is removed, lessons/ is not")
+    text = (inst / "tutorial.yaml").read_text()
+    record(pu.strip_stamp(text) == pu.strip_stamp((bundle / "tutorial.yaml").read_text()),
+           "apply: tutorial.yaml is the bundle's, plus the stamp")
+    stamp = stamp_of(inst)
+    record(stamp.get("materialized_version") == "1.1"
+           and stamp.get("materialized_at") == pu.catalogs.today_stamp()
+           and stamp.get("materialized_from") == "local:../bundle"
+           and stamp.get("runner_version") == 1,
+           "apply: the stamp holds the new version, today, the same source", repr(stamp))
+    record(text.count("\ninstance:") == 1, "apply: exactly one stamp", text[-400:])
+    record(validate_instance(inst) == 0,
+           "apply: the updated instance validates (check 30 sees one version)")
+    plan = pu.make_plan(inst, bundle)
+    changed = {r: c for r, c in plan.classes.items() if c != pu.UNCHANGED}
+    record(changed == {L01: pu.DECIDE_ACTIVE},
+           "apply: a second plan shows only the file the learner kept", repr(changed))
+    code, out = run_ws(ws, "--apply", "--take", L01)
+    record(code == 0 and (inst / L01).read_bytes() == (bundle / L01).read_bytes(),
+           "apply: --take of a decide file takes the bundle's copy", out)
+
+
+@tmpcase
+def test_apply_rewrites_the_validation_record(tmp: Path) -> None:
+    inst, bundle = a_1_1_update(tmp)
+    append(inst / "tutorial.yaml",
+           "  validated: 2026-10-14\n  validation: not-certified\n"
+           "  validation_warnings: 2\n  validation_unchecked: [1, setup:cargo-check]\n")
+    record(stamp_of(inst).get("validated") == "2026-10-14",
+           "restamp: the control - the old record parses before the apply")
+    code, out = run_ws(inst.parent, "--apply", "--take-replace")
+    stamp = stamp_of(inst)
+    record(code == 0 and "validated" not in stamp and "validation_warnings" not in stamp,
+           "restamp: validated and validation_warnings are removed", repr(stamp))
+    record(stamp.get("validation") == "not-certified"
+           and stamp.get("validation_unchecked") == ["setup:cargo-check"],
+           "restamp: a failed setup check stays recorded, and only it", repr(stamp))
+
+    inst2, _ = a_1_1_update(tmp / "second")
+    append(inst2 / "tutorial.yaml", "  validated: 2026-10-14\n  validation: pass\n")
+    run_ws(inst2.parent, "--apply", "--take-replace")
+    stamp = stamp_of(inst2)
+    record(not any(k in stamp for k in pu.VALIDATION_KEYS),
+           "restamp: a plain pass leaves no validation key at all", repr(stamp))
+
+
+@tmpcase
+def test_apply_refuses_and_writes_nothing(tmp: Path) -> None:
+    inst, bundle = a_1_1_update(tmp)
+    ws = inst.parent
+    before = (digest(ws), digest(bundle))
+    for label, args, want in (
+        ("--take of an unchanged file", ("--apply", "--take", "COURSE.md"), pu.EXIT_USAGE),
+        ("--take of tutorial.yaml", ("--apply", "--take", "tutorial.yaml"), pu.EXIT_USAGE),
+        ("--take without --apply", ("--take", L02), pu.EXIT_USAGE),
+    ):
+        code, out = run_ws(ws, *args)
+        record(code == want, f"apply refusal: {label} exits {want}", f"exit {code}\n{out}")
+    edit(bundle / "tutorial.yaml", "id: rust-cli-basics", "id: another-course")
+    before = (digest(ws), digest(bundle))
+    code, out = run_ws(ws, "--apply", "--take-replace")
+    record(code == pu.EXIT_REFUSED and "Nothing was applied" in out,
+           "apply refusal: a refused plan applies nothing, exit 3", f"exit {code}\n{out}")
+    record((digest(ws), digest(bundle)) == before,
+           "apply refusal: both trees identical afterwards")
+
+
+@tmpcase
+def test_check_version(tmp: Path) -> None:
+    inst, bundle = make_pair(tmp)
+    ws = inst.parent
+    code, out = run_ws(ws, "--check-version")
+    record(code == 0 and "not behind" in out, "check-version: the same version is not behind",
+           f"exit {code}\n{out}")
+    set_version(bundle, "1.10")
+    code, out = run_ws(ws, "--check-version")
+    record(code == 1 and "outcome:   behind" in out and '"1.10"' in out,
+           "check-version: a later source is behind, compared as integers", out)
+    before = digest(ws)
+    set_version(bundle, "one point two")
+    code, out = run_ws(ws, "--check-version")
+    record(code == pu.EXIT_REFUSED, "check-version: a malformed version cannot tell, exit 3", out)
+    record(digest(ws) == before, "check-version: writes nothing")
+
+
+@tmpcase
+def test_from_catalogs(tmp: Path) -> None:
+    inst, bundle = a_1_1_update(tmp)
+    ws = inst.parent
+    other = tmp / "elsewhere" / "rust-cli-basics"
+    shutil.copytree(bundle, other)
+    set_version(other, "1.2")
+    config = tmp / "config"
+    config.mkdir()
+    (config / "catalog.yaml").write_text(
+        "catalog_version: 1\ntutorials:\n"
+        "  - id: rust-cli-basics\n    title: t\n    description: d\n"
+        "    subjects: [rust]\n    level: beginner\n    workspace_kind: none\n"
+        f"    source:\n      type: local\n      path: {other}\n"
+    )
+    (config / "catalogs.yaml").write_text(
+        "catalogs_version: 1\ncatalogs:\n  - id: only\n"
+        f"    source: {{ type: file, path: {config / 'catalog.yaml'} }}\n"
+    )
+    opts = ("--from-catalogs", "--config", str(config / "catalogs.yaml"),
+            "--cache-dir", str(tmp / "cache"))
+    code, out = run_ws(ws, *opts)
+    record(code == pu.EXIT_PLAN and '-> "1.2"' in out and "(the catalogues)" in out,
+           "from-catalogs: the plan is against the catalogue's copy", f"exit {code}\n{out}")
+    code, out = run_ws(ws, *opts, "--apply", "--take-replace")
+    stamp = stamp_of(inst)
+    record(code == 0 and stamp.get("materialized_from") == f"local:{other}"
+           and stamp.get("materialized_version") == "1.2",
+           "from-catalogs: the apply records the new source and version", repr(stamp))
+    (config / "catalog.yaml").write_text("catalog_version: 1\ntutorials: []\n")
+    code, out = run_ws(ws, *opts)
+    record(code == pu.EXIT_REFUSED,
+           "from-catalogs: no catalogue offering the course is a refusal", out)
+
+
 def main() -> int:
     print("plan_update.py test suite")
     print(f"  script: {SCRIPT}")
@@ -481,6 +755,14 @@ def main() -> int:
         test_absent_version_reads_as_1_0,
         test_usage_errors_exit_2,
         test_writes_nothing,
+        test_the_source_comes_from_the_stamp,
+        test_an_unusable_stamp_is_refused,
+        test_diff_shows_one_file,
+        test_apply_takes_what_was_accepted,
+        test_apply_rewrites_the_validation_record,
+        test_apply_refuses_and_writes_nothing,
+        test_check_version,
+        test_from_catalogs,
     ):
         try:
             test()
