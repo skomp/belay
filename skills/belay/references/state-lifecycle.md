@@ -118,35 +118,65 @@ file.
 Preconditions:
 
 - the learner has chosen a tutorial from the catalogue (see `catalogue-format.md`);
-- the entry's `source` has been resolved to a readable bundle directory;
+- the entry's `source` resolves to a readable bundle directory. `belay-catalogs materialize`
+  resolves it itself, exactly as `belay-catalogs resolve` does, from what discovery left on
+  disk, and refuses when it does not;
 - the workspace root is known, and satisfies the bundle's `workspace_kind`;
 - there is no existing `tutorial/` in that workspace. If there is, stop — `tutorial/` is
   singular, and materializing over it destroys a learner's progress. When the existing
   instance is this course and the learner wants its newer version, that is an update, and
   section 3.2 is the procedure. Otherwise ask.
 
-Steps, in order:
+**Steps 1, 2, 3 and 5 are one command, and you do not do them by hand.** From the workspace
+root, run:
+
+```
+belay-catalogs materialize <id>
+```
+
+`<id>` is the tutorial id the learner chose. The bundle is outside the workspace — a Git
+catalogue's bundle sits in its cache clone under `~/.cache/belay/`, and a local one is
+usually a checkout beside the workspace — and under
+`permissions.blockReadsOutsideWorkingDirectories` the host asks the learner before any read
+or command that names it. The command reads it inside its own process, and its argument
+names nothing outside the workspace. So do not copy, list or diff the bundle yourself, and
+do not ask the learner to add its directory with `/add-dir`. Every later read of the source
+goes through a command as well: `belay-catalogs place-supplies` (step 8) and
+`belay-plan-update` (section 3.2, and the resume check in `runner-protocol.md` section 1).
+
+The command fetches nothing, runs nothing the bundle declares, and builds the instance in a
+hidden staging directory that it renames to `tutorial/` only when every file is in place, so
+an interrupted run leaves no half-copied instance. It prints what it copied and the stamp it
+wrote.
+
+| Exit | Meaning | What the runner does |
+|---|---|---|
+| 0 | `tutorial/` was created, copied, converted and stamped | go on to step 4 |
+| 2 | usage or I/O error, or the catalogue of catalogues is unusable | correct it and run again. Nothing was left in the workspace |
+| 3 | refused: `tutorial/` already exists, no catalogue supplies the id, the bundle is not there or lacks `tutorial.yaml` or `STATE.template.md`, it is an instance rather than a bundle, or it holds a symbolic link leading outside itself | nothing was written. Say what the report names. An existing `tutorial/` is the precondition above; a missing bundle may be a cached catalogue naming one the last fetch did not carry |
+
+What the command does, step by step:
 
 1. **Create the instance directory** `tutorial/` at the workspace root.
 2. **Copy the bundle's files into it**: `tutorial.yaml`, `COURSE.md`, `DESIGN.md`, and
-   `lessons/` in full, including lesson folders and their material. The instance is
+   `lessons/` in full, including lesson folders and their material — the same file set the
+   update compares (section 3.2). The instance is
    self-contained; teaching never reaches back into the bundle source afterwards. Two
    moments are outside teaching and read the source, and neither one changes this rule.
    A resume may read the source manifest's `version` and nothing else
    (`runner-protocol.md` section 1). An update the learner asked for reads the whole
    source (section 3.2).
 3. **Convert the state file.** Copy `STATE.template.md` to `STATE.md` **in the instance**,
-   then delete `STATE.template.md` from the instance. Both steps matter: an instance that
+   and never copy `STATE.template.md` itself. This matters: an instance that
    still holds `STATE.template.md` is indistinguishable from a half-materialized bundle,
    and a validator in instance mode reports it.
-4. **Initialise `STATE.md`.** Set `status` to `in-progress` when the first lesson begins,
+4. **Initialise `STATE.md`** — yours, with the Edit tool. Set `status` to `in-progress` when the first lesson begins,
    set `updated` to today, and confirm `active_lesson` equals the manifest's `lessons[0]`
    and `tutorial_id` equals the manifest's `id`. The template should already satisfy
    both; if it does not, the bundle is defective — report it rather than silently
    correcting.
-5. **Stamp the instance.** Append one block to the *instance's* copy of `tutorial.yaml`,
-   with the Edit tool (or the host's own file-edit tool), never `cat >>` and a here-document
-   in a shell (`SKILL.md`, the command rule):
+5. **Stamp the instance.** The command appends one block to the *instance's* copy of
+   `tutorial.yaml`:
 
    ```yaml
    instance:
@@ -157,11 +187,15 @@ Steps, in order:
    ```
 
    `materialized_from` records the resolved source in provider-qualified form
-   (`local:` plus the path, and for future provider types the equivalent locator). A
-   relative `local:` path is relative to the workspace root, which is how the example
-   reaches a `belay-bundles` checkout beside the workspace.
+   (`local:` plus the path, and for future provider types the equivalent locator). The
+   command writes the absolute path the entry resolved to — for a Git catalogue, the
+   bundle inside the cache clone. A relative `local:` path, as in this example and in
+   instances stamped by hand before the command existed, is relative to the workspace
+   root, which is how the example reaches a `belay-bundles` checkout beside the workspace.
+   `place-supplies` and `belay-plan-update` read the source from this key, and only a
+   `local:` locator is one they can read.
    `materialized_version` records *which version* of that source this instance holds:
-   copy the bundle's `version` exactly, in quotes, or write `"1.0"` when the bundle
+   the bundle's `version` exactly, in quotes, or `"1.0"` when the bundle
    declares none (`bundle-format.md` section 2, **Content version**). A path has no
    version, so without this key the only way to tell whether an instance is behind its
    bundle is to compare every file. With it, the instance is behind when the bundle's
@@ -245,23 +279,47 @@ Steps, in order:
    The banner names the course; this says where it now lives and what happens next.
 8. **Place what the manifest supplies, then report it.** When `tutorial.yaml` declares
    `supplies` at the top level, place those entries now: the instance exists, no lesson
-   has opened yet, and this is the one moment manifest-scope entries are placed. `from`
+   has opened yet, and this is the one moment manifest-scope entries are placed. Run, from
+   the workspace root:
+
+   ```
+   belay-catalogs place-supplies
+   ```
+
+   It takes no argument. It reads the source from the stamp's `materialized_from`, reads
+   the declaration from the instance's `tutorial.yaml`, checks every entry by the rules of
+   validator check 22 — and refuses the whole placement, before the first file lands, when
+   one `from` leaves the bundle or does not resolve, a `to` leaves the workspace or begins
+   with `tutorial/`, or a symbolic link leads out of either — then creates each missing
+   target and never overwrites one. For each entry it prints the `describe` line, the
+   targets `placed:`, the targets `already here:` and left alone, and any `NOT placed:`
+   because a file of the learner's stands where a directory is needed. An entry whose
+   targets were all there already says *say nothing about this entry*.
+
+   | Exit | Meaning | What the runner does |
+   |---|---|---|
+   | 0 | placed what was missing, or there was nothing to place | report it by the four rules below |
+   | 1 | placed what it could; some targets could not be created | report it, and name each `NOT placed` target and the file in its way. Never move the learner's file |
+   | 2 | usage or I/O error, such as no `tutorial/` in the current directory | run it from the workspace root |
+   | 3 | refused: the stamp is missing or names no readable `local:` source, or an entry is malformed or reaches outside the bundle or the workspace | nothing was placed. Report it as a bundle defect (`runner-protocol.md` section 13.3) |
+
+   `from`
    is relative to the **bundle** root, and a trailing `/` means that directory's
    contents, recursively; `to` is relative to the **workspace** root and never inside
    `tutorial/`.
 
-   **Take each `from` from the bundle source, not from the instance, and finish this step
-   before you release the source.** That is why step 8 is *inside* materialization rather
+   **Each `from` is taken from the bundle source, not from the instance** — which is why the
+   command reads the stamp rather than `tutorial/`. That is why step 8 is *inside* materialization rather
    than a step after it. Step 2 copies only `tutorial.yaml`, `COURSE.md`, `DESIGN.md` and
    `lessons/`, so a manifest-scope `from` such as `supplies/Cargo.toml` exists in the
    bundle and will never exist in the instance. Once the source is out of reach, a
-   manifest-scope entry can no longer be placed at all. This is also the reason a
+   manifest-scope entry can no longer be placed at all, and the command refuses. This is also the reason a
    **lesson-scope** `from` MUST resolve inside `lessons/`: those entries are placed when
    the lesson opens, long after this step, and `lessons/` is the only thing the instance
    carries (`bundle-format.md` section 2, **Where a `from` may point**).
 
-   Four rules govern the placement, and `bundle-format.md` section 2 states
-   them in full:
+   Four rules govern the placement — the command keeps the first and prints what the other
+   three need — and `bundle-format.md` section 2 states them in full:
 
    1. **Never overwrite.** A target that already exists is left exactly as it is.
    2. **Say nothing when every target of an entry already exists.** The entry has been
@@ -452,7 +510,9 @@ For exit 1, and for an exit 3 the learner chose not to start on:
 A repair belongs in the bundle, not in the instance. An instance patched into shape leaves
 the defect in the course everyone else takes, and leaves this learner taking a course
 nobody else is taking. When the bundle is local and the learner's own, the way forward is
-to correct it there and materialize again — which is this section from step 1.
+to correct it there and materialize again — which is this section from step 1, once the
+learner has chosen to remove the `tutorial/` this attempt left, since the command never
+materializes over one.
 
 ### Workspace kinds
 
@@ -487,14 +547,21 @@ anything outside `tutorial/` except by step 8's create-only placement.
 
 #### Plan it
 
-Resolve the bundle: the source the learner names, or the path in the stamp's
-`materialized_from`. Then run:
+From the workspace root, run:
 
 ```
-belay-plan-update <the instance directory> <the bundle directory>
+belay-plan-update tutorial
 ```
 
-The script reads both directories and writes nothing. It prints the two versions, the bump
+The bundle is the source the stamp's `materialized_from` names, and the command reads it
+inside its own process; you never name the bundle directory, for the reason section 3
+gives. When the learner wants the update from somewhere else — a catalogue they added, or a
+local checkout they registered — add `--from-catalogs`: the command then takes the bundle
+the learner's catalogues offer for this course's `id`, resolved as `belay-catalogs resolve`
+resolves it, without fetching. Run `belay-catalogs discover` first when the newer version
+has to be fetched; for a Git catalogue that also refreshes the clone the stamp names.
+
+The plan reads both directories and writes nothing. It prints the two versions, the bump
 (`MINOR` or `MAJOR`), the review mode, and one class for every file that materialization
 copies: `tutorial.yaml` (compared without the `instance:` block), `COURSE.md`, `DESIGN.md`,
 and every file under `lessons/`.
@@ -504,7 +571,18 @@ and every file under `lessons/`.
 | 0 | nothing to do: the same version, and every file the same | tell the learner the instance is current |
 | 1 | a plan | show it to the learner, below |
 | 2 | usage or I/O error | correct the invocation. Never report it to the learner as a problem with their course |
-| 3 | refused | copy nothing. Say what the report names |
+| 3 | refused, or the source cannot be resolved: the stamp is missing or unparseable, it names no `local:` source, or the source is not there | copy nothing. Say what the report names |
+
+The same command has three more modes, all from the workspace root and all with the same
+`2` and `3`:
+
+| Command | Does | Exit |
+|---|---|---|
+| `belay-plan-update tutorial --diff <file>` | prints a unified diff of one file the plan lists, the learner's copy against the bundle's; `tutorial.yaml` is compared without its `instance:` block. Writes nothing | 0 the same, 1 different |
+| `belay-plan-update tutorial --apply [--take <file>]... [--take-replace]` | applies the update: below, **Apply it** | 0 applied, or nothing to apply |
+| `belay-plan-update tutorial --check-version` | says whether the source's `version` is later than the stamp's; `runner-protocol.md` section 1. Writes nothing | 0 not behind, 1 behind |
+
+`--from-catalogs` works with each of them.
 
 The script refuses when the learner's place would not survive the update. It refuses when
 `active_lesson` or `resume_at` names a lesson file that the new bundle lacks, and when a
@@ -551,8 +629,8 @@ the answer is that the learner decides, never that the file is replaced.
 **There is no common ancestor.** The instance keeps no copy of the bundle as it was at
 materialization. When a file differs, the plan cannot tell whether the author changed it,
 the tutor changed it, or both did, and it does not try. A `decide-*` file is reported as
-*different*. Show the learner the difference itself, from a diff of the two files, and do
-not describe which side made it.
+*different*. Show the learner the difference itself, from
+`belay-plan-update tutorial --diff <file>`, and do not describe which side made it.
 
 #### Show it, and ask
 
@@ -576,23 +654,43 @@ they decline the update. Nothing is copied, and the instance stays exactly as it
 
 #### Apply it
 
-Only what the learner accepted, in this order, while the bundle source is still in reach:
+Only what the learner accepted, in this order, while the bundle source is still in reach.
+Steps 1 and 2 are one command:
 
-1. **Copy and delete.** Copy each accepted file from the bundle, and delete each `removed`
-   file. For `tutorial.yaml`, copy the bundle's file and append the existing `instance:`
-   block again, with the Edit tool as in step 5.
-2. **Rewrite the stamp.** Set `materialized_version` to the bundle's `version`, in quotes,
-   or to `"1.0"` when the bundle declares none, and set `materialized_at` to today. Update
-   `materialized_from` when the source changed. The instance's own `version` and
+```
+belay-plan-update tutorial --apply --take <file> --take <file> ...
+```
+
+Name with `--take` each `replace` and `decide-*` file the learner took the bundle's copy of,
+and only those. In a `one-change-set` review, `--take-replace` takes every `replace` file
+instead of naming each. Do not name `tutorial.yaml`, an `added` file or a `removed` file:
+they move together, so the command always applies them, and a learner who declined them
+declined the update — do not run `--apply` at all. A `DESIGN.md` merge the learner approved
+is not taken: write the approved draft into `tutorial/DESIGN.md` yourself, with the Edit
+tool, after the command. The command makes the plan again first and applies nothing when it
+is refused (exit 3), or when the plan names a file it may not take (exit 2). It writes only
+inside `tutorial/`, and it prints what it took, deleted and kept, and the new stamp.
+
+1. **Copy and delete.** It copies each accepted file from the bundle, every `added` file,
+   and deletes each `removed` file, with any lesson folder the deletions left empty. Last,
+   it writes the bundle's `tutorial.yaml` with the `instance:` block appended, so an apply
+   interrupted part-way still carries the old stamp and the next plan shows what is left.
+2. **Rewrite the stamp.** It sets `materialized_version` to the bundle's `version`, in quotes,
+   or to `"1.0"` when the bundle declares none, and sets `materialized_at` to today. It sets
+   `materialized_from` to the source it used, which changes it only under `--from-catalogs`.
+   The instance's own `version` and
    `materialized_version` now hold the same value. Check 30 reports a finding when they
-   differ, because that is what a half-applied update looks like. Remove `validated`,
-   `validation`, `validation_warnings` and `validation_unchecked`. Keep any `setup:` entry
-   from `validation_unchecked` together with `validation: not-certified`, because an update
-   re-runs no setup check.
+   differ, because that is what a half-applied update looks like. It removes `validated`,
+   `validation`, `validation_warnings` and `validation_unchecked`, and keeps any `setup:`
+   entry from `validation_unchecked` together with `validation: not-certified`, because an
+   update re-runs no setup check. The stamp is the command's rather than yours because it
+   is written from the same values as the copied manifest, in the same write: the two
+   cannot then disagree, which is the defect check 30 exists to catch.
 3. **Validate**, exactly as section 3.1 describes, and record the outcome there. A finding
    stops teaching, as at materialization. The defect is in the bundle, so report it and do
    not repair it in the instance.
-4. **Place supplies** by step 8, from the bundle source. Step 8 never overwrites, so this
+4. **Place supplies** by step 8: `belay-catalogs place-supplies`, which reads the source
+   from the stamp just rewritten. Step 8 never overwrites, so this
    places only an entry the new bundle added, and it says nothing about the entries
    already in place.
 5. **Update `STATE.md`, and nothing else in it.** Set `updated` to today. When the plan

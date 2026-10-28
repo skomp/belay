@@ -185,16 +185,24 @@ bundle.** The instance is behind when the source's `version` is greater than the
 `materialized_version`. Compare the two as pairs of integers, MAJOR first, and read an
 absent value as `"1.0"` (`bundle-format.md` section 2, **Content version**).
 
+Run it as one command, from the workspace root, and never by reading the source yourself:
+
+```
+belay-plan-update tutorial --check-version
+```
+
 This is the one read of the bundle source that a resume makes, and it reads only the
 `version` key of the source's `tutorial.yaml`. It does not break the rule that teaching
 never reaches back into the bundle source (`state-lifecycle.md` section 3 step 2). No lesson,
-`COURSE.md` or `DESIGN.md` is read from the source, and nothing is copied. The read happens
-only for a `local:` source in the stamp's `materialized_from`, with a relative path resolved
-from the workspace root. Any other kind of source would mean contacting a host, and a resume
-never does that.
+`COURSE.md` or `DESIGN.md` is read from the source, and nothing is copied. The command reads
+only a `local:` source in the stamp's `materialized_from`, with a relative path resolved
+from the workspace root, and it reads it inside its own process, so the host does not ask
+the learner about a source outside the workspace. Any other kind of source would mean
+contacting a host, and a resume never does that.
 
-When the source cannot be read, or either value is malformed, **say nothing and continue.**
-When the instance is behind, say so in one sentence before the first task, give both
+Exit 0 means not behind. Exit 2 or 3 means the source cannot be read, the stamp names no
+`local:` source, or either value is malformed: **say nothing and continue.**
+Exit 1 means the instance is behind: say so in one sentence before the first task, give both
 versions, and say that nothing changes until the learner asks:
 
 > This course has a newer version (1.0, now 1.1). Ask me to update it whenever you like;
@@ -211,7 +219,10 @@ The runner's scripts are started by bare command: `belay-catalogs`, `belay-valid
 the Bash tool's `PATH`, so the command names no path in the plugin cache, and under
 `permissions.blockReadsOutsideWorkingDirectories` a bare command whose arguments stay
 inside the workspace starts without asking the learner. An argument that names a path
-outside the workspace, such as a bundle directory in a cache, still asks.
+outside the workspace, such as a bundle directory in a cache, still asks — which is why
+no command is ever given one (belay#76). `belay-catalogs materialize` takes the tutorial id,
+and `belay-catalogs place-supplies` and `belay-plan-update` read the source from the
+instance stamp; each opens the bundle inside its own process.
 
 **Fallback.** When the bare command reports `command not found` — the skill was installed
 without its plugin, as the Codex route in the README does, or the host does not put plugin
@@ -1214,7 +1225,8 @@ A bundle MAY declare `supplies`: the files it hands the learner's workspace. You
 them and you say so. You never assign them.
 
 Manifest-scope entries are placed once, at materialization, while the bundle source is
-still in reach — `state-lifecycle.md` section 3 carries that moment. **A lesson's own
+still in reach, by `belay-catalogs place-supplies` — `state-lifecycle.md` section 3 step 8
+carries that moment. **A lesson's own
 entries are placed when that lesson opens, before you state its first task**: when you
 advance into it (section 6), when a session resumes into it, and when the learner accepts
 an optional lesson that declares some. By then you are reading the instance, which carries
@@ -1564,8 +1576,9 @@ session produces the same answer from the same catalogues.
 ### 12.5 Starting one is starting any other course
 
 A recommended follow-up is started exactly the way any course is started, and by the same
-route: the learner chooses it, `belay-catalogs resolve <id>` gives the bundle
-directory, and `state-lifecycle.md` section 3 materializes it.
+route: the learner chooses it, and `belay-catalogs materialize <id>` creates its instance
+by `state-lifecycle.md` section 3 — in a different workspace, or once the learner has
+chosen to replace the finished instance, since `tutorial/` is singular.
 
 - **No completion proof.** Nothing checks that the previous course was finished, including
   when it visibly was.

@@ -111,11 +111,10 @@ a way to see everything. Section 9 of that file carries the procedure.
 The rule that matters most is unchanged: read catalogue metadata only. Do not open
 anything under a candidate's bundle path until the learner has chosen.
 
-After the learner chooses, `belay-catalogs resolve <id>` gives the bundle
-directory — that is the first moment anything under a bundle path may be opened. Then
-materialize the instance. Load `references/state-lifecycle.md` before you create any
-file — it defines the copy, the `STATE.template.md`-to-`STATE.md` conversion, and the
-instance stamp.
+After the learner chooses, load `references/state-lifecycle.md`, then run
+`belay-catalogs materialize <id>` from the workspace root: it opens the bundle, copies,
+converts `STATE.template.md` and stamps. Only the runner's commands read a bundle; never
+name its directory in a command.
 
 ## Step 3 — teach
 
@@ -261,14 +260,15 @@ Load a reference when its condition holds, not before.
 | `references/bundle-format.md` | authoring, importing or repairing a **bundle**, including promoting a generated lesson into one. Not needed to teach. |
 
 A learner's session runs four scripts, each at one moment, never per turn.
-`belay-catalogs` belongs to discovery; a resume never runs it.
+`belay-catalogs` belongs to discovery and materialization; a resume never runs it.
 `belay-validate --instance tutorial` checks the instance
 materialization has just created, before the first task: a finding stops the course from
 starting, a warning never does, and an indeterminate run is not a pass.
 `references/state-lifecycle.md` section 3.1 has the step, `references/runner-protocol.md`
 section 13 the outcomes and the report.
-`belay-plan-update` runs only when the learner asks to update the course, and writes
-nothing. `belay-evidence` compacts the learning record when a lesson completes.
+`belay-plan-update` plans, shows and applies an update the learner asked for; a resume
+may only run `--check-version`.
+`belay-evidence` compacts the learning record when a lesson completes.
 
 **No script here ever runs a bundle's validator.** A `command` validator is an argument
 list that *you* run, through your own host, where your host's permission prompt sees it.

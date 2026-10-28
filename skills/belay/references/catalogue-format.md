@@ -27,8 +27,8 @@ even be on the machine yet. A runner that peeks into the bundle to enrich a choi
 only for local sources and silently breaks the provider boundary.
 
 `belay-catalogs discover` keeps the rule mechanically: it never opens, lists or stats
-anything under a bundle path. `belay-catalogs resolve <id>`, which runs **after** the learner
-has chosen, is the step that is allowed to look.
+anything under a bundle path. `belay-catalogs resolve <id>` and `belay-catalogs materialize
+<id>`, which run **after** the learner has chosen, are the steps that are allowed to look.
 
 ---
 
@@ -105,7 +105,9 @@ for the other three commands. It needs Python 3 and the `git` command, and nothi
 |---|---|---|
 | `belay-catalogs discover` | a discovery request starts | refreshes every catalogue, then prints the merged catalogue and the status of each source |
 | `belay-catalogs status` | the learner asks what is configured, or a failure needs explaining | prints each catalogue's state from disk; fetches nothing |
-| `belay-catalogs resolve <id>` | the learner has chosen | prints that entry and the bundle directory it resolves to, and checks the bundle is really there |
+| `belay-catalogs resolve <id>` | the learner has chosen, and wants to know where the course comes from | prints that entry and the bundle directory it resolves to, and checks the bundle is really there |
+| `belay-catalogs materialize <id>` | the learner has chosen | resolves the entry as `resolve` does and creates `tutorial/` in the current directory from it: copy, `STATE.md`, stamp (`state-lifecycle.md` section 3) |
+| `belay-catalogs place-supplies` | materialization, after validation; and after an update | places the manifest's `supplies` from the source the instance stamp names, never overwriting (`state-lifecycle.md` section 3 step 8) |
 | `belay-catalogs covers <query>` | the learner asks who **teaches** a concept | prints every bundle whose `covers` answers, with the reason each one matched |
 | `belay-catalogs follow-ups <id>` | a course finished, or the learner asks what comes next | prints the author's follow-ups, then the bundles that name this one as a previous bundle |
 | `belay-catalogs prepare <id>` | the learner asks how to get ready for a course | prints the bundles that cover what it `assumes` |
@@ -120,7 +122,16 @@ on disk without fetching, `--timeout SECONDS` for a slow host. A query that star
 
 Exit codes: `0` every catalogue answered; `1` at least one was served from cache or could
 not be served, and there is still something to offer; `2` the configuration is unusable and
-nothing was fetched; `3` there is nothing to offer at all.
+nothing was fetched; `3` there is nothing to offer at all. `materialize` and
+`place-supplies` have their own, tabled in `state-lifecycle.md` section 3: `0` done, `2`
+usage, `3` refused with nothing written, and for `place-supplies` `1` when a learner's file
+stands in the way of a target.
+
+**No command here is given a bundle path** (belay#76). A bundle sits outside the learner's
+workspace, and under `permissions.blockReadsOutsideWorkingDirectories` the host asks before
+any command that names such a path. `materialize` takes the id and `place-supplies` reads
+the instance stamp; both open the bundle inside their own process, fetch nothing, and run
+nothing the bundle declares.
 
 ### When to refresh
 
@@ -233,7 +244,8 @@ That one rule is what lets a bundles repository ship a `catalog.yaml` at its roo
 its own bundles by relative path. A learner adds the repository with one entry in
 `catalogs.yaml`, and the bundles arrive with it. For a `git` catalogue the root is inside
 the local cache clone, so `belay-catalogs resolve` prints an absolute path under
-`~/.cache/belay/` — that is correct, and materialization copies from there.
+`~/.cache/belay/` — that is correct, and `belay-catalogs materialize` copies from there,
+inside its own process, so the tutor never names that path.
 
 An absolute path, or one starting with `~`, is used as written. A catalogue fetched from a
 repository may **not** do that, and may not climb out of its own directory with `..`: such
@@ -471,11 +483,11 @@ A selection whose options are titles alone is not enough: the learner decides on
 metadata, so it belongs beside the options, in the selection or in the sentence that
 introduces it.
 
-Then wait for an answer. When the learner has chosen, run `belay-catalogs resolve <id>` to
-get the bundle directory, then load `state-lifecycle.md` and materialize; that is the
-first moment anything under a bundle path may be opened. When `resolve` reports that the
-bundle is not there, report it and stop — a cached catalogue can name a bundle the last
-successful fetch did not carry.
+Then wait for an answer. When the learner has chosen, load `state-lifecycle.md` and run
+`belay-catalogs materialize <id>` from the workspace root; that is the first moment
+anything under a bundle path may be opened. When it refuses because the bundle is not
+there, report it and stop — a cached catalogue can name a bundle the last successful fetch
+did not carry.
 
 ---
 

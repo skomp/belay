@@ -1,7 +1,7 @@
 # Generic Tutorial Runner + Portable Tutorial Bundles — Design
 
 **Date:** 2026-09-11
-**Last amended:** 2026-10-27
+**Last amended:** 2026-10-28
 **Status:** Design approved. Formats and first bundle implemented; runner in progress.
 **Repositories:** `belay` (runner), `belay-bundles` (courses), `automaton-db` (a learner)
 
@@ -661,6 +661,8 @@ differ in *when*: `catalogs.py` runs at discovery, `validate_bundle.py` at mater
 | `discover` | a discovery request starts | refreshes every catalogue, prints the merged catalogue and per-source status |
 | `status` | explaining the configuration or a failure | reports from disk; fetches nothing |
 | `resolve <id>` | the learner has chosen | prints the entry and the bundle directory, and checks the bundle is there |
+| `materialize <id>` | the learner has chosen | resolves as `resolve` does and creates `tutorial/` in the current directory: copy, `STATE.md`, stamp. Refuses over an existing `tutorial/` |
+| `place-supplies` | materialization, after validation; after an update | places the manifest's `supplies` from the source the stamp names; create-only |
 
 Options: `--config`, `--cache-dir`, `--timeout`, `--offline`, `--json`. Exit codes: `0`
 all current, `1` partial (something cached or unavailable), `2` the configuration is
@@ -668,8 +670,20 @@ unusable, `3` nothing to serve.
 
 **`discover` never touches a bundle path** — it does not open, list or stat one. That is
 what keeps the provider boundary real rather than aspirational, and it is tested by
-offering an entry whose bundle directory does not exist. `resolve` is the step allowed to
-look, and it is the step that runs after the learner has chosen.
+offering an entry whose bundle directory does not exist. `resolve` and `materialize` are
+the steps allowed to look, and they run after the learner has chosen.
+
+**No command takes a bundle path** (belay#76, amended 2026-10-28). Under
+`permissions.blockReadsOutsideWorkingDirectories` the host asks the learner before a read or
+a command that names a path outside the workspace, and a bundle always is one — a Git
+catalogue's sits in the cache clone. Measured on Claude Code 2.1.308: a plugin `bin/`
+command that reads `~/.cache/...` inside its own process runs without a prompt, and the same
+command given that path as an argument is refused. So the tutor never copies, lists or
+diffs a bundle itself. `materialize` takes the id, and `place-supplies` and
+`plan_update.py` read `materialized_from` from the instance stamp, which `materialize`
+writes as the absolute path the entry resolved to. Both of the new commands check
+everything before they write — a symbolic link leading out of the bundle or the workspace
+is refused — and `materialize` builds in a staging directory that it renames into place.
 
 The restricted YAML reader moved to `scripts/yamlite.py`, shared by both scripts. Two
 hand-written YAML parsers would drift apart, and a fix applied to one of them is the
@@ -1081,7 +1095,7 @@ Codex:        codex plugin marketplace add <repo> ; codex plugin add belay
   `PATH` (§13), and under `permissions.blockReadsOutsideWorkingDirectories` a bare command
   whose arguments stay inside the workspace starts without asking the learner, where
   `python3 <plugin cache>/.../catalogs.py` asks every time. An argument naming a path outside
-  the workspace still asks; the calls that pass a bundle directory are belay#76's. `bin/` is
+  the workspace still asks, so no call passes a bundle directory (belay#76, §7.2). `bin/` is
   the one runtime file outside `skills/belay/`, and the Codex skill route does not install
   it, so `runner-protocol.md` section 1 and `catalogue-format.md` section 4 state the
   fallback: on `command not found`, `belay-<x>` is `python3 <skill dir>/scripts/<x>.py`.
@@ -1439,19 +1453,22 @@ nothing silent. The rule above stands: the runner reports and never applies.
 
 - **Detection on resume** (`runner-protocol.md` section 1, **A resume may say the course
   has moved on**). Once per session, a resume MAY read the `version` of the source's
-  `tutorial.yaml`, and nothing else. It does this only for a `local:` source, so no host is
-  contacted. It says one sentence when the instance is behind, and says nothing when the
+  `tutorial.yaml`, and nothing else, through `plan_update.py --check-version`. It does this
+  only for a `local:` source, so no host is contacted. It says one sentence when the instance is behind, and says nothing when the
   source cannot be read. This is the one read of the source outside materialization and
   update, and `state-lifecycle.md` section 3 step 2 says so beside "teaching never reaches
   back".
 - **The update** (`state-lifecycle.md` section 3.2). It starts only when the learner asks.
-  `scripts/plan_update.py` reads the instance and the bundle, writes nothing, and classifies
-  every file that materialization copies. A file in a lesson not started is replaced. A
+  `scripts/plan_update.py` reads the instance and the bundle the stamp names, and classifies
+  every file that materialization copies; the plan writes nothing. A file in a lesson not started is replaced. A
   differing file in a completed, active or unrecorded lesson, and a differing `DESIGN.md`,
   get the learner's own answer. Added and removed files move with the manifest. The script
   refuses when `active_lesson`, `resume_at`, or a generated lesson's `after:` would name a
-  lesson the new bundle lacks. The tutor shows the plan, the learner answers, and the tutor
-  copies, rewrites the stamp, re-validates (3.1), and places new supplies (step 8).
+  lesson the new bundle lacks. The tutor shows the plan and each difference (`--diff`), the
+  learner answers, and `--apply` copies what was accepted and rewrites the stamp in the same
+  write as the manifest (amended 2026-10-28, belay#76: the tutor used to copy and stamp by
+  hand, which read the bundle source by path). The tutor then re-validates (3.1) and places
+  new supplies (step 8, `place-supplies`).
   `STATE.md` keeps the learner's progress unchanged.
 - **Which version the instance claims.** An update rewrites both the instance's own
   `version`, by copying the new `tutorial.yaml`, and the stamp's `materialized_version`.
@@ -1628,8 +1645,9 @@ real files. One repository cannot satisfy both without duplication.
 | Knowledge assessments (`assesses`, `## Assessments`, `kind: practice`) | **done** — 2026-10-16, belay#33; `runner-protocol.md` §15, `state-lifecycle.md` §11, checks 31-32. The question-and-answer loop is untested, as above |
 | Learning-evidence record (`tutorial/EVENTS.jsonl`, `skills/belay/scripts/evidence.py`) | **done** — 2026-10-16, belay#34; `state-lifecycle.md` §12, `runner-protocol.md` §16, check 33 (warning only); `tests/test_evidence.py`, 65 assertions. Whether the tutor writes the events in conversation is untested, as above |
 | Multi-catalogue support (`skills/belay/scripts/catalogs.py`) | **done** — 2026-09-12, §7 |
-| Catalogue test suite (`tests/test_catalogs.py`) | **done** — 338 assertions; every failure kind proven firing |
-| Instance update (`skills/belay/scripts/plan_update.py`, `state-lifecycle.md` §3.2) | **done** — 2026-10-14, belay#50, §15c; `tests/test_plan_update.py`, 67 assertions |
+| Catalogue test suite (`tests/test_catalogs.py`) | **done** — 407 assertions; every failure kind proven firing |
+| Instance update (`skills/belay/scripts/plan_update.py`, `state-lifecycle.md` §3.2) | **done** — 2026-10-14, belay#50, §15c; source from the stamp, `--diff`, `--apply`, `--check-version` 2026-10-28, belay#76; `tests/test_plan_update.py`, 129 assertions |
+| Materialization and supplies placement by command (`catalogs.py materialize`, `place-supplies`) | **done** — 2026-10-28, belay#76, §7.2; `tests/test_catalogs.py` |
 | Shared YAML reader (`skills/belay/scripts/yamlite.py`) | **done** — the only reader; the PyYAML preference was removed 2026-09-13, belay#29 |
 | `catalog.yaml` inside `belay-bundles` | **done** — 2026-09-12, §15 item 6; generated by `belay-authoring`'s `catalog.py` |
 | `SKILL.md` (the runner control plane) | **done** |
