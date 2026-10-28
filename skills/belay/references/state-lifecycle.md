@@ -560,6 +560,9 @@ local checkout they registered — add `--from-catalogs`: the command then takes
 the learner's catalogues offer for this course's `id`, resolved as `belay-catalogs resolve`
 resolves it, without fetching. Run `belay-catalogs discover` first when the newer version
 has to be fetched; for a Git catalogue that also refreshes the clone the stamp names.
+Add it also when the plain command refuses because the stamp's `materialized_from` is not
+a `local:` path. A runner before 0.11.0 wrote the stamp by hand, and for a Git catalogue
+it often wrote a `git:` locator, which no command reads.
 
 The plan reads both directories and writes nothing. It prints the two versions, the bump
 (`MINOR` or `MAJOR`), the review mode, and one class for every file that materialization
