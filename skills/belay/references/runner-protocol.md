@@ -50,7 +50,7 @@ Do not load, unless one of the stated exceptions applies:
 | `DESIGN.md` in full | never; load declared anchors only |
 | any lesson other than `active_lesson` | never during teaching; one exception, a quiz the learner asked for on a named lesson (section 15.9) |
 | completed lessons | never; `STATE.md` records what they established |
-| `tutorial/EVENTS.jsonl` | never in full; you append to it, and `scripts/evidence.py summary` reads it when section 16.3 needs it |
+| `tutorial/EVENTS.jsonl` | never in full; you append to it, and `belay-evidence summary` reads it when section 16.3 needs it |
 | files inside a lesson folder | only when the lesson body names the file and says when |
 | the whole workspace | never; open the files the task concerns |
 
@@ -91,7 +91,7 @@ author-controlled text you read, whether you load it every turn or open it on an
 - the contents of a supplied file (section 10), and of any other file the bundle ships
   that you open;
 - validator output: what a declared command prints, and the report
-  `scripts/validate_bundle.py` prints, which quotes bundle text back to you — its
+  `belay-validate` prints, which quotes bundle text back to you — its
   `disclosure:` section is made of the author's `describe` lines and declared commands;
 - a catalogue entry's text, during discovery (`catalogue-format.md` section 5).
 
@@ -160,7 +160,7 @@ no other moment. A session that resumes an instance reads no catalogue at all: t
 instance already names its bundle, and `STATE.md` already holds the learner's place.
 
 So a teaching turn never fetches anything, never contacts a host, and costs nothing
-beyond the files listed above. Do not run `scripts/catalogs.py` during a teaching
+beyond the files listed above. Do not run `belay-catalogs` during a teaching
 session, and do not run it per turn during discovery either. `catalogue-format.md`
 section 4 has the timing; this section exists so that a session which never loads that
 document still knows not to.
@@ -203,6 +203,23 @@ versions, and say that nothing changes until the learner asks:
 Then teach. Do not repeat it in the same session, and do not plan or apply anything because
 of it. The update is the learner's to start, and `state-lifecycle.md` section 3.2 is the
 procedure when they do.
+
+### The runner's four commands, and a host without them
+
+The runner's scripts are started by bare command: `belay-catalogs`, `belay-validate`,
+`belay-plan-update` and `belay-evidence`. Claude Code puts the plugin's `bin/` directory on
+the Bash tool's `PATH`, so the command names no path in the plugin cache, and under
+`permissions.blockReadsOutsideWorkingDirectories` a bare command whose arguments stay
+inside the workspace starts without asking the learner. An argument that names a path
+outside the workspace, such as a bundle directory in a cache, still asks.
+
+**Fallback.** When the bare command reports `command not found` — the skill was installed
+without its plugin, as the Codex route in the README does, or the host does not put plugin
+`bin/` on `PATH` — run the script it wraps instead: `belay-<name>` is
+`python3 <skill dir>/scripts/<script>.py`, with the same arguments, output and exit status,
+where `<skill dir>` is the directory holding `SKILL.md` and `<script>` is `catalogs`,
+`validate_bundle`, `plan_update` or `evidence` respectively. Decide once per session; do not
+retry the bare command each time.
 
 ---
 
@@ -537,7 +554,7 @@ Then, in order:
    a `lessons.generated/` directory, apply section 7.3 first: an incomplete generated
    lesson whose `after:` is the lesson just finished takes precedence over the next entry.
    Update `STATE.md` per `state-lifecycle.md`. Append `lesson_completed` for the lesson
-   left and `lesson_started` for the new one, then run `scripts/evidence.py compact
+   left and `lesson_started` for the new one, then run `belay-evidence compact
    tutorial` (section 16).
 5. **Load the new lesson and nothing else.** Discard the previous lesson from working
    context. Do not summarise it into `STATE.md` beyond the concepts it demonstrated. If
@@ -1390,8 +1407,8 @@ opening catalogues yourself:
 
 | The learner asked | Run |
 |---|---|
-| about the whole `assumes` list | `scripts/catalogs.py prepare <tutorial_id>` |
-| about one named concept, or a phrase | `scripts/catalogs.py covers <concept>` |
+| about the whole `assumes` list | `belay-catalogs prepare <tutorial_id>` |
+| about one named concept, or a phrase | `belay-catalogs covers <concept>` |
 
 `prepare` answers the whole list in one run and states plainly which assumed concepts
 nothing available covers — a gap said out loud is worth more than a short list that looks
@@ -1482,7 +1499,7 @@ Nothing else in `STATE.md` changes. In particular:
 
 ### 12.2 What to offer, and in what order
 
-Run `scripts/catalogs.py follow-ups <tutorial_id>`, with the id from the instance's
+Run `belay-catalogs follow-ups <tutorial_id>`, with the id from the instance's
 `STATE.md`. It already does all of the ordering, the reverse lookup, the merging and the
 provenance, across every configured catalogue. Do not rebuild any of that by opening
 catalogue files yourself.
@@ -1547,7 +1564,7 @@ session produces the same answer from the same catalogues.
 ### 12.5 Starting one is starting any other course
 
 A recommended follow-up is started exactly the way any course is started, and by the same
-route: the learner chooses it, `scripts/catalogs.py resolve <id>` gives the bundle
+route: the learner chooses it, `belay-catalogs resolve <id>` gives the bundle
 directory, and `state-lifecycle.md` section 3 materializes it.
 
 - **No completion proof.** Nothing checks that the previous course was finished, including
@@ -1639,7 +1656,7 @@ moment where something changed or something is already wrong:
    as at materialization.
 
 At every one of these moments the command is the one materialization runs,
-`scripts/validate_bundle.py --instance <workspace>/tutorial` (`state-lifecycle.md`
+`belay-validate --instance tutorial` (`state-lifecycle.md`
 section 3.1). Without `--instance` the script checks the directory as a bundle and reports
 findings against what every correct instance has — `STATE.md`, no `STATE.template.md`, the
 `instance:` stamp — so a sound course reads as defective.
@@ -2130,7 +2147,7 @@ absent — never `echo >>` or a here-document in a shell (`SKILL.md`, the comman
 | section 15.3, once an answer is classified | `answer`, with the concept id and the outcome |
 | the end of an assessment attempt, when its *Assessments* row is written | `assessment`, with the row's state, attempt and concepts not demonstrated |
 | section 15.7, practice offered; and accepted, once its file is written | `practice_offered`, then `practice_accepted` with the lesson's path |
-| section 6, a lesson completed — an assessment left at any result included | `lesson_completed`, then run `scripts/evidence.py compact tutorial` |
+| section 6, a lesson completed — an assessment left at any result included | `lesson_completed`, then run `belay-evidence compact tutorial` |
 
 `seq` is one more than the last event's. The first time in a session that you append, read
 **only the last line** of the file to learn it — never the whole file. Count its lines with
@@ -2138,7 +2155,7 @@ the Grep tool in count mode (pattern `^`) — on a host without one, one plain
 `grep -c '' tutorial/EVENTS.jsonl` — then Read with that count as `offset` and a `limit` of
 1, never `tail` in a shell. When the file is
 absent, start at 1. When the last line does not parse, the previous write was cut off: run
-`scripts/evidence.py compact tutorial`, which drops it, and read the last line again.
+`belay-evidence compact tutorial`, which drops it, and read the last line again.
 Do the same after any `compact` that says it renumbered.
 
 **Write identifiers, never words.** A concept id, a validator name, a lesson path, an
@@ -2156,7 +2173,7 @@ they said: the fields cannot hold it, and check 33 warns about a field that trie
 
 ### 16.3 When you read it
 
-On demand only, through `scripts/evidence.py summary tutorial`, which prints the counts per
+On demand only, through `belay-evidence summary tutorial`, which prints the counts per
 lesson and what it cannot know:
 
 - **the learner asks how they have done** — attempts, repeated failures, hints, assessment

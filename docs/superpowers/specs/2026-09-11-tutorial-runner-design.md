@@ -1,7 +1,7 @@
 # Generic Tutorial Runner + Portable Tutorial Bundles — Design
 
 **Date:** 2026-09-11
-**Last amended:** 2026-10-16
+**Last amended:** 2026-10-27
 **Status:** Design approved. Formats and first bundle implemented; runner in progress.
 **Repositories:** `belay` (runner), `belay-bundles` (courses), `automaton-db` (a learner)
 
@@ -1044,13 +1044,14 @@ One shared `skills/` directory, sibling per-host manifests. Proven shape: superp
 belay/
 ├── .claude-plugin/{plugin.json,marketplace.json}
 ├── .codex-plugin/plugin.json          "skills": "./skills/", "hooks": {}
+├── bin/{belay-catalogs,belay-validate,belay-plan-update,belay-evidence}
 ├── skills/belay/
 │   ├── SKILL.md
 │   ├── references/{bundle-format,catalogue-format,runner-protocol,state-lifecycle}.md
 │   ├── scripts/{validate_bundle.py,catalogs.py,plan_update.py,evidence.py,yamlite.py}
 │   ├── catalog/builtin.yaml
 │   └── examples/rust-cli-basics/
-├── tests/{fixtures/,test_validate_bundle.py,test_catalogs.py,test_plan_update.py,test_evidence.py}
+├── tests/{fixtures/,test_validate_bundle.py,test_catalogs.py,test_plan_update.py,test_evidence.py,test_bin_wrappers.py}
 ├── docs/superpowers/specs/
 └── README.md
 ```
@@ -1072,6 +1073,18 @@ Codex:        codex plugin marketplace add <repo> ; codex plugin add belay
 - **No `${CLAUDE_PLUGIN_ROOT}`** — Claude-only. Both hosts resolve skill-body paths
   relative to the skill directory, so everything needed at runtime lives under
   `skills/belay/` and is referenced relatively.
+- **The runner's scripts are started by bare command, with a path fallback** (belay#78,
+  amended 2026-10-27). Each script in `skills/belay/scripts/` has a POSIX `sh` wrapper in
+  the plugin-root `bin/` — `belay-catalogs`, `belay-validate`, `belay-plan-update`,
+  `belay-evidence` — that `exec`s `python3` on the script beside it, so arguments, output and
+  exit status pass through. Claude Code puts an enabled plugin's `bin/` on the Bash tool's
+  `PATH` (§13), and under `permissions.blockReadsOutsideWorkingDirectories` a bare command
+  whose arguments stay inside the workspace starts without asking the learner, where
+  `python3 <plugin cache>/.../catalogs.py` asks every time. An argument naming a path outside
+  the workspace still asks; the calls that pass a bundle directory are belay#76's. `bin/` is
+  the one runtime file outside `skills/belay/`, and the Codex skill route does not install
+  it, so `runner-protocol.md` section 1 and `catalogue-format.md` section 4 state the
+  fallback: on `command not found`, `belay-<x>` is `python3 <skill dir>/scripts/<x>.py`.
 - **Trigger words go at the front of `description`** — Codex truncates descriptions under
   a 2%-of-context / 8,000-char budget, shortest-first, and a truncated description stops
   triggering.
@@ -1175,6 +1188,9 @@ should not re-derive these.
 | Codex plugin manifest | `.codex-plugin/plugin.json`; needs `"hooks": {}` to suppress hook discovery |
 | Claude Code plugin manifest | `.claude-plugin/plugin.json`; `skills/` auto-discovered |
 | Path resolution in skill body | relative to skill directory, **both hosts** |
+| Claude Code plugin `bin/` | on the Bash tool's `PATH` (measured 2026-10-27, 2.1.308, `claude -p --plugin-dir`) |
+| Read block and a bare command | `blockReadsOutsideWorkingDirectories` does not inspect what a bare `bin/` command reads, but does refuse one whose **arguments** name a path outside the working directories (both measured 2026-10-27, 2.1.308) |
+| Codex plugin `bin/` | **not measured**; the supported Codex route is a skill symlink, which installs no `bin/` |
 | `project_doc_fallback_filenames` | real, but ambient-instructions only — **not** a skills mechanism |
 | Local filesystem | case-insensitive; `lesson.md` resolves as `LESSON.md` |
 | Local toolchain | Python 3.11.9, `jq` 1.8.2, no `yq`, cargo/rustc 1.98.0, PyYAML 6.0.3 (installed 2026-09-13, and unused: `yamlite` always parses with its own reader — belay#29) |

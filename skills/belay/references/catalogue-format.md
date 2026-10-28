@@ -7,7 +7,7 @@ A catalogue is a list of tutorials the runner can offer. It holds **metadata onl
 is not a course, and reading it must never require reading a course.
 
 A learner configures **many** catalogues, and any of them may live in a Git repository.
-The `scripts/catalogs.py` script fetches, caches and merges them, and you act on what it
+The `belay-catalogs` command fetches, caches and merges them, and you act on what it
 prints. Fetching, precedence, staleness and failure classification are deterministic and
 easy to get subtly wrong, so they are in code and not in your judgement.
 
@@ -26,8 +26,8 @@ catalogue fetched from a repository returns the same entry shape, and its bundle
 even be on the machine yet. A runner that peeks into the bundle to enrich a choice works
 only for local sources and silently breaks the provider boundary.
 
-`catalogs.py discover` keeps the rule mechanically: it never opens, lists or stats
-anything under a bundle path. `catalogs.py resolve <id>`, which runs **after** the learner
+`belay-catalogs discover` keeps the rule mechanically: it never opens, lists or stats
+anything under a bundle path. `belay-catalogs resolve <id>`, which runs **after** the learner
 has chosen, is the step that is allowed to look.
 
 ---
@@ -47,7 +47,7 @@ the two-file model this replaced, so an existing user catalogue keeps working wi
 migration and no action from you. A missing user catalogue is the normal state on a first
 run: it is left out rather than reported as a failure.
 
-`catalogs.py status` prints the configuration that the default implies. Use that text when
+`belay-catalogs status` prints the configuration that the default implies. Use that text when
 you write a real `catalogs.yaml`, so nothing already in use is dropped.
 
 ---
@@ -95,17 +95,20 @@ fails here, the failure is real and worth reporting, not worth working around.
 
 ## 4. The script, and the three things it does
 
-Run it at `scripts/catalogs.py`, relative to this skill's directory. It needs Python 3 and
-the `git` command, and nothing else.
+Run it as the bare command `belay-catalogs`, which the plugin puts on the host's `PATH`.
+When that reports `command not found` — a host without plugin `bin/` support, such as the
+Codex skill route — run `python3 <skill dir>/scripts/catalogs.py` with the same arguments,
+where `<skill dir>` holds `SKILL.md`; `runner-protocol.md` section 1 has the same fallback
+for the other three commands. It needs Python 3 and the `git` command, and nothing else.
 
 | Command | When | What it does |
 |---|---|---|
-| `catalogs.py discover` | a discovery request starts | refreshes every catalogue, then prints the merged catalogue and the status of each source |
-| `catalogs.py status` | the learner asks what is configured, or a failure needs explaining | prints each catalogue's state from disk; fetches nothing |
-| `catalogs.py resolve <id>` | the learner has chosen | prints that entry and the bundle directory it resolves to, and checks the bundle is really there |
-| `catalogs.py covers <query>` | the learner asks who **teaches** a concept | prints every bundle whose `covers` answers, with the reason each one matched |
-| `catalogs.py follow-ups <id>` | a course finished, or the learner asks what comes next | prints the author's follow-ups, then the bundles that name this one as a previous bundle |
-| `catalogs.py prepare <id>` | the learner asks how to get ready for a course | prints the bundles that cover what it `assumes` |
+| `belay-catalogs discover` | a discovery request starts | refreshes every catalogue, then prints the merged catalogue and the status of each source |
+| `belay-catalogs status` | the learner asks what is configured, or a failure needs explaining | prints each catalogue's state from disk; fetches nothing |
+| `belay-catalogs resolve <id>` | the learner has chosen | prints that entry and the bundle directory it resolves to, and checks the bundle is really there |
+| `belay-catalogs covers <query>` | the learner asks who **teaches** a concept | prints every bundle whose `covers` answers, with the reason each one matched |
+| `belay-catalogs follow-ups <id>` | a course finished, or the learner asks what comes next | prints the author's follow-ups, then the bundles that name this one as a previous bundle |
+| `belay-catalogs prepare <id>` | the learner asks how to get ready for a course | prints the bundles that cover what it `assumes` |
 
 The last three are **section 12**, and they fetch nothing unless given `--refresh`. A
 concept question is asked in the middle of a conversation, often several times, and
@@ -229,7 +232,7 @@ against the entry and never against its origin.
 That one rule is what lets a bundles repository ship a `catalog.yaml` at its root listing
 its own bundles by relative path. A learner adds the repository with one entry in
 `catalogs.yaml`, and the bundles arrive with it. For a `git` catalogue the root is inside
-the local cache clone, so `catalogs.py resolve` prints an absolute path under
+the local cache clone, so `belay-catalogs resolve` prints an absolute path under
 `~/.cache/belay/` — that is correct, and materialization copies from there.
 
 An absolute path, or one starting with `~`, is used as written. A catalogue fetched from a
@@ -286,7 +289,7 @@ builds the time-commitment facet out of the distinct `scope` values it finds. A 
 sentence would compete with it, could not be validated beyond "is a string", and could not
 be generated from the bundle. A number can be checked, compared and derived.
 
-**The count is not proof.** `validate_bundle.py --catalog` checks its shape and nothing
+**The count is not proof.** `belay-validate --catalog` checks its shape and nothing
 else; no tool opens the bundle to recount. A count that disagrees with the bundle's
 `optional_lessons` is wrong metadata of the same kind as a `scope` that under-states the
 work, and the bundle is authoritative once the learner has chosen.
@@ -334,7 +337,7 @@ showing is current.
 | `no-catalogue` | the repository was fetched and holds no catalogue file at that path | the `path` field |
 | `missing-file` | a local catalogue file is not there | the `path` field, or create the file |
 | `unreadable` | the file is not UTF-8 text | permissions, or the file itself |
-| `malformed` | the file is not a usable catalogue | correct the file; check it with `validate_bundle.py --catalog <path>` |
+| `malformed` | the file is not a usable catalogue | correct the file; check it with `belay-validate --catalog <path>` |
 | `no-git` | the `git` command is not installed | install git |
 | `unclassified` | git failed in a way the script does not recognise | read git's own message, which is printed verbatim |
 
@@ -359,7 +362,7 @@ Matching is agent judgement against `subjects`, `aliases`, `title`, `description
 `level` and `style`. It is not a scoring function, and there is no threshold to tune.
 
 **When the learner names a concept rather than a subject, section 12 is the answer** and
-it is not judgement: `catalogs.py covers <concept>` is deterministic, and it tells you
+it is not judgement: `belay-catalogs covers <concept>` is deterministic, and it tells you
 which bundles teach that concept and why each one is in the list.
 
 Rules, all of which matter more than ranking quality:
@@ -468,7 +471,7 @@ A selection whose options are titles alone is not enough: the learner decides on
 metadata, so it belongs beside the options, in the selection or in the sentence that
 introduces it.
 
-Then wait for an answer. When the learner has chosen, run `catalogs.py resolve <id>` to
+Then wait for an answer. When the learner has chosen, run `belay-catalogs resolve <id>` to
 get the bundle directory, then load `state-lifecycle.md` and materialize; that is the
 first moment anything under a bundle path may be opened. When `resolve` reports that the
 bundle is not there, report it and stop — a cached catalogue can name a bundle the last
@@ -482,10 +485,10 @@ successful fetch did not carry.
 
 1. ask for the repository URL, the branch, and where the catalogue file sits inside it
    (`catalog.yaml` at the root is the convention);
-2. if `~/.config/belay/catalogs.yaml` does not exist, run `catalogs.py status` first and
+2. if `~/.config/belay/catalogs.yaml` does not exist, run `belay-catalogs status` first and
    write the configuration it prints, so the user's existing catalogue is not dropped;
 3. add the entry **above** `builtin`, and below any catalogue the user said they prefer;
-4. run `catalogs.py discover` and show what arrived, including any entry that was skipped.
+4. run `belay-catalogs discover` and show what arrived, including any entry that was skipped.
 
 **To register one local bundle:**
 
@@ -505,7 +508,7 @@ successful fetch did not carry.
 number of keys in the manifest's `optional_lessons` map, and leave the field out when that
 map is absent or empty.
 
-A catalogue file can be checked before it is used: `validate_bundle.py --catalog <path>`,
+A catalogue file can be checked before it is used: `belay-validate --catalog <path>`,
 and `--portable` as well for a `catalog.yaml` that ships inside a bundles repository,
 where every bundle must travel with the catalogue.
 
@@ -614,7 +617,7 @@ This is the single distinction the whole feature rests on. A course that *assume
 retained event logs begins where a learner asking about them is stuck, so returning it as
 a course that *teaches* them wastes exactly the time the question was asked to save.
 
-`catalogs.py covers <query>` keeps the rule mechanically. Run it rather than reading the
+`belay-catalogs covers <query>` keeps the rule mechanically. Run it rather than reading the
 entries yourself.
 
 ### 12.2 The ranking, and why each result explains itself
@@ -690,7 +693,7 @@ reading metadata. Section 12.2.
 
 ### 12.5 After a course: `follow-ups`, and the reverse index
 
-`catalogs.py follow-ups <id>` answers "what could I take after this", from three places, in
+`belay-catalogs follow-ups <id>` answers "what could I take after this", from three places, in
 this order:
 
 1. the finished bundle's own `recommended_follow_ups`, **in author order**;
@@ -711,7 +714,7 @@ on the machine.
 
 ### 12.6 Before a course: `prepare`
 
-`catalogs.py prepare <id>` answers "how do I get ready for this", from the bundle's own
+`belay-catalogs prepare <id>` answers "how do I get ready for this", from the bundle's own
 `recommended_previous_bundles` first, then bundles whose authors name it as a follow-up,
 then every available bundle that **covers** a concept it **assumes**. An assumed concept
 that nothing available covers is stated plainly rather than left as a silent gap.

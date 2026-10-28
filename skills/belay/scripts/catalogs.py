@@ -172,7 +172,7 @@ FAILURE_KINDS: dict[str, tuple[str, str]] = {
     "malformed": (
         "the catalogue file is not a usable catalogue",
         "correct the file, then check it with "
-        "validate_bundle.py --catalog <path>",
+        "belay-validate --catalog <path>",
     ),
     "no-git": (
         "the git command is not installed",
