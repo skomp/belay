@@ -78,6 +78,17 @@ Continue the tutorial.
 No catalogue is read and no choice is offered. The runner finds `tutorial/`, reads your
 progress file, and resumes at the pending task — in a brand new conversation, weeks later.
 
+### Update Belay in the middle of a course
+
+```
+claude plugin marketplace update belay && claude plugin update belay@belay
+```
+
+Then start a new session. An update changes the runner, never your course: `tutorial/`,
+your progress in `STATE.md`, your `DESIGN.md` decisions and your generated lessons stay as
+they are, and the next session resumes where you stopped. A newer version of the *course*
+is a separate step that you start yourself, by asking the tutor to update the course.
+
 ---
 
 ## How a session works
@@ -366,7 +377,7 @@ course that walks a learner through building it themselves.
 
 ## Project status
 
-Version 0.10.0. Early, in active use, and honest about its edges.
+Version 0.11.0. Early, in active use, and honest about its edges.
 
 **What works today.** Discovery across many catalogues, local or Git-hosted, with caching
 and per-source failure reporting. Materialising a course into a workspace and validating it
