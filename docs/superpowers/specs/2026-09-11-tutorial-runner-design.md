@@ -1,7 +1,7 @@
 # Generic Tutorial Runner + Portable Tutorial Bundles — Design
 
 **Date:** 2026-09-11
-**Last amended:** 2026-10-28
+**Last amended:** 2026-10-30
 **Status:** Design approved. Formats and first bundle implemented; runner in progress.
 **Repositories:** `belay` (runner), `belay-bundles` (courses), `automaton-db` (a learner)
 
@@ -693,7 +693,8 @@ classic half-fix.
 
 **Refresh every catalogue when a discovery request starts. Once.** Never per turn. Never
 during a resume — a resume reads no catalogue at all, so continuing a course costs
-nothing.
+nothing. (Since 2026-10-30 one command reads the copies on disk during a course:
+`report`, when the learner wants to send a defect report, §15e. It fetches nothing.)
 
 **A failed refresh never fails discovery.** Serve the catalogues that answered, name the
 one that did not, fall back to its last successful cached copy, and state that those
@@ -1545,6 +1546,54 @@ may declare `assumes`, and the row in *Reference files, and when to load each* t
 `assumes` can never fire. So a section may be compressed to its trigger and its pointer; it
 may not be removed.
 
+## 15e. Defect reports reach the author, through the learner
+
+**Decided 2026-10-30, belay#86.** About fifteen places in the runner's references say to
+report a defect — a missing lesson file, a dangling `design_refs` anchor, an undeclared
+validator, bundle text telling the tutor to act — and until now the report reached the
+learner and stopped there. Nothing in either format said where it should go next.
+
+**What was decided:**
+
+- **A `report` key, a MAY, on the manifest and on a catalogue entry**, with the same shape:
+  a `url` that starts `https://` or `mailto:`, and an optional `prefill` of `github`,
+  `gitlab` or `none` (the default). With a `mailto:` URL, `prefill` is absent or `none`,
+  because a mail link always carries the subject and body. Validator check 34 and catalogue
+  check 3 report a bad shape as a finding, and an unknown key inside `report` as one too,
+  following `supplies` and `setup_validators`. A bundle without `report` gets no finding
+  and no warning. `bundle-format.md` section 2, **Defect reports**.
+- **The issue's `include` key was dropped.** A report always carries the full context —
+  course `id` and `materialized_version`, lesson, task, validator or anchor, the kind of
+  defect, runner version and host — so an author has nothing to choose, and a key that
+  selected less would only produce reports the author cannot act on.
+- **The target order, first that exists wins:** the instance manifest's `report`; the
+  `report` of the catalogue entry for the course's `id`, resolved from disk first-match-wins
+  as `materialize` resolves it; the new-issue page of that entry's catalogue when it is a
+  Git repository on `github.com` or `gitlab.com` (https, ssh and scp-style URLs); and
+  otherwise none, when the learner sends the text by hand. A defect in the runner goes to
+  `skomp/belay` and never to a course, whatever the course declares.
+- **The learner sends it; nothing else does.** The tutor writes the draft to
+  `tutorial/REPORT.md`, the learner reads all of it, and `belay-catalogs report` prints a
+  link with the title and body percent-encoded into it. The command opens no browser,
+  calls no `gh`, writes nothing and fetches nothing, and takes no path, so it starts
+  without a prompt under `blockReadsOutsideWorkingDirectories` (belay#76). A prefilled link
+  past 8,000 characters falls back to the bare URL. `--context` prints the runner version
+  from the plugin manifest, read in-process, so the tutor never opens a file in the plugin
+  cache to fill in the draft.
+- **Privacy is the learning record's rule.** No learner code and no learner words in a
+  draft unless the learner adds them, and no local path: the stamp's `materialized_from`
+  names a directory on the learner's machine.
+- **Offered once per defect, recorded either way.** A `reported` event, with a `defect`
+  from a closed set of kinds and an identifier `subject`, is written when the offer is
+  made, and compaction keeps it as written, so the same defect is not offered twice in one
+  instance. The kinds were derived from the places that say to report a defect, listed in
+  `runner-protocol.md` section 17.2.
+- **Opinions are out of scope.** "This explanation confused me" is course quality, which
+  belongs to `skomp/belay-authoring`; the tutor notes it and does not report it.
+
+`runner-protocol.md` section 17 is the behaviour. One rule there covers every existing
+"report it" place, rather than an edit at each of them.
+
 ---
 
 ## 16. Deferred: telemetry feedback
@@ -1637,17 +1686,18 @@ real files. One repository cannot satisfy both without duplication.
 | `belay-bundles` repository | **done** — holds five bundles and its own `catalog.yaml` |
 | `rust-automaton-db` bundle | **done** — imported, corrected, verified |
 | `automaton-db/tutorial/` instance + `STATE.md` | **done** — uncommitted |
-| Validator (`skills/belay/scripts/validate_bundle.py`) | **done** — 33 bundle checks + 7 catalogue checks |
-| Validator test suite | **done** — 846 assertions on a clean checkout, the same on any machine; every check proven firing or warning. `BELAY_SWEEP_SIBLING_REPOS=1` adds the published bundles, counted separately (belay#37) |
+| Validator (`skills/belay/scripts/validate_bundle.py`) | **done** — 34 bundle checks + 7 catalogue checks |
+| Validator test suite | **done** — 873 assertions on a clean checkout, the same on any machine; every check proven firing or warning. `BELAY_SWEEP_SIBLING_REPOS=1` adds the published bundles, counted separately (belay#37) |
 | Optional lessons (`optional_lessons`, `failure_modes`) | **done** — 2026-09-12, §6; checks 18-21 |
 | First-load banner + `teaching_method` | **done** — 2026-09-13, released in 0.6.0; `state-lifecycle.md` §3 step 7, check 27; belay#23 |
 | Offer / defer / re-offer behaviour | **untested** — no harness exercises it; belay#22 |
 | Knowledge assessments (`assesses`, `## Assessments`, `kind: practice`) | **done** — 2026-10-16, belay#33; `runner-protocol.md` §15, `state-lifecycle.md` §11, checks 31-32. The question-and-answer loop is untested, as above |
-| Learning-evidence record (`tutorial/EVENTS.jsonl`, `skills/belay/scripts/evidence.py`) | **done** — 2026-10-16, belay#34; `state-lifecycle.md` §12, `runner-protocol.md` §16, check 33 (warning only); `tests/test_evidence.py`, 65 assertions. Whether the tutor writes the events in conversation is untested, as above |
+| Learning-evidence record (`tutorial/EVENTS.jsonl`, `skills/belay/scripts/evidence.py`) | **done** — 2026-10-16, belay#34; `state-lifecycle.md` §12, `runner-protocol.md` §16, check 33 (warning only); `tests/test_evidence.py`, 89 assertions. Whether the tutor writes the events in conversation is untested, as above |
 | Multi-catalogue support (`skills/belay/scripts/catalogs.py`) | **done** — 2026-09-12, §7 |
-| Catalogue test suite (`tests/test_catalogs.py`) | **done** — 407 assertions; every failure kind proven firing |
+| Catalogue test suite (`tests/test_catalogs.py`) | **done** — 467 assertions; every failure kind proven firing |
 | Instance update (`skills/belay/scripts/plan_update.py`, `state-lifecycle.md` §3.2) | **done** — 2026-10-14, belay#50, §15c; source from the stamp, `--diff`, `--apply`, `--check-version` 2026-10-28, belay#76; `tests/test_plan_update.py`, 129 assertions |
 | Materialization and supplies placement by command (`catalogs.py materialize`, `place-supplies`) | **done** — 2026-10-28, belay#76, §7.2; `tests/test_catalogs.py` |
+| Defect reports (`report` key, check 34, `catalogs.py report`, the `reported` event) | **done** — 2026-10-30, belay#86, §15e; `runner-protocol.md` §17. Whether the tutor offers, drafts and records in conversation is untested, as above |
 | Shared YAML reader (`skills/belay/scripts/yamlite.py`) | **done** — the only reader; the PyYAML preference was removed 2026-09-13, belay#29 |
 | `catalog.yaml` inside `belay-bundles` | **done** — 2026-09-12, §15 item 6; generated by `belay-authoring`'s `catalog.py` |
 | `SKILL.md` (the runner control plane) | **done** |

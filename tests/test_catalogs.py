@@ -1449,6 +1449,41 @@ CATALOG_CASES: list[tuple[str, int, str, str, bool]] = [
         False,
     ),
     (
+        "3: an entry's report has an http url",
+        3,
+        catalog_doc(("a", "bundle")).replace(
+            "    level: beginner\n",
+            "    level: beginner\n    report:\n"
+            "      url: http://github.com/o/r/issues/new\n",
+        ),
+        "it must start 'https://' or 'mailto:'",
+        False,
+    ),
+    (
+        "3: an entry's report has an unknown prefill",
+        3,
+        catalog_doc(("a", "bundle")).replace(
+            "    level: beginner\n",
+            "    level: beginner\n    report:\n"
+            "      url: https://github.com/o/r/issues/new\n"
+            "      prefill: jira\n",
+        ),
+        "'report.prefill' is 'jira'",
+        False,
+    ),
+    (
+        "3: an entry's report pairs mailto with prefill github",
+        3,
+        catalog_doc(("a", "bundle")).replace(
+            "    level: beginner\n",
+            "    level: beginner\n    report:\n"
+            "      url: mailto:owner@example.org\n"
+            "      prefill: github\n",
+        ),
+        "with a mailto: url",
+        False,
+    ),
+    (
         "4: two entries share an id",
         4,
         catalog_doc(("a", "bundle"), ("a", "bundle")),
@@ -1571,6 +1606,28 @@ def test_validator_catalog_mode() -> None:
             "and reports n/a without it, rather than quietly passing",
             repr(report.status.get(7)),
         )
+
+        # report: the three rejections above mean nothing unless a
+        # well-formed target passes, with no warning about the field either.
+        for block, label in (
+            ("      url: https://github.com/o/r/issues/new\n      prefill: github\n",
+             "an entry's https report with prefill github passes"),
+            ("      url: mailto:owner@example.org\n",
+             "an entry's mailto report passes"),
+        ):
+            target.write_text(
+                catalog_doc(("a", "bundle")).replace(
+                    "    level: beginner\n",
+                    f"    level: beginner\n    report:\n{block}",
+                ),
+                encoding="utf-8",
+            )
+            report = vb.validate_catalog(target, portable=False)
+            record(
+                report.exit_code() == 0 and not report.warnings,
+                label + ", with no warning",
+                "; ".join(str(f) for f in [*report.findings, *report.warnings]),
+            )
 
         # optional_lesson_count: the four rejections above mean nothing
         # unless a well-formed count passes. Zero is legal and means the same
@@ -3344,6 +3401,413 @@ def test_place_supplies_refuses_and_writes_nothing() -> None:
 # --------------------------------------------------------------------------
 
 
+# --------------------------------------------------------------------------
+# report (belay#86)
+# --------------------------------------------------------------------------
+#
+# Every link is DECODED and compared with the draft, rather than matched as a
+# string: an encoding that lost a '&' or turned a space into '+' would still
+# look like a link. The body below carries every character that could end or
+# change a query.
+
+REPORT_TITLE = "Lesson 01 names a validator 100% missing & more"
+REPORT_BODY = (
+    "Course: rust-cli-basics, version 1.0\n"
+    "Lesson: lessons/01-subcommands/LESSON.md\n"
+    "\n"
+    "Validator: cargo-tset #2 + a&b=c 50% ?x=y\n"
+    "Host: Claude Code - Z\u00fcrich \u2713"
+)
+REPORT_DRAFT_TEXT = f"# {REPORT_TITLE}\n\n{REPORT_BODY}\n"
+
+
+def write_draft(workspace: Path, text: str = REPORT_DRAFT_TEXT) -> None:
+    (workspace / "tutorial" / "REPORT.md").write_text(text, encoding="utf-8")
+
+
+def set_manifest_report(workspace: Path, block: str) -> None:
+    manifest = workspace / "tutorial" / "tutorial.yaml"
+    text = manifest.read_text()
+    head, sep, stamp = text.partition("\ninstance:\n")
+    assert sep, "the instance carries no stamp to keep at the end"
+    manifest.write_text(f"{head}\n{block}{sep}{stamp}")
+    document = cat.load_yaml(manifest.read_text(), "tutorial.yaml")
+    assert "report" in document, "the planted report did not survive the reader"
+
+
+def decoded_query(link: str) -> dict[str, list[str]]:
+    import urllib.parse
+
+    return urllib.parse.parse_qs(
+        urllib.parse.urlsplit(link).query, keep_blank_values=True, strict_parsing=True
+    )
+
+
+def report_json(env: "Env", workspace: Path, *extra: str) -> tuple[int, dict]:
+    with in_directory(workspace):
+        return env.run_json("report", *extra)
+
+
+def entry_with_report(identifier: str, path: str, block: str) -> str:
+    return catalog_doc((identifier, path)).replace(
+        "    level: beginner\n", f"    level: beginner\n    report:\n{block}"
+    )
+
+
+def materialized_workspace(env: "Env", catalogue_text: str | None = None) -> Path:
+    bundle = env.root / "bundles" / "rust-cli-basics"
+    if not bundle.exists():
+        shutil.copytree(BUNDLE_FIXTURE, bundle)
+    catalog = env.write_catalog(
+        "catalogues/user.yaml",
+        catalogue_text.replace("@BUNDLE@", str(bundle))
+        if catalogue_text
+        else catalog_doc(("rust-cli-basics", str(bundle))),
+    )
+    env.write_config(file_config(("mine", catalog)))
+    workspace = env.root / "workspace"
+    workspace.mkdir()
+    code, out = run_in(env, workspace, "materialize", "rust-cli-basics")
+    assert code == 0, f"materialize failed: {out}"
+    return workspace
+
+
+def git_catalogue_workspace(env: "Env", configured_url: str) -> Path:
+    """An instance whose winning catalogue is a Git one at `configured_url`.
+
+    The clone is fetched over a file:// URL, which is all this suite can
+    reach, and the configuration then names the real-looking URL. `report`
+    fetches nothing, so it reads the clone on disk under the URL configured
+    now - which is the URL whose issue page is derived.
+    """
+    source = env.root / "authoring" / "rust-cli-basics"
+    shutil.copytree(BUNDLE_FIXTURE, source)
+    files = {
+        str(p.relative_to(source.parent)): p.read_text(encoding="utf-8")
+        for p in source.rglob("*")
+        if p.is_file()
+    }
+    files["catalog.yaml"] = catalog_doc(("rust-cli-basics", "rust-cli-basics"))
+    url = make_repo(env.root / "remote", files)
+    env.write_config(git_config("bundles", url))
+    code, out = env.run("discover")
+    assert code == 0, f"discover failed: {out}"
+    workspace = env.root / "workspace"
+    workspace.mkdir()
+    code, out = run_in(env, workspace, "materialize", "rust-cli-basics")
+    assert code == 0, f"materialize failed: {out}"
+    env.write_config(git_config("bundles", configured_url))
+    return workspace
+
+
+def expect_decoded(label: str, payload: dict, title_key: str, body_key: str) -> None:
+    link = payload.get("link") or ""
+    try:
+        query = decoded_query(link)
+    except ValueError as exc:
+        record(False, f"{label}: the link's query parses", f"{exc}: {link}")
+        return
+    record(
+        query.get(title_key) == [REPORT_TITLE] and query.get(body_key) == [REPORT_BODY]
+        and set(query) == {title_key, body_key},
+        f"{label}: the decoded {title_key} and {body_key} are exactly the draft's",
+        f"decoded = {query!r}",
+    )
+    record(
+        "+" not in link.split("?", 1)[1] and " " not in link,
+        f"{label}: no '+' and no raw space in the query - spaces are %20",
+        link,
+    )
+
+
+def test_report_tiers() -> None:
+    print("\nreport: the target tiers, in order:")
+    # (a) the manifest's own report
+    with temp_env() as env:
+        workspace = materialized_workspace(env)
+        set_manifest_report(
+            workspace,
+            "report:\n  url: https://github.com/author/course/issues/new\n"
+            "  prefill: github\n",
+        )
+        write_draft(workspace)
+        before = tree_digest(workspace)
+        code, payload = report_json(env, workspace)
+        record(
+            code == cat.EXIT_REPORT_LINK and payload.get("tier") == "manifest"
+            and payload.get("url") == "https://github.com/author/course/issues/new"
+            and payload.get("prefilled") is True,
+            "(a) the manifest's report wins, exit 0, prefilled",
+            f"exit {code} {payload!r}",
+        )
+        expect_decoded("(a) github", payload, "title", "body")
+        record(
+            (payload.get("link") or "").startswith(
+                "https://github.com/author/course/issues/new?title="
+            ),
+            "(a) the link is the declared url with the query appended",
+            payload.get("link", ""),
+        )
+        record(tree_digest(workspace) == before, "(a) and the command wrote nothing")
+        with in_directory(workspace):
+            code, out = env.run("report")
+        record(
+            code == 0 and "tier:                 manifest" in out
+            and payload["link"] in out and "Nothing was sent" in out,
+            "(a) the text report says the tier, then gives the same link",
+            out,
+        )
+
+        # --runner overrides the manifest's report: a runner defect never
+        # goes to a course.
+        code, payload = report_json(env, workspace, "--runner")
+        record(
+            code == 0 and payload.get("tier") == "runner"
+            and payload.get("url") == "https://github.com/skomp/belay/issues/new",
+            "--runner overrides the manifest's report and targets skomp/belay",
+            f"exit {code} {payload!r}",
+        )
+        expect_decoded("--runner", payload, "title", "body")
+
+        # A malformed manifest report is skipped, with a note, to the next tier.
+        manifest = workspace / "tutorial" / "tutorial.yaml"
+        manifest.write_text(manifest.read_text().replace(
+            "url: https://github.com/author/course/issues/new",
+            "url: http://github.com/author/course/issues/new",
+        ))
+        code, payload = report_json(env, workspace)
+        record(
+            code == cat.EXIT_REPORT_NO_TARGET and payload.get("tier") == "none"
+            and any("check 34" in n for n in payload.get("notes", [])),
+            "a malformed manifest report is skipped with a note, not used",
+            f"exit {code} {payload!r}",
+        )
+
+    # (b) the catalogue entry's report, when the manifest has none
+    with temp_env() as env:
+        workspace = materialized_workspace(
+            env,
+            entry_with_report(
+                "rust-cli-basics", "@BUNDLE@",
+                "      url: https://gitlab.com/owner/group/course/-/issues/new\n"
+                "      prefill: gitlab\n",
+            ),
+        )
+        write_draft(workspace)
+        code, payload = report_json(env, workspace)
+        record(
+            code == 0 and payload.get("tier") == "catalogue-entry"
+            and payload.get("url") == "https://gitlab.com/owner/group/course/-/issues/new",
+            "(b) the catalogue entry's report, when the manifest declares none",
+            f"exit {code} {payload!r}",
+        )
+        expect_decoded("(b) gitlab", payload, "issue[title]", "issue[description]")
+        # and (a) still beats (b)
+        set_manifest_report(workspace, "report:\n  url: mailto:author@example.org\n")
+        code, payload = report_json(env, workspace)
+        record(
+            code == 0 and payload.get("tier") == "manifest"
+            and (payload.get("link") or "").startswith("mailto:author@example.org?subject="),
+            "(a) beats (b): the manifest's mailto report wins over the entry's",
+            f"exit {code} {payload!r}",
+        )
+        expect_decoded("mailto", payload, "subject", "body")
+
+    # (c) the issue page of a Git catalogue's repository
+    for configured, expected_url, prefill, title_key, body_key, label in (
+        ("git@github.com:owner/bundles.git",
+         "https://github.com/owner/bundles/issues/new", "github",
+         "title", "body", "(c) github, from an scp-style URL"),
+        ("https://gitlab.com/group/sub/bundles.git",
+         "https://gitlab.com/group/sub/bundles/-/issues/new", "gitlab",
+         "issue[title]", "issue[description]", "(c) gitlab, with a subgroup"),
+    ):
+        with temp_env() as env:
+            workspace = git_catalogue_workspace(env, configured)
+            write_draft(workspace)
+            with path_prefixed(env.bin, "fatal: report must not fetch\n"):
+                code, payload = report_json(env, workspace)
+            record(
+                code == 0 and payload.get("tier") == "catalogue-repository"
+                and payload.get("url") == expected_url
+                and payload.get("prefill") == prefill,
+                f"{label} -> {expected_url}, fetching nothing",
+                f"exit {code} {payload!r}",
+            )
+            expect_decoded(label, payload, title_key, body_key)
+
+    # (c) on another host gives no target: (d)
+    with temp_env() as env:
+        workspace = git_catalogue_workspace(env, "https://git.example.org/owner/bundles.git")
+        write_draft(workspace)
+        code, payload = report_json(env, workspace)
+        record(
+            code == cat.EXIT_REPORT_NO_TARGET and payload.get("tier") == "none"
+            and payload.get("link") is None
+            and any("not on github.com or gitlab.com" in n for n in payload.get("notes", [])),
+            "(c) on any other host derives nothing: no target, exit 1, and a note why",
+            f"exit {code} {payload!r}",
+        )
+
+    # (d) nothing at all
+    with temp_env() as env:
+        workspace = materialized_workspace(env)
+        write_draft(workspace)
+        with in_directory(workspace):
+            code, out = env.run("report")
+        record(
+            code == cat.EXIT_REPORT_NO_TARGET and "tier:                 none" in out
+            and "tutorial/REPORT.md" in out and "by hand" in out
+            and "not a Git repository" in out,
+            "(d) a file catalogue and no report: no target, exit 1, the draft "
+            "is to send by hand",
+            f"exit {code}\n{out}",
+        )
+
+
+def test_report_link_forms() -> None:
+    print("\nreport: prefill none, the length limit, and the draft:")
+    with temp_env() as env:
+        workspace = materialized_workspace(env)
+        set_manifest_report(
+            workspace, "report:\n  url: https://forum.example.org/c/course\n  prefill: none\n"
+        )
+        write_draft(workspace)
+        code, payload = report_json(env, workspace)
+        record(
+            code == 0 and payload.get("link") == "https://forum.example.org/c/course"
+            and payload.get("prefilled") is False
+            and "paste" in (payload.get("fallback") or ""),
+            "prefill none: the bare url, and the learner pastes from REPORT.md",
+            f"exit {code} {payload!r}",
+        )
+        manifest = workspace / "tutorial" / "tutorial.yaml"
+        manifest.write_text(manifest.read_text().replace(
+            "url: https://forum.example.org/c/course\n  prefill: none",
+            "url: https://github.com/author/course/issues/new\n  prefill: github",
+        ))
+        # The limit, from both sides: a body that fits, then one that does not.
+        fits = "x" * 7000
+        write_draft(workspace, f"# {REPORT_TITLE}\n\n{fits}\n")
+        code, payload = report_json(env, workspace)
+        record(
+            code == 0 and payload.get("prefilled") is True
+            and len(payload.get("link") or "") <= cat.REPORT_LINK_LIMIT,
+            "a link under 8000 characters is prefilled",
+            f"length {len(payload.get('link') or '')}",
+        )
+        write_draft(workspace, f"# {REPORT_TITLE}\n\n{'x' * 9000}\n")
+        code, payload = report_json(env, workspace)
+        record(
+            code == 0 and payload.get("link") == "https://github.com/author/course/issues/new"
+            and payload.get("prefilled") is False
+            and "8000" in (payload.get("fallback") or ""),
+            "a prefilled link over 8000 characters falls back to the bare url, "
+            "and says why",
+            f"exit {code} {payload!r}",
+        )
+
+        write_draft(workspace)
+        code, payload = report_json(env, workspace)
+        record(code == 0, "the control: the well-formed draft gives exit 0", f"exit {code}")
+        for label, text in (
+            ("an empty draft", ""),
+            ("a draft of blank lines", "\n\n  \n"),
+            ("a draft with no '# ' title", f"{REPORT_TITLE}\n\n{REPORT_BODY}\n"),
+            ("a draft whose title is blank", f"#  \n\n{REPORT_BODY}\n"),
+            ("a draft with a title and no body", f"# {REPORT_TITLE}\n\n"),
+        ):
+            write_draft(workspace, text)
+            with in_directory(workspace):
+                code, out = env.run("report")
+            record(code == cat.EXIT_USAGE, f"{label} is a usage error, exit 2", f"exit {code}\n{out}")
+        (workspace / "tutorial" / "REPORT.md").unlink()
+        with in_directory(workspace):
+            code, out = env.run("report")
+        record(
+            code == cat.EXIT_USAGE and "there is no tutorial/REPORT.md" in out,
+            "a missing draft is a usage error, exit 2, saying what to write",
+            f"exit {code}\n{out}",
+        )
+        code, payload = report_json(env, workspace, "--context")
+        record(
+            code == 0 and payload.get("context_only") is True
+            and payload.get("course") == "rust-cli-basics"
+            and payload.get("materialized_version") == "1.0"
+            and payload.get("link") is None,
+            "--context needs no draft and prints the course, version and target",
+            f"exit {code} {payload!r}",
+        )
+        plugin = json.loads((REPO / ".claude-plugin" / "plugin.json").read_text())
+        record(
+            payload.get("runner_version") == plugin["version"],
+            "the runner version is the plugin manifest's",
+            f"{payload.get('runner_version')!r} vs {plugin['version']!r}",
+        )
+        empty = env.root / "elsewhere"
+        empty.mkdir()
+        with in_directory(empty):
+            code, out = env.run("report")
+        record(
+            code == cat.EXIT_USAGE and "never create tutorial/" in out,
+            "no instance in the current directory is a usage error, exit 2",
+            f"exit {code}\n{out}",
+        )
+
+
+def test_repository_issue_page() -> None:
+    print("\nreport: deriving an issue page from a Git catalogue URL:")
+    for url, expected in (
+        ("https://github.com/skomp/belay-bundles", ("https://github.com/skomp/belay-bundles/issues/new", "github")),
+        ("https://github.com/skomp/belay-bundles.git", ("https://github.com/skomp/belay-bundles/issues/new", "github")),
+        ("https://GitHub.com/skomp/belay-bundles/", ("https://github.com/skomp/belay-bundles/issues/new", "github")),
+        ("ssh://git@github.com/skomp/belay-bundles.git", ("https://github.com/skomp/belay-bundles/issues/new", "github")),
+        ("ssh://git@github.com:22/skomp/belay-bundles.git", ("https://github.com/skomp/belay-bundles/issues/new", "github")),
+        ("git@github.com:skomp/belay-bundles.git", ("https://github.com/skomp/belay-bundles/issues/new", "github")),
+        ("git@gitlab.com:group/sub/repo.git", ("https://gitlab.com/group/sub/repo/-/issues/new", "gitlab")),
+        ("https://gitlab.com/group/repo", ("https://gitlab.com/group/repo/-/issues/new", "gitlab")),
+        ("http://github.com/skomp/belay-bundles", None),
+        ("git://github.com/skomp/belay-bundles", None),
+        ("file:///srv/git/bundles", None),
+        ("https://github.com/skomp", None),
+        ("https://github.com/skomp/belay/tree/main", None),
+        ("https://bitbucket.org/skomp/bundles.git", None),
+        ("git@github.com:../etc.git", None),
+        ("/srv/git/bundles.git", None),
+    ):
+        got = cat.repository_issue_page(url)
+        record(got == expected, f"{url} -> {expected[0] if expected else 'no page'}", f"got {got!r}")
+
+
+def test_the_reader_keeps_report_on_an_entry() -> None:
+    print("\nreport: the tolerant reader keeps an entry's report:")
+    with temp_env() as env:
+        bundle = env.make_bundle("bundles/a")
+        good = env.write_catalog(
+            "catalogues/user.yaml",
+            entry_with_report("a", str(bundle),
+                              "      url: https://github.com/o/r/issues/new\n      prefill: github\n"),
+        )
+        env.write_config(file_config(("mine", good)))
+        code, payload = env.run_json("discover", "--offline")
+        entry = next((t for t in payload.get("tutorials", []) if t.get("id") == "a"), {})
+        record(
+            entry.get("report") == {"url": "https://github.com/o/r/issues/new", "prefill": "github"},
+            "discover --json carries the entry's report as written",
+            repr(entry),
+        )
+        good.write_text(
+            entry_with_report("a", str(bundle), "      url: http://bad.example/x\n"),
+            encoding="utf-8",
+        )
+        code, payload = env.run_json("discover", "--offline")
+        record(
+            any(t.get("id") == "a" for t in payload.get("tutorials", [])),
+            "a malformed report never removes a working course from discovery",
+            repr(payload.get("tutorials")),
+        )
+
+
 def main() -> int:
     print("catalogs.py test suite")
     print(f"  script:      {SCRIPTS / 'catalogs.py'}")
@@ -3403,6 +3867,10 @@ def main() -> int:
         test_materialize_and_supplies_from_a_git_catalogue,
         test_place_supplies,
         test_place_supplies_refuses_and_writes_nothing,
+        test_report_tiers,
+        test_report_link_forms,
+        test_repository_issue_page,
+        test_the_reader_keeps_report_on_an_entry,
     ):
         try:
             test()

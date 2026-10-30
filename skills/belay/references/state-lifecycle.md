@@ -876,6 +876,7 @@ tutorial/
 ├── DESIGN.md
 ├── STATE.md
 ├── EVENTS.jsonl          the learning record, section 12; tutor-owned, may be absent
+├── REPORT.md             a defect report's draft, runner-protocol.md section 17; tutor-owned, may be absent
 ├── lessons/              the author's lessons, copied at materialization, read-only
 └── lessons.generated/    lessons the tutor wrote during this course, tutor-owned
 ```
@@ -1521,12 +1522,17 @@ One JSON object per line, appended. Every event has four fields:
 | `assessment` | `state`, `attempt`, `not_demonstrated` (concept ids), and `requested` | an attempt ends and its *Assessments* row is written |
 | `practice_offered` | `concepts` (concept ids) | practice is offered after a weak result |
 | `practice_accepted` | `concepts`, `practice_lesson` (its path under `lessons.generated/`) | the learner accepts it and the lesson is written |
+| `reported` | `defect` (a kind of defect), `subject` (what it is about), and `target` | a defect report is offered, whether or not the learner sends it |
 | `summary` | `first_date`, `events`, `started`, `completed`, `checks`, `hints`, `answers`, `attempts`, `practice_offered`, `practice_lessons` | written only by compaction, 12.3 |
 
 - **`outcome`** is one of the four answer outcomes of `runner-protocol.md` section 15.4:
   `demonstrated`, `partial`, `misconception`, `not-enough-evidence`.
 - **`state`** is one of the four states of section 11.2: `passed`, `partial`, `stopped`,
   `skipped`. `skipped` and `passed` are different values here exactly as in `STATE.md`.
+- **`defect`** is one of the kinds `runner-protocol.md` section 17.2 lists, and
+  **`subject`** is an identifier for what it is about — a validator name, an anchor, a
+  lesson path, `check-<n>` — never a sentence. **`target`** is `course`, which an absent
+  `target` also means, or `runner`. The event is what stops a report being offered twice.
 - **`requested`** is written, as `true`, only for a quiz the learner asked for (section
   11.1's `_scope:_` rows). Its `lesson` is the lesson the learner stands in, and the scope
   in words stays in `STATE.md`.
@@ -1559,6 +1565,9 @@ stays in order without renumbering. A lesson is completed when it has a
 `lesson_completed` event and is neither `active_lesson` nor `resume_at` in `STATE.md`. The
 events of a lesson still in progress are kept as written. A lesson re-entered after
 compaction, an assessment's retake, merges into its summary again at the next one.
+**A `reported` event is never compacted**, in any lesson: it is the only record that a
+report was offered, and a count in a summary could not say which defect it was about.
+There is one per distinct defect, so keeping them costs nothing.
 
 After compaction the record is valid under the same check, and every question in 12.5
 can still be answered for a completed lesson, at the precision of counts per lesson and
@@ -1592,6 +1601,7 @@ from `STATE.md`.
   by concept.
 - **Whether practice improved the next result** — a `practice_accepted` event, then the
   next `answer` and `assessment` events on the same concepts, in `seq` order.
+- **Which defect reports were offered** — the `reported` events, by kind and subject.
 - **Elapsed time per lesson**, at date precision — from its `lesson_started` to its
   `lesson_completed`.
 - **Where a course was abandoned** is not an event: nobody writes "I stopped". It is

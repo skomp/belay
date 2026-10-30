@@ -24,7 +24,7 @@ Four exceptions, and no others:
 - the instance's `ownership_policy` is `on-request` and the learner explicitly asks, or
   it is `unrestricted`;
 - the path is tutor-owned (`tutorial/STATE.md`, `tutorial/DESIGN.md`,
-  `tutorial/EVENTS.jsonl`, and whatever else `tutor_owned` lists);
+  `tutorial/EVENTS.jsonl`, `tutorial/REPORT.md`, and whatever else `tutor_owned` lists);
 - you are **creating** a file the bundle declares in `supplies`, which is placement rather
   than the learner's work. Create-only, declared paths only, never a file that already
   exists, and never something to ask about — not even under `on-request`;
@@ -79,8 +79,8 @@ the repository root, or at the filesystem root if there is no repository) and lo
 `tutorial/tutorial.yaml`. The first one found is the active instance, and its parent
 directory is the workspace root.
 
-Do not read `COURSE.md`, the lesson files, or anything else while orienting. You need the
-manifest and `STATE.md`, nothing more.
+Do not read `COURSE.md`, the lesson files, or anything but the manifest and `STATE.md`
+while orienting.
 
 ## Step 2 — branch
 
@@ -108,8 +108,8 @@ Present what you find as a **selection, not as prose**: options the learner pick
 narrowed one facet at a time when there are too many, never narrowed to zero, always with
 a way to see everything. Section 9 of that file carries the procedure.
 
-The rule that matters most is unchanged: read catalogue metadata only. Do not open
-anything under a candidate's bundle path until the learner has chosen.
+The rule that matters most: read catalogue metadata only. Do not open anything under a
+candidate's bundle path until the learner has chosen.
 
 After the learner chooses, load `references/state-lifecycle.md`, then run
 `belay-catalogs materialize <id>` from the workspace root: it opens the bundle, copies,
@@ -141,7 +141,7 @@ The loop in one screen:
 
 ### Context budget
 
-This is the reason the format exists. A tutor holds one lesson, not a course.
+A tutor holds one lesson, not a course.
 
 | Load every turn | Never load routinely |
 |---|---|
@@ -256,11 +256,11 @@ Load a reference when its condition holds, not before.
 |---|---|
 | `references/catalogue-format.md` | no active instance was found and you must find a tutorial to offer; the learner asks what tutorials are available; the learner wants to add a catalogue or register a course; a catalogue failed to refresh |
 | `references/state-lifecycle.md` | materializing a new instance; the first time this session you are about to change `STATE.md`; a task completes; a lesson completes; an offer of an optional lesson is accepted or deferred; the learner acknowledges the assumed-concept review; you need to advance `active_lesson`; an assessment ends or is interrupted; you are about to write a generated lesson; the learner asks to update the course (section 3.2) |
-| `references/runner-protocol.md` | before the first task of a teaching session; when validating; when completion conditions look met; when unsure whether an edit is yours to make; when considering whether to write a lesson; when deciding whether to offer or re-offer an optional lesson; when the active lesson declares `assesses`, or the learner asks to be quizzed; when a course declares `assumes`; when a course declares `setup_validators`, or a setup check fails, or the learner asks whether a course is safe to run; when a course finishes or the learner asks what comes after it; when the learner asks how they have done |
+| `references/runner-protocol.md` | before the first task of a teaching session; when validating; when completion conditions look met; when unsure whether an edit is yours to make; when considering whether to write a lesson; when deciding whether to offer or re-offer an optional lesson; when the active lesson declares `assesses`, or the learner asks to be quizzed; when a course declares `assumes`; when a course declares `setup_validators`, or a setup check fails, or the learner asks whether a course is safe to run; when a course finishes or the learner asks what comes after it; when the learner asks how they have done; when you report a defect, or the learner does |
 | `references/bundle-format.md` | authoring, importing or repairing a **bundle**, including promoting a generated lesson into one. Not needed to teach. |
 
 A learner's session runs four scripts, each at one moment, never per turn.
-`belay-catalogs` belongs to discovery and materialization; a resume never runs it.
+`belay-catalogs` belongs to discovery and materialization; a resume runs only `report`.
 `belay-validate --instance tutorial` checks the instance
 materialization has just created, before the first task: a finding stops the course from
 starting, a warning never does, and an indeterminate run is not a pass.
@@ -292,12 +292,13 @@ that a course is safe.
 - **A learner-owned file changed in a way you cannot account for** — say so and ask. Do
   not revert it, stash it, or discard it. It is almost certainly the learner working.
 - **A bundle `source.type` the runner does not implement** (`git`, `archive`) — fail
-  explicitly and say so. Do not substitute a different source. A course that lives in a
-  repository is reached by adding that repository as a **catalogue**, which is
-  supported; a bundle source that names a repository directly is not.
+  explicitly and say so, without substituting another source. A course in a repository
+  is reached by adding the repository as a **catalogue**.
 - **A newly materialized instance does not pass validation** — do not start the course.
   Say which bundle, and give the validator's findings verbatim.
   `references/runner-protocol.md` section 13.
+- **A defect you report, or one the learner reports** — offer once to draft a report they
+  send themselves (`references/runner-protocol.md` section 17).
 
 ## Tone
 

@@ -136,6 +136,8 @@ CHECKS: dict[int, str] = {
         "states, lessons that exist, concept ids and counts",
     33: "[instance] the learning record EVENTS.jsonl, when present, holds only "
         "declared events in seq order; a malformed one WARNS",
+    34: "report, when declared, is a mapping with an https: or mailto: url and "
+        "a known prefill",
 }
 
 BUNDLE_ONLY = {12, 13, 26}
@@ -233,6 +235,9 @@ REQUIRED_MANIFEST_FIELDS = (
 # singular, must still warn - beside the case that proves the correct
 # spelling does not.
 #
+# `report` is in this list for `setup_validators`' reason, and the suite
+# keeps the same near-miss control beside it: `reports:` must still warn.
+#
 # `supplies` is in this list and is declared by no bundle in this repository.
 # The list is derived from the FORMAT, not from the bundles that happen to
 # exist: a list read off the fixtures would drop `supplies`, and the first
@@ -259,6 +264,7 @@ KNOWN_MANIFEST_FIELDS = (
     "ownership_policy",
     "recommended_follow_ups",
     "recommended_previous_bundles",
+    "report",
     "setup_validators",
     "solution_code",
     "style",
@@ -4756,6 +4762,109 @@ def check_version(manifest: Any, mode: str, report: Report) -> None:
     report.ran(30, ", ".join(seen) if seen else "declared, malformed")
 
 
+# Where a learner's defect report goes (check 34, and catalogue check 3).
+REPORT_KEY = "report"
+REPORT_KEYS = ("url", "prefill")
+REPORT_PREFILLS = ("github", "gitlab", "none")
+REPORT_SCHEMES = ("https://", "mailto:")
+
+
+def report_problems(value: Any) -> list[str]:
+    """Why a `report` value is unusable, or [] when it is well formed.
+
+    One definition for the manifest key (check 34), the catalogue entry
+    field (catalogue check 3) and the runtime (`belay-catalogs report`,
+    which skips a malformed target rather than building a link from it), so
+    the three cannot disagree about what a target is.
+
+    An unknown key inside `report` is reported rather than ignored, which is
+    the rule `supplies` and `setup_validators` keep for their entries and for
+    their reason: a key at this level is almost always a misspelling of one
+    that belongs, and `prefil: github` would otherwise send every learner a
+    bare link with nothing filled in. The issue's `include` key is one of
+    these on purpose: a report always carries the full context, so there is
+    nothing for an author to choose (bundle-format.md section 2, **Defect
+    reports**).
+
+    The scheme is checked as a PREFIX and nothing more. `https://` keeps a
+    report off plain HTTP and off `javascript:`, `file:` and `data:`; whether
+    the page exists, or is the author's, is not something a validator can
+    know.
+    """
+    if not isinstance(value, dict):
+        actual = (
+            "nothing at all - the key is written with no value under it"
+            if value is None
+            else f"{type(value).__name__}: {value!r}"
+        )
+        return [
+            f"'report' must be a mapping with a 'url' and an optional "
+            f"'prefill'; it is {actual}"
+        ]
+    problems: list[str] = []
+    for key in sorted((str(k) for k in value if str(k) not in REPORT_KEYS), key=str):
+        problems.append(
+            f"'report' carries an unknown key {key!r}; only 'url' and "
+            f"'prefill' are recognised"
+        )
+    url = value.get("url")
+    if "url" not in value:
+        problems.append("'report' is missing required key 'url'")
+    elif not isinstance(url, str) or not url.strip():
+        problems.append(f"'report.url' must be a non-empty string; it is {url!r}")
+    elif not url.startswith(REPORT_SCHEMES) or url in REPORT_SCHEMES:
+        problems.append(
+            f"'report.url' is {url!r}; it must start 'https://' or 'mailto:'. "
+            f"A learner opens this link, so plain http and every other scheme "
+            f"are refused"
+        )
+    elif any(ch.isspace() for ch in url):
+        problems.append(
+            f"'report.url' is {url!r}, which contains whitespace; a link "
+            f"cannot"
+        )
+    if "prefill" in value:
+        prefill = value.get("prefill")
+        if prefill not in REPORT_PREFILLS or isinstance(prefill, bool):
+            problems.append(
+                f"'report.prefill' is {prefill!r}; it must be one of "
+                f"{', '.join(REPORT_PREFILLS)}"
+            )
+        elif (
+            isinstance(url, str)
+            and url.startswith("mailto:")
+            and prefill != "none"
+        ):
+            problems.append(
+                f"'report.prefill' is {prefill!r} with a mailto: url. A "
+                f"mailto: link always carries the subject and the body, so "
+                f"leave 'prefill' out or write 'none'"
+            )
+    return problems
+
+
+def check_report(manifest: Any, report: Report) -> None:
+    """Check 34 - both modes.
+
+    `report` is a MAY: where a learner's defect report goes. A bundle that
+    omits it is complete, and nothing warns - the runner falls back to the
+    catalogue (runner-protocol.md section 17). So this check speaks only
+    about a bundle that declares the key and puts something unusable under
+    it, which nothing else here can see: check 28 knows the key's NAME and
+    nothing about its value.
+
+    BOTH modes, for check 27's reason: `belay-catalogs report` reads the
+    INSTANCE's copy of tutorial.yaml.
+    """
+    if not isinstance(manifest, dict) or REPORT_KEY not in manifest:
+        report.na(34, "the bundle declares no report")
+        return
+    problems = report_problems(manifest[REPORT_KEY])
+    for problem in problems:
+        report.add(34, "tutorial.yaml", problem)
+    report.ran(34, "declared, malformed" if problems else "declared")
+
+
 def unknown_manifest_fields(manifest: dict) -> list[str]:
     """The top-level keys of a parsed tutorial.yaml the format does not define.
 
@@ -4997,6 +5106,9 @@ def validate(target: Path, mode: str) -> Report:
     check_manifest_fields(manifest, report)
     # Check 30, both modes, and given the RAW manifest for check 28's reason.
     check_version(manifest, mode, report)
+    # Check 34, both modes, for check 27's reason: the report command reads
+    # the instance's copy of tutorial.yaml.
+    check_report(manifest_dict, report)
     if mode == "bundle":
         check_no_generated_dir(target, report)
         template_fm = check_state_template(target, manifest_dict, report)
@@ -5095,6 +5207,7 @@ CATALOG_KNOWN_ENTRY_FIELDS = (
     "optional_lesson_count",
     "recommended_follow_ups",
     "recommended_previous_bundles",
+    "report",
     "scope",
     "source",
     "style",
@@ -5481,6 +5594,14 @@ def validate_catalog(target: Path, portable: bool) -> Report:
                     f"lists under 'optional_lessons', which 'scope' does not "
                     f"count. Omit the field when the course has none",
                 )
+        # `report` is the bundle's check 34, on the entry: the same shape and
+        # the same rules, so a catalogue owner can collect reports for a
+        # course they do not control. A FINDING here, where an unknown field
+        # only warns, because a malformed target is a value the runner would
+        # build a link from - not a key it would ignore.
+        if REPORT_KEY in item:
+            for problem in report_problems(item[REPORT_KEY]):
+                report.add(3, where, problem)
         kind = item.get("workspace_kind")
         if _is_text(kind) and kind not in WORKSPACE_KINDS:
             report.add(

@@ -5,8 +5,9 @@ session, when validating, when a lesson's completion conditions look met, when d
 whether to offer or re-offer an optional lesson, when the active lesson declares
 `assesses` or the learner asks to be quizzed (section 15), when a course finishes or the
 learner asks what comes after it, when a newly materialized instance does not pass
-validation, when you are unsure whether an edit is yours to make, or when the learner asks
-how they have done (section 16).
+validation, when you are unsure whether an edit is yours to make, when the learner asks
+how they have done (section 16), or when you find a defect or the learner asks to report one
+(section 17).
 
 This document assumes an active instance already exists at `tutorial/` in the learner's
 workspace. Materialization is in `state-lifecycle.md`. Finding a tutorial in the first
@@ -50,7 +51,7 @@ Do not load, unless one of the stated exceptions applies:
 | `DESIGN.md` in full | never; load declared anchors only |
 | any lesson other than `active_lesson` | never during teaching; one exception, a quiz the learner asked for on a named lesson (section 15.9) |
 | completed lessons | never; `STATE.md` records what they established |
-| `tutorial/EVENTS.jsonl` | never in full; you append to it, and `belay-evidence summary` reads it when section 16.3 needs it |
+| `tutorial/EVENTS.jsonl` | never in full; you append to it, `belay-evidence summary` reads it when section 16.3 needs it, and section 17.1 searches it for earlier reports |
 | files inside a lesson folder | only when the lesson body names the file and says when |
 | the whole workspace | never; open the files the task concerns |
 
@@ -169,6 +170,10 @@ The one exception is a learner who, mid-course, asks what else is available. Tha
 discovery request inside a teaching session: refresh once, answer, and go back to the
 lesson.
 
+The other is `belay-catalogs report`, when the learner wants to send a defect report
+(section 17). It reads the catalogues already on disk to find where the report goes,
+fetches nothing, contacts no host, and runs only at the learner's request.
+
 A discovery answers with a **selection**, never with prose. Offer the candidates as
 options the learner picks from, through whatever interactive selection this host
 provides, and number them when it has none. When more candidates remain than fit one
@@ -222,7 +227,8 @@ inside the workspace starts without asking the learner. An argument that names a
 outside the workspace, such as a bundle directory in a cache, still asks — which is why
 no command is ever given one (belay#76). `belay-catalogs materialize` takes the tutorial id,
 and `belay-catalogs place-supplies` and `belay-plan-update` read the source from the
-instance stamp; each opens the bundle inside its own process.
+instance stamp; each opens the bundle inside its own process. `belay-catalogs report`
+reads only the instance and its draft (section 17).
 
 **Fallback.** When the bare command reports `command not found` — the skill was installed
 without its plugin, as the Codex route in the README does, or the host does not put plugin
@@ -480,6 +486,8 @@ describe an instance that does not exist yet:
   `tutor_owned` lists it. It holds only lessons you wrote (section 7);
 - `tutorial/EVENTS.jsonl`, the learning record, is **tutor-owned in every instance** for
   the same reason (section 16). The learner may read or delete it;
+- `tutorial/REPORT.md`, a defect report's draft, is **tutor-owned in every instance** too
+  (section 17.4);
 - `tutorial/lessons/**` is **read-only in every instance**, whether or not `tutor_owned`
   lists it. Those are the author's lessons, copied in at materialization. Correct a
   defective one by reporting it, never by editing the copy.
@@ -1730,8 +1738,9 @@ essay and no sentence addressed to them. Five things, in this order:
 4. **What they can actually do**, offered as choices rather than instructions: take a
    different course — the candidates from discovery are still in hand and offering them
    costs no file open; tell whoever publishes this one, naming the catalogue and the source
-   it resolved to; or, when the bundle is local and theirs, correct it **in the bundle** and
-   start again. Correcting the instance is not on the list, and 13.5 says why.
+   it resolved to — section 17 offers to draft that report; or, when the bundle is local
+   and theirs, correct it **in the bundle** and start again. Correcting the instance is not
+   on the list, and 13.5 says why.
 5. **Where their workspace stands.** `tutorial/` exists and holds no progress, nothing was
    placed outside it, and it can be removed if they want it gone.
 
@@ -2161,6 +2170,7 @@ absent — never `echo >>` or a here-document in a shell (`SKILL.md`, the comman
 | the end of an assessment attempt, when its *Assessments* row is written | `assessment`, with the row's state, attempt and concepts not demonstrated |
 | section 15.7, practice offered; and accepted, once its file is written | `practice_offered`, then `practice_accepted` with the lesson's path |
 | section 6, a lesson completed — an assessment left at any result included | `lesson_completed`, then run `belay-evidence compact tutorial` |
+| section 17.3, a defect report offered, whatever the answer | `reported`, with the kind and the subject |
 
 `seq` is one more than the last event's. The first time in a session that you append, read
 **only the last line** of the file to learn it — never the whole file. Count its lines with
@@ -2198,3 +2208,180 @@ When the summary says the record is missing, or lists lines it could not read, s
 sentence what you cannot know — "I have no record of how many attempts the earlier lessons
 took" — and carry on from `STATE.md`. A missing or broken record never stops a course and
 never needs the learner to do anything.
+
+---
+
+## 17. Reporting a defect
+
+Everywhere this skill tells you to report a defect — stop and report the path, report it
+as a bundle defect, say the bundle should declare it — **the report goes to the learner
+first, exactly as that place says.** This section adds one step after it: an offer to send
+the report to whoever can fix it. It changes none of those places. What you stop, what you
+tell the learner and what you refuse stay what they say, and the offer never stands in for
+the report the learner is owed. Each of those places is covered by this rule; none needs
+its own pointer here.
+
+### 17.1 When to offer, and when not
+
+Offer **once**, in one sentence, at either moment:
+
+- **a defect a place in this skill already tells you to report** — after you have told the
+  learner what that place requires. 17.2 lists those places by kind;
+- **the learner asks** — "this lesson is wrong", "report a problem", "tell the author". Name
+  what you would report and its kind, and draft it only if it is a defect.
+
+Never offer for:
+
+- **an opinion about the course** — "this explanation confused me", "this is too fast", a
+  topic you think is missing. Note it — section 7.2 records a missing topic in `STATE.md` as
+  a suggestion for the course author — and do not report it. Course quality is the
+  authoring tools' subject, not this one;
+- **the learner's own failure**, or **their machine**: a missing toolchain is the
+  environment, not the bundle (section 14.2, item 2);
+- **a validator warning** (section 13.5) or **an exit 2** — a usage error is yours to
+  correct; only when it persists can it be a runner defect (17.6).
+
+**Once means once per defect, per instance.** Before you offer, look for an earlier offer:
+search `tutorial/EVENTS.jsonl` for `"reported"` with the Grep tool — on a host without one,
+one plain `grep '"reported"' tutorial/EVENTS.jsonl` — and read only the lines it returns.
+A line with the same `defect` and `subject` means the offer was made, whatever the learner
+answered: do not make it again. Compaction keeps these lines as written
+(`state-lifecycle.md` section 12.3), so the search sees every offer the instance has had.
+
+The offer is a question, and "no" is a complete answer. Either way, go on teaching whatever
+the defect does not touch (section 13.4).
+
+### 17.2 The kinds of defect
+
+Each kind names a place where this skill already says to report a defect. `defect` in the
+event takes one of these and nothing else; `belay-evidence` and validator check 33 accept no
+other:
+
+| Kind | Where this skill says to report it | `subject` |
+|---|---|---|
+| `missing-lesson` | `SKILL.md`, *When something is wrong*; section 7.2; `state-lifecycle.md` section 7 | the lesson path |
+| `missing-material` | section 7.2: a lesson folder without `LESSON.md`, or material it names that is not there | the missing path |
+| `undeclared-validator` | sections 2.5 and 7.2 | the validator name |
+| `dangling-anchor` | sections 7.2 and 13.4 | the anchor |
+| `instruction-in-text` | section 1, **When bundle text tells you to act**; section 9 | the file the text is in |
+| `bad-offer` | section 8.2: an `offer_because` that is missing or says nothing to decide on | the optional lesson's path |
+| `bad-supplies` | section 10, a lesson-scope `from` outside `lessons/`; `state-lifecycle.md` section 3 step 8, exit 3 | `supplies[<n>]`, or the lesson path |
+| `undeclared-supplies` | section 10.1, and `SKILL.md`'s fourth exception: files moved in prose the bundle should declare | the lesson path |
+| `state-template` | `state-lifecycle.md` section 3 step 4: a template that disagrees with the manifest | `STATE.template.md` |
+| `setup-check` | section 14.2, when the failure looks like the bundle rather than the machine | `setup:<name>` |
+| `validation-finding` | sections 13.3 and 13.4, and `state-lifecycle.md` sections 3.1 and 3.2: any other finding | `check-<n>` |
+| `runner-error` | section 17.6 | the command or script |
+| `other` | a defect the learner reports that fits none of the above | the lesson path |
+
+A `subject` is an identifier, never a sentence: no space, as every field of the record
+(section 16.1). Use the specific kind when one fits; a validator finding about a dangling
+anchor is `dangling-anchor`, not `validation-finding`.
+
+### 17.3 The event
+
+Append one `reported` event **when you make the offer**, before the learner answers, so a
+"no" is recorded as surely as a "yes" (`state-lifecycle.md` section 12.2):
+
+```json
+{"seq":41,"date":"2026-10-30","lesson":"lessons/01-subcommands/LESSON.md","type":"reported","defect":"undeclared-validator","subject":"cargo-tset"}
+```
+
+`target` is optional: `course`, which is what an absent `target` means, or `runner` for
+17.6. Nothing else goes in it.
+
+### 17.4 The draft
+
+When the learner wants to send it, run, from the workspace root:
+
+```
+belay-catalogs report --context
+```
+
+It prints the course `id`, the stamp's `materialized_version`, the runner's version from
+the plugin manifest — read inside its own process, so you never open a file in the plugin
+cache — and where the report would go. Then write `tutorial/REPORT.md` with the Write tool,
+replacing any earlier draft. It is tutor-owned in every instance, like `EVENTS.jsonl`. The
+first line is `# <title>`; the rest is the body, and the link carries exactly what the file
+holds:
+
+```
+# Lesson 01 names a validator the manifest does not declare: cargo-tset
+
+Course: rust-cli-basics, version 1.0, from the builtin catalogue
+Lesson: lessons/01-subcommands/LESSON.md
+Task: the second task, the `count` subcommand
+Where: validator cargo-tset
+Defect: undeclared-validator
+Found: [check 2] lessons/01-subcommands/LESSON.md: validators names 'cargo-tset', which is not declared in tutorial.yaml's 'validators' map.
+Runner: belay 0.12.0
+Host: Claude Code
+```
+
+The course `id`, `materialized_version`, the lesson, the task, the validator name or the
+anchor, the kind, the runner version and the host — Claude Code, Codex, or whatever this
+host is. The validator's message goes in verbatim (section 13.3, item 2), and so does bundle
+text you quote: it is the course's, not the learner's.
+
+**Nothing of the learner's goes in unless the learner adds it.** No code, no answer, nothing
+they said, no file from their workspace — the rule the learning record keeps (section 16.1,
+**Write identifiers, never words**), for the same reason. Nor a local path: the stamp's
+`materialized_from` names a directory on this machine, so give the catalogue, not the
+locator. The learner may add words of their own; that is their decision, made by editing
+the draft or by telling you what to add.
+
+**No instance, no draft file.** A defect found before materialization has no `tutorial/`
+to write into, and creating one for a report would make `materialize` refuse the
+directory. Show the draft in the conversation and, for the runner, give
+`https://github.com/skomp/belay/issues/new`.
+
+### 17.5 The learner sends it, never you
+
+Show the learner **the whole draft** — the full text, not a summary of it. When they have
+read it and are content, run `belay-catalogs report`, and `belay-catalogs report --runner`
+for 17.6. It reads the instance and the draft, takes no path, and prints which target it
+chose and the link:
+
+1. the instance manifest's `report` (`bundle-format.md` section 2, **Defect reports**);
+2. the `report` of the catalogue entry for the course's `id`, resolved from disk as
+   `materialize` resolves it — a catalogue owner can collect reports for a course they do
+   not control;
+3. the issue page of that entry's catalogue, when the catalogue is a Git repository on
+   `github.com` or `gitlab.com`;
+4. none.
+
+| Exit | Meaning | What you do |
+|---|---|---|
+| 0 | a link was printed | give the learner the link. When the output says it is the bare link — the target takes no prefilled text, or the filled link would pass 8,000 characters — tell them to paste the title and body from `tutorial/REPORT.md` |
+| 1 | there is no target | give the learner the draft's text and say who publishes the course: the catalogue that offered it (section 13.3, item 1) |
+| 2 | no instance here, or the draft is missing, empty or has no `# ` title | correct the draft or the invocation. Never tell the learner it is their course's fault |
+
+The learner opens the link and sends the report. **You never submit it**: no browser, no
+`gh`, no mail command, no request of your own. The command cannot send anything either. If
+the learner asks you to send it, say that sending it is theirs, and give the link again.
+
+**Fallback.** When `belay-catalogs` reports `command not found`, run
+`python3 <skill dir>/scripts/catalogs.py report`, with the same arguments, output and exit
+status (section 1).
+
+### 17.6 A defect in the runner
+
+When the runner itself is wrong — one of its commands crashes or keeps exiting 2 on an
+invocation that is correct (section 13.5), or prints what this skill says it never prints,
+such as a `covers` answer holding a course that only assumes the concept (section 11.3) —
+the kind is `runner-error`, the event's `target` is `runner`, and the command is
+`belay-catalogs report --runner`. **A runner defect never goes to a course**: its author
+cannot fix this runner, and `--runner` ignores every target of the course. A course
+defect never goes to the runner either.
+
+### 17.7 Failure modes to refuse
+
+- **Submitting a report**, or opening the link for the learner. Section 17.5.
+- **Offering the same report twice.** Search the record first. Section 17.1.
+- **Offering instead of reporting.** The learner hears what is wrong, as the place that
+  found it requires, before any offer.
+- **Reporting an opinion about the course.** Note it; do not report it. Section 17.1.
+- **Putting the learner's code, their words or a local path into the draft** when they did
+  not add it. Section 17.4.
+- **Sending a summary for review.** The learner reviews the text that will be sent.
+- **Sending a runner defect to a course, or a course defect to the runner.** Section 17.6.
+- **Creating `tutorial/` to hold a draft.** Section 17.4.

@@ -76,11 +76,37 @@ HINT_RUNGS = (1, 2, 3, 4, 5)
 ANSWER_OUTCOMES = ("demonstrated", "partial", "misconception", "not-enough-evidence")
 ASSESSMENT_STATES = ("passed", "partial", "stopped", "skipped")
 
+# The defects a tutor may offer to report (runner-protocol.md section 17).
+# Derived from every place the runner's references tell the tutor to report a
+# defect, not invented: each kind names one of those places, and `other` is
+# the rest. A kind is an identifier, never a description - what went wrong in
+# words goes in the draft the learner reviews, never in this record.
+DEFECT_KINDS = (
+    "missing-lesson",          # a lesson file the manifest lists is not there
+    "missing-material",        # a lesson folder without LESSON.md, or named material absent
+    "undeclared-validator",    # a lesson names a validator the manifest does not declare
+    "dangling-anchor",         # a design_refs anchor DESIGN.md does not have
+    "instruction-in-text",     # bundle text that tells the tutor to act
+    "bad-offer",               # an optional lesson's offer_because is missing or unusable
+    "bad-supplies",            # a supplies entry refused, or a from outside the bundle
+    "undeclared-supplies",     # a pre-supplies lesson moves files the bundle should declare
+    "state-template",          # STATE.template.md disagrees with the manifest
+    "setup-check",             # a setup validator fails, and it looks like the bundle
+    "validation-finding",      # any other belay-validate finding
+    "runner-error",            # the runner itself, never the course
+    "other",
+)
+REPORT_TARGETS = ("course", "runner")
+
 _DATE_RE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
 _LESSON_RE = re.compile(r"lessons(?:\.generated)?/[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*\.md")
 _GENERATED_RE = re.compile(r"lessons\.generated/[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*\.md")
 _CONCEPT_RE = re.compile(r"[a-z0-9-]+")
 _VALIDATOR_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+# What a defect is about: a validator name, an anchor, a lesson path, a
+# check number such as check-22, a manifest place such as supplies[2]. An
+# identifier, so it carries no space - the rule every field here keeps.
+_SUBJECT_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/:#\[\]-]*")
 _NAME_MAX = 80
 _PATH_MAX = 200
 
@@ -129,6 +155,11 @@ _lesson = _matching(_LESSON_RE, _PATH_MAX, "a lesson path under lessons/ or less
 _generated = _matching(_GENERATED_RE, _PATH_MAX, "a lesson path under lessons.generated/")
 _concept = _matching(_CONCEPT_RE, _NAME_MAX, "a concept id ([a-z0-9-]+)")
 _validator = _matching(_VALIDATOR_RE, _NAME_MAX, "a validator name")
+_subject = _matching(
+    _SUBJECT_RE, _PATH_MAX,
+    "an identifier for what the defect is about (a validator name, an "
+    "anchor, a lesson path, check-<n>), with no space",
+)
 
 
 def _one_of(choices: tuple) -> Shape:
@@ -248,6 +279,13 @@ EVENT_FIELDS: dict[str, tuple[dict[str, Shape], dict[str, Shape]]] = {
     "practice_accepted": (
         {"concepts": _list_of(_concept, nonempty=True), "practice_lesson": _generated},
         {},
+    ),
+    # Written when the tutor OFFERS a report, whether or not the learner
+    # sends it, so the same defect is never offered twice in one instance.
+    # Compaction keeps it as written: it is the record that offer was made.
+    "reported": (
+        {"defect": _one_of(DEFECT_KINDS), "subject": _subject},
+        {"target": _one_of(REPORT_TARGETS)},
     ),
     # Written only by `compact`: the events of one completed lesson, as counts.
     "summary": (
@@ -376,6 +414,9 @@ def _empty_tally(lesson: str) -> dict:
         "attempts": [],
         "practice_offered": 0,
         "practice_lessons": [],
+        # Never folded into a summary: compaction keeps every `reported`
+        # event as written, so this is filled from raw lines only.
+        "reports": [],
     }
 
 
@@ -387,6 +428,13 @@ def fold(tally: dict, event: dict) -> None:
     if tally["date"] is None or event["date"] > tally["date"]:
         tally["date"] = event["date"]
     etype = event["type"]
+    if etype == "reported":
+        # Not counted in `events`: compaction keeps the line itself, so
+        # counting it into a summary as well would count it twice.
+        tally["reports"].append(
+            {k: event[k] for k in ("defect", "subject", "target") if k in event}
+        )
+        return
     if etype == "summary":
         tally["events"] += event["events"]
         tally["started"] += event["started"]
@@ -532,6 +580,12 @@ def compact(instance: Path, cap: int = CAP) -> Compaction:
     neither STATE.md's active_lesson nor its resume_at. Every other event is
     kept as written. A summary already in the file is merged, so a lesson
     re-entered after compaction - an assessment's retake - stays one line.
+
+    A `reported` event is never compacted, whatever its lesson. It is the
+    only record that a defect report was offered, and the tutor reads it to
+    avoid offering the same one twice (runner-protocol.md section 17), so a
+    count in a summary would lose the one thing it is kept for. Reports are
+    rare - one per distinct defect - so keeping them costs nothing.
     """
     result = Compaction()
     record = read_record(instance)
@@ -566,12 +620,15 @@ def compact(instance: Path, cap: int = CAP) -> Compaction:
                 and not _only_summary(events, lesson)
             ]
             if done:
-                last_index = {e["lesson"]: i for i, e in enumerate(events)}
+                last_index = {
+                    e["lesson"]: i for i, e in enumerate(events)
+                    if e["type"] != "reported"
+                }
                 out: list[dict] = []
                 out_lines: list[str | None] = []
                 for index, event in enumerate(events):
                     lesson = event["lesson"]
-                    if lesson not in done:
+                    if lesson not in done or event["type"] == "reported":
                         out.append(event)
                         out_lines.append(lines[index])
                     elif index == last_index[lesson]:
@@ -595,8 +652,12 @@ def compact(instance: Path, cap: int = CAP) -> Compaction:
 
 
 def _only_summary(events: list[dict], lesson: str) -> bool:
-    """True when the lesson is already exactly one summary line."""
-    mine = [e for e in events if e["lesson"] == lesson]
+    """True when the lesson is already exactly one summary line.
+
+    Its `reported` events do not count: compaction keeps them beside the
+    summary, so a lesson holding both is as compact as it can get.
+    """
+    mine = [e for e in events if e["lesson"] == lesson and e["type"] != "reported"]
     return len(mine) == 1 and mine[0]["type"] == "summary"
 
 
@@ -661,6 +722,9 @@ def render_summary(record: Record, stream=sys.stdout) -> None:
         if t["practice_offered"] or t["practice_lessons"]:
             taken = ", ".join(t["practice_lessons"]) or "none"
             w(f"  practice: offered {t['practice_offered']}x; accepted: {taken}\n")
+        for r in t["reports"]:
+            to = " (to the runner)" if r.get("target") == "runner" else ""
+            w(f"  report offered: {r['defect']} at {r['subject']}{to}\n")
 
 
 def render_compaction(result: Compaction, path: Path, cap: int, stream=sys.stdout) -> None:

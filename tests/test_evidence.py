@@ -32,6 +32,7 @@ REPO = HERE.parent
 SCRIPTS = REPO / "skills" / "belay" / "scripts"
 SCRIPT = SCRIPTS / "evidence.py"
 LIFECYCLE = REPO / "skills" / "belay" / "references" / "state-lifecycle.md"
+PROTOCOL = REPO / "skills" / "belay" / "references" / "runner-protocol.md"
 FIXTURE = HERE / "fixtures" / "rust-cli-basics"
 
 sys.dont_write_bytecode = True
@@ -527,6 +528,115 @@ def test_compaction_size_bound(tmp: Path) -> None:
            str(size))
 
 
+@tmpcase
+def test_reported_events(tmp: Path) -> None:
+    """belay#86: the `reported` event, which stops a report being offered twice."""
+    print("\nthe reported event:")
+    good = {"seq": 1, "date": "2026-10-30", "lesson": L01, "type": "reported",
+            "defect": "undeclared-validator", "subject": "cargo-tset"}
+    record(ev.event_problem(good) is None,
+           "a reported event with a known defect and a subject is accepted",
+           repr(ev.event_problem(good)))
+    for subject in ("lessons/01-subcommands/LESSON.md", "check-22", "supplies[2]",
+                    "state-merge"):
+        event = {**good, "subject": subject, "target": "course"}
+        record(ev.event_problem(event) is None,
+               f"subject {subject!r} with target course is accepted",
+               repr(ev.event_problem(event)))
+    runner = {**good, "defect": "runner-error", "subject": "belay-catalogs",
+              "target": "runner"}
+    record(ev.event_problem(runner) is None, "target runner is accepted",
+           repr(ev.event_problem(runner)))
+    for label, event, needle in (
+        ("an unknown defect", {**good, "defect": "typo"}, "'defect'"),
+        ("an empty subject", {**good, "subject": ""}, "'subject'"),
+        ("a subject that is a sentence",
+         {**good, "subject": "the lesson is wrong"}, "'subject'"),
+        ("a subject that is not a string", {**good, "subject": 7}, "'subject'"),
+        ("an unknown target", {**good, "target": "author"}, "'target'"),
+        ("no subject at all",
+         {k: v for k, v in good.items() if k != "subject"}, "'subject'"),
+        ("a free-text field beside it", {**good, "note": "learner said so"},
+         "undeclared field 'note'"),
+    ):
+        why = ev.event_problem(event)
+        record(why is not None and needle in why, f"rejected: {label}", repr(why))
+
+    inst = make_instance(tmp, active=L02)
+    w = _long_record(inst)
+    # A report offered in lesson 00, which is completed, and one in the
+    # active lesson. Both must outlive compaction.
+    lines = (inst / ev.FILENAME).read_text().splitlines()
+    done = json.dumps({"seq": 0, "date": "2026-09-12", "lesson": L00, "type": "reported",
+                       "defect": "dangling-anchor", "subject": "state-merge"})
+    lines.insert(3, done)
+    rewritten = [json.loads(ln) for ln in lines]
+    for number, event in enumerate(rewritten, start=1):
+        event["seq"] = number
+    (inst / ev.FILENAME).write_text("".join(json.dumps(e) + "\n" for e in rewritten))
+    w.seq = len(rewritten)
+    w("2026-09-16", L02, "reported", defect="runner-error", subject="belay-evidence",
+      target="runner")
+    report = vb.validate(inst, "instance")
+    record(report.exit_code() == 0 and not [x for x in report.warnings if x.check == 33]
+           and report.status.get(33, ("", ""))[0] == vb.RAN,
+           "check 33 accepts a record holding reported events: ran, no warning, exit 0",
+           f"{report.status.get(33)}, {[str(x) for x in report.warnings]}")
+    # Control: the same record with an unknown defect is a check-33 warning.
+    bad = inst.parent.parent / "bad"
+    shutil.copytree(inst.parent, bad)
+    with (bad / "tutorial" / ev.FILENAME).open("a") as handle:
+        handle.write(json.dumps({**good, "seq": 999, "defect": "typo"}) + "\n")
+    code, findings, warnings = check33(bad / "tutorial")
+    record(code == 0 and len(warnings) == 1 and "'defect'" in warnings[0].message,
+           "control: one reported line with an unknown defect is one warning, exit 0",
+           f"exit {code}, {warnings}")
+
+    reported_before = [ln for ln in (inst / ev.FILENAME).read_text().splitlines()
+                       if '"reported"' in ln]
+    before = ev.tally(ev.read_record(inst).events)
+    record(before[L00]["reports"] == [{"defect": "dangling-anchor", "subject": "state-merge"}]
+           and before[L00]["events"] == 8,
+           "a report is listed per lesson and is not counted among its events",
+           repr(before[L00]))
+    result = ev.compact(inst, cap=10)
+    after_lines = (inst / ev.FILENAME).read_text().splitlines()
+    rec = ev.read_record(inst)
+    record(L00 in result.compacted
+           and [ln for ln in after_lines if '"reported"' in ln] == reported_before,
+           "compaction keeps every reported event byte for byte, a completed "
+           "lesson's included",
+           f"{result.compacted}\n{after_lines}")
+    l00 = [e["type"] for e in rec.events if e["lesson"] == L00]
+    record(sorted(l00) == ["reported", "summary"],
+           "lesson 00 is now its report and one summary", repr(l00))
+    record(not rec.problems and rec.seq_ordered and ev.tally(rec.events) == before,
+           "the compacted record is valid, in seq order, and every count is equal",
+           f"{rec.problems}")
+    again = ev.compact(inst, cap=10)
+    record(not again.compacted and not again.written,
+           "a second compaction finds lesson 00 already compact: nothing rewritten",
+           repr(again))
+    code, out = run_cli("summary", str(inst))
+    record(code == 0 and "report offered: dangling-anchor at state-merge" in out
+           and "report offered: runner-error at belay-evidence (to the runner)" in out,
+           "summary lists each report offered", out)
+
+
+def test_the_defect_kinds_are_documented() -> None:
+    """runner-protocol.md section 17's table of kinds is the code's closed set."""
+    print("\nthe documented defect kinds match the code:")
+    text = PROTOCOL.read_text()
+    start = text.index("### 17.2 ")
+    section = text[start:text.index("### 17.3 ")]
+    kinds = re.findall(r"^\| `([a-z-]+)` \|", section, re.M)
+    record(len(kinds) >= 5, f"the table parse is a live instrument ({len(kinds)} rows)",
+           repr(kinds))
+    record(tuple(kinds) == ev.DEFECT_KINDS,
+           "section 17 lists exactly the defect kinds evidence.py accepts, in order",
+           f"documented {kinds}, code {list(ev.DEFECT_KINDS)}")
+
+
 def main() -> int:
     print("evidence.py test suite")
     print(f"  script: {SCRIPT}")
@@ -542,6 +652,8 @@ def main() -> int:
         test_validator_quiet_on_valid_record,
         test_cli,
         test_compaction_size_bound,
+        test_reported_events,
+        test_the_defect_kinds_are_documented,
     ):
         try:
             test()

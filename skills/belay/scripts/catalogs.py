@@ -19,6 +19,11 @@ Usage:
     catalogs.py place-supplies      place tutorial/tutorial.yaml's supplies
                                     from the source its stamp names; never
                                     overwrite; fetch nothing
+    catalogs.py report [--runner] [--context]
+                                    print a link that sends the defect
+                                    report drafted in tutorial/REPORT.md to
+                                    the course author, or with --runner to
+                                    the runner; send nothing, fetch nothing
     catalogs.py covers <query>      print the bundles that TEACH a concept
     catalogs.py follow-ups <id>     print what could be taken after a bundle
     catalogs.py prepare <id>        print what covers the concepts a bundle
@@ -47,6 +52,10 @@ Exit codes:
        file of the learner's is in the way; the report names each one
     2  usage or I/O error, or the configuration is unusable
     3  refused - the report says why, and nothing was written
+`report` has its own as well:
+    0  a link was printed
+    1  there is no target: the draft is the learner's to send by hand
+    2  usage, or the instance or the draft is unusable
 `materialize` refuses when tutorial/ already exists, when no catalogue
 supplies the id, and when the bundle is not usable. `place-supplies`
 refuses when the stamp is missing or names no readable local source, and
@@ -92,6 +101,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import urllib.parse
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -379,6 +389,10 @@ class MergedEntry:
     resolved_path: str
     origin: str
     shadowed: list[tuple[str, str]] = field(default_factory=list)
+    # The winning catalogue's own source, for `report`: a Git catalogue's
+    # repository is where a course defect goes when nothing nearer says.
+    # Not in as_dict(), so --json output is unchanged by it.
+    catalog_source: Source | None = None
 
     @property
     def id(self) -> str:
@@ -1229,6 +1243,7 @@ def merge(results: list[CatalogResult]) -> tuple[list[MergedEntry], list[dict]]:
                 freshness="current" if result.state == "current" else "cached",
                 resolved_path=resolved,
                 origin=result.spec.source.describe(),
+                catalog_source=result.spec.source,
             )
             order.append(identifier)
     return [merged[i] for i in order], shadowed
@@ -3192,6 +3207,357 @@ def command_place_supplies(args, stream) -> int:
 
 
 # --------------------------------------------------------------------------
+# report: a link the learner opens to send a defect report themselves
+# --------------------------------------------------------------------------
+#
+# runner-protocol.md section 17. The tutor drafts tutorial/REPORT.md with the
+# Write tool, the learner reads all of it, and this command turns it into a
+# link. It never opens a browser, never calls `gh`, never sends anything and
+# writes nothing: the learner sends the report, or nobody does. Like
+# `place-supplies` it works from the current directory and takes no path, so
+# under permissions.blockReadsOutsideWorkingDirectories it starts without a
+# prompt (belay#76). It fetches nothing: the catalogue tiers read what
+# `discover` left on disk, exactly as `materialize` does.
+
+REPORT_DRAFT = "REPORT.md"
+RUNNER_REPORT_URL = "https://github.com/skomp/belay/issues/new"
+# Longer than this and a prefilled link is not reliably accepted: browsers,
+# proxies and the issue trackers themselves cut a URL off somewhere past it.
+REPORT_LINK_LIMIT = 8000
+
+EXIT_REPORT_LINK = 0
+EXIT_REPORT_NO_TARGET = 1
+
+_SCP_URL_RE = re.compile(r"(?:[A-Za-z0-9._-]+@)?([A-Za-z0-9.-]+):(?!//)(.+)")
+_REPO_SEGMENT_RE = re.compile(r"[A-Za-z0-9._-]+")
+
+
+class ReportUsage(Exception):
+    """The command cannot build a report from what is in the workspace."""
+
+
+@dataclass
+class ReportTarget:
+    tier: str  # manifest | catalogue-entry | catalogue-repository | runner | none
+    where: str
+    url: str | None = None
+    prefill: str = "none"
+
+
+def repository_issue_page(url: str) -> tuple[str, str] | None:
+    """The new-issue page of a Git repository on github.com or gitlab.com.
+
+    Accepts the three spellings a catalogue's `source.url` takes for such a
+    host: https://host/owner/repo(.git), ssh://[user@]host[:port]/owner/repo
+    and scp-style [user@]host:owner/repo(.git). Any other host, scheme or
+    shape gives None: guessing an issue page for a host this does not know
+    would send a learner's report to a page that may not exist.
+    """
+    if url.startswith(("https://", "ssh://")):
+        parts = urllib.parse.urlsplit(url)
+        host = (parts.hostname or "").lower()
+        path = parts.path
+    else:
+        match = _SCP_URL_RE.fullmatch(url)
+        if match is None:
+            return None
+        host, path = match.group(1).lower(), match.group(2)
+    path = path.strip("/")
+    if path.endswith(".git"):
+        path = path[: -len(".git")]
+    segments = path.split("/")
+    if not all(
+        _REPO_SEGMENT_RE.fullmatch(segment) and segment not in (".", "..")
+        for segment in segments
+    ):
+        return None
+    if host == "github.com" and len(segments) == 2:
+        return f"https://github.com/{path}/issues/new", "github"
+    if host == "gitlab.com" and len(segments) >= 2:
+        return f"https://gitlab.com/{path}/-/issues/new", "gitlab"
+    return None
+
+
+def runner_release() -> str | None:
+    """The plugin's version, from its own manifest, or None without one.
+
+    Read in this process so the tutor need not open a file in the plugin
+    cache, which is outside the workspace. A skill installed without its
+    plugin (the Codex route) carries no manifest, and then nobody knows.
+    """
+    for rel in (".claude-plugin/plugin.json", ".codex-plugin/plugin.json"):
+        try:
+            data = json.loads((SKILL_DIR.parent.parent / rel).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        version = data.get("version") if isinstance(data, dict) else None
+        if isinstance(version, str) and version:
+            return version
+    return None
+
+
+def read_draft(instance: Path) -> tuple[str, str]:
+    """The title and the body of tutorial/REPORT.md.
+
+    The first line is `# <title>`; everything after it, less the blank lines
+    around it, is the body. The link carries exactly these two strings, so
+    what the learner read is what is sent.
+    """
+    path = instance / REPORT_DRAFT
+    shown = f"{INSTANCE_DIR}/{REPORT_DRAFT}"
+    how = (
+        "Write the draft with the Write tool: its first line '# <title>', "
+        "then the body (runner-protocol.md section 17)"
+    )
+    if not path.is_file():
+        raise ReportUsage(f"there is no {shown}. {how}")
+    text = read_text(path)
+    if text is None:
+        raise ReportUsage(f"{shown} could not be read as UTF-8 text")
+    text = text.lstrip("\ufeff").replace("\r\n", "\n")
+    if not text.strip():
+        raise ReportUsage(f"{shown} is empty. {how}")
+    first, _, rest = text.partition("\n")
+    if not first.startswith("# ") or not first[2:].strip():
+        raise ReportUsage(
+            f"{shown} has no title: its first line is {first!r}, and it must "
+            f"be '# <title>'"
+        )
+    body = rest.lstrip("\n").rstrip()
+    if not body:
+        raise ReportUsage(
+            f"{shown} has a title and no body. The body carries the context "
+            f"an author needs to find the defect"
+        )
+    return first[2:].strip(), body
+
+
+def prefilled_link(url: str, prefill: str, title: str, body: str) -> str | None:
+    """`url` with the title and the body in its query, or None for `none`.
+
+    Every value is percent-encoded with urllib.parse.quote and safe="", so a
+    space is %20, never '+', and '&', '#', '+' and '%' in the text cannot
+    end or change the query.
+    """
+    if url.startswith("mailto:"):
+        params = (("subject", title), ("body", body))
+    elif prefill == "github":
+        params = (("title", title), ("body", body))
+    elif prefill == "gitlab":
+        params = (("issue[title]", title), ("issue[description]", body))
+    else:
+        return None
+    base, hash_, fragment = url.partition("#")
+    query = "&".join(f"{k}={urllib.parse.quote(v, safe='')}" for k, v in params)
+    return f"{base}{'&' if '?' in base else '?'}{query}{hash_}{fragment}"
+
+
+def report_target(args, manifest: dict, notes: list[str]) -> ReportTarget:
+    """The first target that exists, in the order section 17 fixes.
+
+    A malformed `report` at a tier is skipped with a note rather than
+    refused: the reader is tolerant (catalogue-format.md, last section), and
+    a learner with a report to send is better served by the next tier than
+    by an error. The validator is where an author is told.
+    """
+    import validate_bundle as vb
+
+    if args.runner:
+        return ReportTarget(
+            "runner",
+            "the Belay runner's own repository, because --runner was given; "
+            "a runner defect never goes to a course",
+            RUNNER_REPORT_URL,
+            "github",
+        )
+    if vb.REPORT_KEY in manifest:
+        raw = manifest[vb.REPORT_KEY]
+        problems = vb.report_problems(raw)
+        if not problems:
+            return ReportTarget(
+                "manifest", "the course's own tutorial.yaml (report)",
+                raw["url"], raw.get("prefill", "none"),
+            )
+        notes.append(
+            f"the instance's tutorial.yaml declares a report that cannot be "
+            f"used, so it was skipped: {problems[0]} (validator check 34)"
+        )
+    course = manifest.get("id")
+    if not isinstance(course, str) or not course:
+        notes.append("the instance manifest has no id, so no catalogue entry "
+                     "can be looked up")
+        return ReportTarget("none", "nowhere")
+    try:
+        run = gather(expand(args.config), Cache(expand(args.cache_dir)), False, args.timeout)
+    except ConfigError as exc:
+        notes.append(f"the catalogue configuration could not be read, so no "
+                     f"catalogue was asked: {exc}")
+        return ReportTarget("none", "nowhere")
+    match = next((e for e in run.entries if e.id == course), None)
+    if match is None:
+        notes.append(f"no catalogue on disk carries {course!r}")
+        return ReportTarget("none", "nowhere")
+    if vb.REPORT_KEY in match.entry:
+        raw = match.entry[vb.REPORT_KEY]
+        problems = vb.report_problems(raw)
+        if not problems:
+            return ReportTarget(
+                "catalogue-entry",
+                f"the {match.catalog_id} catalogue's entry for {course} (report)",
+                raw["url"], raw.get("prefill", "none"),
+            )
+        notes.append(
+            f"the {match.catalog_id} catalogue's entry for {course} declares "
+            f"a report that cannot be used, so it was skipped: {problems[0]}"
+        )
+    source = match.catalog_source
+    if source is not None and source.type == "git" and source.url:
+        page = repository_issue_page(source.url)
+        if page is not None:
+            return ReportTarget(
+                "catalogue-repository",
+                f"the issue page of the {match.catalog_id} catalogue's "
+                f"repository, {source.url}",
+                page[0], page[1],
+            )
+        notes.append(
+            f"the {match.catalog_id} catalogue is the Git repository "
+            f"{source.url}, which is not on github.com or gitlab.com, so no "
+            f"issue page can be derived from it"
+        )
+    else:
+        notes.append(
+            f"the {match.catalog_id} catalogue, which carries {course}, is "
+            f"not a Git repository, so it has no issue page"
+        )
+    return ReportTarget("none", "nowhere")
+
+
+def command_report(args, stream) -> int:
+    """runner-protocol.md section 17: print the link; send nothing."""
+    workspace = Path.cwd()
+    instance = workspace / INSTANCE_DIR
+    if not (instance / "tutorial.yaml").is_file():
+        print(
+            f"error: there is no {INSTANCE_DIR}/tutorial.yaml in {workspace}. "
+            f"Run this from the workspace root of a course. Without an "
+            f"instance there is no draft: show the report in the conversation "
+            f"instead, and never create {INSTANCE_DIR}/ for one",
+            file=sys.stderr,
+        )
+        return EXIT_USAGE
+    try:
+        manifest = read_manifest(instance / "tutorial.yaml", "the instance manifest")
+        title, body = ("", "") if args.context else read_draft(instance)
+    except (Refusal, ReportUsage) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return EXIT_USAGE
+
+    notes: list[str] = []
+    target = report_target(args, manifest, notes)
+    stamp = manifest.get("instance") if isinstance(manifest.get("instance"), dict) else {}
+    context = {
+        "course": manifest.get("id"),
+        "materialized_version": stamp.get("materialized_version"),
+        "runner_version": runner_release(),
+    }
+    link = None
+    fallback = None
+    if target.url is not None and not args.context:
+        full = prefilled_link(target.url, target.prefill, title, body)
+        if full is None:
+            fallback = (
+                f"this target takes no prefilled text (prefill: "
+                f"{target.prefill}), so the learner pastes the title and the "
+                f"body from {INSTANCE_DIR}/{REPORT_DRAFT}"
+            )
+            link = target.url
+        elif len(full) > REPORT_LINK_LIMIT:
+            fallback = (
+                f"the prefilled link would be {len(full)} characters, more "
+                f"than the {REPORT_LINK_LIMIT} a browser or an issue tracker "
+                f"reliably accepts, so this is the bare link and the learner "
+                f"pastes the title and the body from "
+                f"{INSTANCE_DIR}/{REPORT_DRAFT}"
+            )
+            link = target.url
+        else:
+            link = full
+    code = EXIT_REPORT_LINK if target.url is not None else EXIT_REPORT_NO_TARGET
+
+    if args.json:
+        print(
+            json.dumps(
+                {
+                    "command": "report",
+                    "context_only": bool(args.context),
+                    **context,
+                    "tier": target.tier,
+                    "target": target.where,
+                    "url": target.url,
+                    "prefill": target.prefill if target.url else None,
+                    "link": link,
+                    "prefilled": link is not None and fallback is None,
+                    "fallback": fallback,
+                    "notes": notes,
+                    "title": title or None,
+                    "exit_code": code,
+                },
+                indent=2,
+                sort_keys=True,
+            ),
+            file=stream,
+        )
+        return code
+
+    w = stream.write
+    w("Belay catalogues - report" + (" --context" if args.context else "") + "\n\n")
+    w(f"  course:               {context['course']}\n")
+    w(f"  materialized_version: {context['materialized_version']}\n")
+    w(f"  runner:               belay {context['runner_version'] or '(unknown: no plugin manifest)'}\n")
+    if not args.context:
+        w(f"  draft:                {INSTANCE_DIR}/{REPORT_DRAFT}\n")
+        w(f"  title:                {title}\n")
+    w(f"  target:               {target.where}\n")
+    w(f"  tier:                 {target.tier}\n")
+    if target.url is not None:
+        w(f"  url:                  {target.url}\n")
+        w(f"  prefill:              {target.prefill}\n")
+    w("\n")
+    for text in notes:
+        w(f"note: {text}\n")
+    if notes:
+        w("\n")
+    if args.context:
+        if target.url is None:
+            w("There is no target: the report will be the learner's to send by hand.\n")
+        w("Put the course, version and runner lines above into the draft, then "
+          "write tutorial/REPORT.md and run this again without --context.\n")
+        return code
+    if target.url is None:
+        w(
+            f"There is no target for this report. It is in "
+            f"{INSTANCE_DIR}/{REPORT_DRAFT}: give the learner its text to send "
+            f"by hand, to whoever publishes the course.\n"
+        )
+    else:
+        if fallback is not None:
+            w(f"Bare link: {fallback}.\n")
+        else:
+            w("Link, with the title and the body filled in:\n")
+        w(f"{link}\n\n")
+        w(
+            "Give the learner this link. They open it, read the report, and "
+            "send it themselves.\n"
+        )
+    w(
+        "Nothing was sent, no browser was opened, and nothing was written. "
+        "Never submit it for them.\n"
+    )
+    return code
+
+
+# --------------------------------------------------------------------------
 # The relationship commands
 # --------------------------------------------------------------------------
 #
@@ -3352,6 +3718,25 @@ def build_parser() -> argparse.ArgumentParser:
         "stamp names; never overwrites",
     )
     place_supplies.set_defaults(run=command_place_supplies, offline=True)
+
+    report = sub.add_parser(
+        "report",
+        help="print a link that sends the defect report in tutorial/REPORT.md "
+        "to the course author; sends nothing",
+    )
+    report.add_argument(
+        "--runner",
+        action="store_true",
+        help="the defect is in the runner: send it to skomp/belay, never to "
+        "the course",
+    )
+    report.add_argument(
+        "--context",
+        action="store_true",
+        help="print the course, versions and target to put in the draft; "
+        "needs no draft",
+    )
+    report.set_defaults(run=command_report, offline=True)
 
     covers = sub.add_parser(
         "covers", help="which bundles TEACH a concept (never which assume it)"
