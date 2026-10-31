@@ -101,8 +101,9 @@ include a flat list, and each is that shape because the thing it describes reall
 | `assumes` | concept id | that concept's definition | `aliases` |
 
 The other nested shape is one level of list over one level of mapping, with scalars
-underneath — `supplies`, `setup_validators` and the two recommendation lists. A field
-that seems to want a fourth level wants to be that shape instead.
+underneath — `supplies`, `setup_validators` and the two recommendation lists. `report` is
+a single mapping of scalars. A field that seems to want a fourth level wants to be one of
+these shapes instead.
 
 ```yaml
 bundle_format: 1
@@ -181,6 +182,7 @@ advance_on: validated-evidence-only
 | `ownership_policy` | MUST | See below. |
 | `validators` | MUST (may be `{}`) | Named validators lessons may reference. |
 | `setup_validators` | MAY | Checks the runner performs itself, unprompted, rather than assigning them: a list of `name` + `describe` entries naming validators from `validators`. See **Setup validators** below. |
+| `report` | MAY | Where a learner's defect report goes: a `url` that starts `https://` or `mailto:`, and an optional `prefill` of `github`, `gitlab` or `none`. See **Defect reports** below. |
 | `one_task_at_a_time` | SHOULD | Default `true`. |
 | `solution_code` | SHOULD | `on-request-only` or `freely`. |
 | `advance_on` | SHOULD | `validated-evidence-only` or `learner-assertion`. |
@@ -307,7 +309,9 @@ instance, because all progress belongs in `STATE.md` and a lesson carrying progr
 rejected by the same rule as section 3. **Do not add `tutorial/lessons.generated/**`**
 either: that directory belongs to an instance you cannot see from here, and the runner
 treats it as tutor-owned without being told (section 8). The same holds for
-`tutorial/EVENTS.jsonl`, the learner's evidence record (`state-lifecycle.md` section 12).
+`tutorial/EVENTS.jsonl`, the learner's evidence record (`state-lifecycle.md` section 12),
+and for `tutorial/REPORT.md`, the draft of a defect report (`runner-protocol.md` section
+17).
 
 **One narrow exemption exists, and it exists only for declared supplies.** Under
 `tutor-must-not-edit-learner-owned` the tutor MAY **create** a file a `supplies` entry
@@ -497,6 +501,45 @@ so it is never handed back as a correction. And nothing about a setup validator 
 as progress, the same rule `supplies` carries. `runner-protocol.md` section 14 states what
 the runner does in both directions, including what happens when a manifest-scope setup
 check fails at materialization.
+
+### Defect reports — `report`
+
+```yaml
+report:
+  url: https://github.com/<owner>/<repo>/issues/new
+  prefill: github        # github | gitlab | none; default none
+```
+
+When the runner finds a defect in your course — a lesson file the manifest lists and the
+bundle lacks, a dangling `design_refs` anchor, a validator a lesson names and nobody
+declared, prose telling the tutor to act — it tells the learner, and then offers to draft a
+report for them to send to you (`runner-protocol.md` section 17). `report` says where it
+goes. The tutor never sends anything: the learner reads the whole draft, opens the link and
+submits it themselves.
+
+- **`url`** is required inside `report`, and starts `https://` or `mailto:`. Plain `http:`
+  and every other scheme are refused: a learner opens this link.
+- **`prefill`** says how the runner puts the title and body into the link: `github` as
+  `?title=&body=`, `gitlab` as `?issue[title]=&issue[description]=`, and `none` — the
+  default — for a page that takes no prefilled text, where the learner pastes both from the
+  draft. A `mailto:` link always carries the subject and the body, so with one `prefill` is
+  left out or is `none`.
+- **Any other key inside `report` is a finding**, as in `supplies` and `setup_validators`:
+  at this level an unknown key is almost always a misspelling, and `prefil: github` would
+  silently send every learner a bare link. There is no key for choosing what a report
+  contains: it always carries the full context — the course `id` and version, the lesson,
+  the task, the validator or anchor, the kind of defect, the runner version and the host —
+  so there is nothing for an author to choose.
+
+**A bundle without `report` is complete**, and nothing warns. The runner then uses the
+`report` of the catalogue entry that offered the course, so the owner of a catalogue can
+collect reports for courses they do not control (`catalogue-format.md` section 5); then the
+issue page of that catalogue's repository, when it is a Git repository on `github.com` or
+`gitlab.com`; and otherwise gives the learner the text to send by hand. A defect in the
+runner itself never comes to you: it goes to `skomp/belay`.
+
+Check 34 checks the shape in both modes, because the runner reads the instance's copy.
+Nothing checks that the page exists or that it is yours.
 
 ### Optional lessons — `optional_lessons`
 
@@ -2124,7 +2167,7 @@ genuinely cannot be finished with the failure in place.
 
 `bundle_format` stays `1`. `optional_lessons`, `failure_modes`, `supplies`, `covers`,
 `assumes`, `recommended_follow_ups`, `recommended_previous_bundles`,
-`teaching_method`, `setup_validators`, `version` and the lesson field `assesses` are all additive: a bundle written before this
+`teaching_method`, `setup_validators`, `version`, `report` and the lesson field `assesses` are all additive: a bundle written before this
 section existed is valid exactly as it stands, nothing in this document changes what it means, and no edit
 is implied. Run the validator over it and see.
 
@@ -2168,6 +2211,10 @@ keys, and ignores them. The effect on a learner is precise, and worth stating pl
   `## Assessments` record. The learner still answers questions and still advances; what is
   lost is the remediation loop. An older validator reports nothing about a lesson
   frontmatter field it does not know, so it accepts `assesses` in silence;
+- **no report is ever offered, and `report` is never read.** An older runner still tells the
+  learner about a defect it finds, as every runner has, and offers nothing after it; the
+  learner can still tell you by whatever route they would have used. An older validator
+  reports `report` as an unrecognised top-level field rather than rejecting the bundle;
 - **nothing is taught wrongly.** The main path is untouched by `optional_lessons`, because
   an optional lesson is never in it. An unplaced supply is not the same case — a
   manifest-scope entry IS on the main path — but it costs the learner the toil the key

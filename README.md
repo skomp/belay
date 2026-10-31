@@ -262,6 +262,7 @@ my-project/
     ├── DESIGN.md
     ├── STATE.md         ← your progress
     ├── EVENTS.jsonl     how you got there: attempts, hints, answers (evidence only)
+    ├── REPORT.md        a defect report the tutor drafted for you to send, if any
     ├── lessons/
     └── lessons.generated/   detours, if any were written
 ```
@@ -312,7 +313,7 @@ wrapper in [`bin/`](bin), and the tutor calls the wrapper by its bare name:
 
 | Command | Runs | When |
 |---|---|---|
-| `belay-catalogs` | `skills/belay/scripts/catalogs.py` | discovery: refresh and list courses, resolve the one you chose, follow-ups; then create `tutorial/` from it and place its supplied files |
+| `belay-catalogs` | `skills/belay/scripts/catalogs.py` | discovery: refresh and list courses, resolve the one you chose, follow-ups; then create `tutorial/` from it and place its supplied files. When the tutor finds a defect in the course, `belay-catalogs report` turns the report it drafted, and you read, into a link you open to send it to the author yourself |
 | `belay-validate` | `skills/belay/scripts/validate_bundle.py` | checks a new instance before the first task; authors check bundles and catalogues with it |
 | `belay-plan-update` | `skills/belay/scripts/plan_update.py` | you asked to update a course; it plans, shows each difference, and applies only what you accepted. A resume may ask it whether the course has a newer version |
 | `belay-evidence` | `skills/belay/scripts/evidence.py` | a lesson completed; it compacts `tutorial/EVENTS.jsonl` |
@@ -354,7 +355,7 @@ bin/belay-validate --catalog path/to/catalog.yaml
 
 Run them from a checkout of this repository ([The commands](#the-commands)).
 
-33 bundle checks and 7 catalogue checks. Your run and the runner's run are the same checks
+34 bundle checks and 7 catalogue checks. Your run and the runner's run are the same checks
 over the same files, which is the point: a bundle that passes here starts cleanly there. It
 checks structure — that references resolve, that no progress leaked into the course, that
 every lesson is reachable. It says nothing about whether the course is any good.
@@ -377,7 +378,7 @@ course that walks a learner through building it themselves.
 
 ## Project status
 
-Version 0.11.0. Early, in active use, and honest about its edges.
+Version 0.12.0. Early, in active use, and honest about its edges.
 
 **What works today.** Discovery across many catalogues, local or Git-hosted, with caching
 and per-source failure reporting. Materialising a course into a workspace and validating it
@@ -388,7 +389,9 @@ A learning record beside `STATE.md` — attempts, check failures, hints and answ
 as identifiers and counts, never your code or your words — that you may read or delete.
 Assumed-concept review, and follow-up recommendations at the end of a course. Updating a
 course you have started to its newer version, when you ask for it: a plan you review, which
-keeps your progress, your `DESIGN.md` decisions and your generated lessons.
+keeps your progress, your `DESIGN.md` decisions and your generated lessons. A report about a
+defect the tutor finds in a course, drafted for you to read and send to its author
+yourself; the tutor never sends it.
 
 **Known gaps.**
 
@@ -449,10 +452,10 @@ tutor runs the scripts by their path instead of the `belay-*` commands
 No pytest; five plain scripts, run from a checkout of this repository.
 
 ```
-python3 tests/test_validate_bundle.py     # 846 assertions
-python3 tests/test_catalogs.py            # 407 assertions
+python3 tests/test_validate_bundle.py     # 873 assertions
+python3 tests/test_catalogs.py            # 467 assertions
 python3 tests/test_plan_update.py         # 129 assertions
-python3 tests/test_evidence.py            # 65 assertions
+python3 tests/test_evidence.py            # 89 assertions
 python3 tests/test_bin_wrappers.py        # 57 assertions
 ```
 
@@ -473,7 +476,7 @@ BELAY_SWEEP_SIBLING_REPOS=1 python3 tests/test_validate_bundle.py
 Those are separate checkouts at their own revisions, so what they contribute is
 reported on its own line and never added to the total above — `and 24 more against
 sibling repositories outside this commit` on the machine this was measured on. The
-headline stays 846 either way. Run it before publishing a bundle; a plain `python3
+headline stays 873 either way. Run it before publishing a bundle; a plain `python3
 tests/test_validate_bundle.py` is the check that a commit of *this* repository is
 sound.
 

@@ -108,6 +108,7 @@ for the other three commands. It needs Python 3 and the `git` command, and nothi
 | `belay-catalogs resolve <id>` | the learner has chosen, and wants to know where the course comes from | prints that entry and the bundle directory it resolves to, and checks the bundle is really there |
 | `belay-catalogs materialize <id>` | the learner has chosen | resolves the entry as `resolve` does and creates `tutorial/` in the current directory from it: copy, `STATE.md`, stamp (`state-lifecycle.md` section 3) |
 | `belay-catalogs place-supplies` | materialization, after validation; and after an update | places the manifest's `supplies` from the source the instance stamp names, never overwriting (`state-lifecycle.md` section 3 step 8) |
+| `belay-catalogs report` | the learner wants to send a defect report the tutor drafted in `tutorial/REPORT.md` | prints which target it chose and a link the learner opens to send it; `--runner` for a defect in the runner, `--context` for what goes in the draft. Sends nothing (`runner-protocol.md` section 17) |
 | `belay-catalogs covers <query>` | the learner asks who **teaches** a concept | prints every bundle whose `covers` answers, with the reason each one matched |
 | `belay-catalogs follow-ups <id>` | a course finished, or the learner asks what comes next | prints the author's follow-ups, then the bundles that name this one as a previous bundle |
 | `belay-catalogs prepare <id>` | the learner asks how to get ready for a course | prints the bundles that cover what it `assumes` |
@@ -125,19 +126,24 @@ not be served, and there is still something to offer; `2` the configuration is u
 nothing was fetched; `3` there is nothing to offer at all. `materialize` and
 `place-supplies` have their own, tabled in `state-lifecycle.md` section 3: `0` done, `2`
 usage, `3` refused with nothing written, and for `place-supplies` `1` when a learner's file
-stands in the way of a target.
+stands in the way of a target. `report` has its own, tabled in `runner-protocol.md` section
+17.5: `0` a link was printed, `1` there is no target and the draft is the learner's to
+send by hand, `2` usage, or no instance or no usable draft. It writes nothing, so it has no
+refusal.
 
 **No command here is given a bundle path** (belay#76). A bundle sits outside the learner's
 workspace, and under `permissions.blockReadsOutsideWorkingDirectories` the host asks before
 any command that names such a path. `materialize` takes the id and `place-supplies` reads
 the instance stamp; both open the bundle inside their own process, fetch nothing, and run
-nothing the bundle declares.
+nothing the bundle declares. `report` reads the instance, its draft and the catalogues on
+disk, and opens no bundle at all.
 
 ### When to refresh
 
 **Refresh when a discovery request starts. Once.** Never once per turn, and never during
 a resume — a resume reads no catalogue at all, so a learner continuing a course pays
-nothing for any of this.
+nothing for any of this. The one read during a course is `report`, and only when the learner
+wants to send a defect report: it reads the copies already on disk and fetches nothing.
 
 An exit code of `2` is the one case where you stop and ask: the catalogue of catalogues
 decides every other step, so nothing was fetched. Say which line is wrong, and offer to
@@ -184,6 +190,7 @@ tutorials:
 | `assumes` | SHOULD | The concepts the course **expects you to bring**, each with a `level` and a `summary`. Never a gate. Section 12. |
 | `recommended_follow_ups` | MAY | Courses the author suggests **after** this one, each with a `because`. Author order is display order. |
 | `recommended_previous_bundles` | MAY | Courses the author suggests **before** this one, each with a `because`. This is how a course attaches itself to an earlier one. |
+| `report` | MAY | Where a learner's defect report about this course goes, when the bundle's own `tutorial.yaml` says nothing: a `url` starting `https://` or `mailto:`, and an optional `prefill` of `github`, `gitlab` or `none`. The same shape and rules as the manifest key (`bundle-format.md` section 2, **Defect reports**). |
 | `source` | MUST | Where the bundle is. See section 5.1. |
 
 The entry duplicates fields that also appear in the bundle's `tutorial.yaml`. That is
@@ -193,6 +200,16 @@ after the learner has chosen, and a mismatch is worth mentioning then.
 
 An entry missing a MUST field is malformed. The script skips it and names the entry and
 the field. Pass that on rather than pretending the catalogue was complete.
+
+**`report` lets a catalogue owner collect reports for a course they do not control.** The
+runner takes the target from the bundle's own manifest first, then from this field on the
+entry that won the merge for that `id` (section 6), then from the issue page of that
+entry's catalogue when it is a Git repository on `github.com` or `gitlab.com` — so an
+entry in a bundles repository on one of those hosts needs no `report` at all to reach it.
+The validator checks the field on check 3 and reports a malformed one as a **finding**, not
+a warning: it is a value a runner builds a link from, not a key it ignores. The reader is
+tolerant all the same: a malformed `report` never removes a course from discovery, and the
+report command skips it, says why, and moves to the next target.
 
 **A field this document does not define is warned about, never rejected.** A catalogue is
 data that a newer runner may extend, and a validator that refused an unknown key would turn

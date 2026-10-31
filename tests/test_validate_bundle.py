@@ -3049,6 +3049,136 @@ def m_setup_validators_misspelled_singular(root: Path) -> None:
     )
 
 
+# -- check 34: report, where a learner's defect report goes
+
+
+GITHUB_REPORT_URL = "https://github.com/example/course/issues/new"
+
+
+def _declare_report(root: Path, literal: str, expected: object) -> None:
+    _append_top_level(root, literal, {"report": expected})
+
+
+def m_report_https_github(root: Path) -> None:
+    _declare_report(
+        root,
+        f"report:\n  url: {GITHUB_REPORT_URL}\n  prefill: github",
+        {"url": GITHUB_REPORT_URL, "prefill": "github"},
+    )
+
+
+def m_report_https_none(root: Path) -> None:
+    _declare_report(
+        root,
+        "report:\n  url: https://forum.example.org/c/course\n  prefill: none",
+        {"url": "https://forum.example.org/c/course", "prefill": "none"},
+    )
+
+
+def m_report_https_gitlab(root: Path) -> None:
+    _declare_report(
+        root,
+        "report:\n  url: https://gitlab.com/group/sub/course/-/issues/new\n"
+        "  prefill: gitlab",
+        {"url": "https://gitlab.com/group/sub/course/-/issues/new",
+         "prefill": "gitlab"},
+    )
+
+
+def m_report_mailto(root: Path) -> None:
+    _declare_report(
+        root,
+        "report:\n  url: mailto:author@example.org",
+        {"url": "mailto:author@example.org"},
+    )
+
+
+def m_report_mailto_prefill_none(root: Path) -> None:
+    _declare_report(
+        root,
+        "report:\n  url: mailto:author@example.org\n  prefill: none",
+        {"url": "mailto:author@example.org", "prefill": "none"},
+    )
+
+
+def m_report_http(root: Path) -> None:
+    _declare_report(
+        root,
+        "report:\n  url: http://github.com/example/course/issues/new\n"
+        "  prefill: github",
+        {"url": "http://github.com/example/course/issues/new", "prefill": "github"},
+    )
+
+
+def m_report_javascript(root: Path) -> None:
+    _declare_report(
+        root,
+        'report:\n  url: "javascript:alert(1)"',
+        {"url": "javascript:alert(1)"},
+    )
+
+
+def m_report_bad_prefill(root: Path) -> None:
+    _declare_report(
+        root,
+        f"report:\n  url: {GITHUB_REPORT_URL}\n  prefill: bitbucket",
+        {"url": GITHUB_REPORT_URL, "prefill": "bitbucket"},
+    )
+
+
+def m_report_mailto_prefill_github(root: Path) -> None:
+    _declare_report(
+        root,
+        "report:\n  url: mailto:author@example.org\n  prefill: github",
+        {"url": "mailto:author@example.org", "prefill": "github"},
+    )
+
+
+def m_report_without_url(root: Path) -> None:
+    _declare_report(root, "report:\n  prefill: github", {"prefill": "github"})
+
+
+def m_report_is_a_string(root: Path) -> None:
+    _declare_report(root, f"report: {GITHUB_REPORT_URL}", GITHUB_REPORT_URL)
+
+
+def m_report_with_include(root: Path) -> None:
+    """The issue's `include` key, which the format dropped. Reported, not
+    ignored - the rule supplies and setup_validators keep for unknown keys."""
+    _declare_report(
+        root,
+        f"report:\n  url: {GITHUB_REPORT_URL}\n  prefill: github\n"
+        "  include: [lesson, task, validator]",
+        {"url": GITHUB_REPORT_URL, "prefill": "github",
+         "include": ["lesson", "task", "validator"]},
+    )
+
+
+def m_report_prefill_misspelled(root: Path) -> None:
+    _declare_report(
+        root,
+        f"report:\n  url: {GITHUB_REPORT_URL}\n  prefil: github",
+        {"url": GITHUB_REPORT_URL, "prefil": "github"},
+    )
+
+
+def m_no_report(root: Path) -> None:
+    """The backward-compatibility control: the key is a MAY."""
+    assert "report" not in vb.load_yaml(
+        (root / "tutorial.yaml").read_text(), "tutorial.yaml"
+    ), "this baseline declares report, so it cannot show a bundle without one"
+
+
+def m_report_misspelled_plural(root: Path) -> None:
+    """Check 28's near-miss control for the allow-list edit, as for
+    setup_validators: adding `report` must not silence `reports`."""
+    _append_top_level(
+        root,
+        f"reports:\n  url: {GITHUB_REPORT_URL}",
+        {"reports": {"url": GITHUB_REPORT_URL}},
+    )
+
+
 # -- the disclosure block: fixtures
 #
 # NOT a check. The disclosure section produces no finding, no warning and
@@ -4385,6 +4515,57 @@ CASES: list[Case] = [
          m_version_2_1, kind="silent"),
     Case("28: and so is an INSTANCE's, with the stamped copy", 28, "cli",
          "instance", m_materialized_version_good, kind="silent"),
+    # ---- check 34: report. The silent rows are the positive control: every
+    # finding below means nothing unless a well-formed target passes.
+    Case("34: an https url with prefill github is silent", 34, "cli",
+         "bundle", m_report_https_github, kind="silent"),
+    Case("34: an https url with prefill none is silent", 34, "cli",
+         "bundle", m_report_https_none, kind="silent"),
+    Case("34: an https url with prefill gitlab is silent", 34, "cli",
+         "bundle", m_report_https_gitlab, kind="silent"),
+    Case("34: a mailto url with no prefill is silent", 34, "cli", "bundle",
+         m_report_mailto, kind="silent"),
+    Case("34: a mailto url with prefill none is silent", 34, "cli",
+         "bundle", m_report_mailto_prefill_none, kind="silent"),
+    Case("34: a bundle with no report is silent", 34, "cli", "bundle",
+         m_no_report, kind="silent"),
+    Case("34: and so is an INSTANCE with no report", 34, "cli", "instance",
+         m_no_report, kind="silent"),
+    Case("34: an INSTANCE with a good report is silent", 34, "cli",
+         "instance", m_report_https_github, kind="silent"),
+    Case("34: an http url fires", 34, "cli", "bundle", m_report_http,
+         "it must start 'https://' or 'mailto:'", where="tutorial.yaml"),
+    Case("34: a javascript: url fires", 34, "cli", "bundle",
+         m_report_javascript, "it must start 'https://' or 'mailto:'",
+         where="tutorial.yaml"),
+    Case("34: an unknown prefill fires", 34, "cli", "bundle",
+         m_report_bad_prefill, "'report.prefill' is 'bitbucket'",
+         where="tutorial.yaml"),
+    Case("34: a mailto url with prefill github fires", 34, "cli", "bundle",
+         m_report_mailto_prefill_github, "with a mailto: url",
+         where="tutorial.yaml"),
+    Case("34: a report without a url fires", 34, "cli", "bundle",
+         m_report_without_url, "missing required key 'url'",
+         where="tutorial.yaml"),
+    Case("34: a report written as a bare string fires", 34, "cli", "bundle",
+         m_report_is_a_string, "'report' must be a mapping",
+         where="tutorial.yaml"),
+    Case("34: the dropped include key fires as an unknown key", 34, "cli",
+         "bundle", m_report_with_include, "unknown key 'include'",
+         where="tutorial.yaml"),
+    Case("34: a misspelled prefill fires as an unknown key", 34, "cli",
+         "bundle", m_report_prefill_misspelled, "unknown key 'prefil'",
+         where="tutorial.yaml"),
+    Case("34: an INSTANCE with an http url fires too", 34, "cli",
+         "instance", m_report_http, "it must start 'https://' or 'mailto:'",
+         where="tutorial.yaml"),
+    # ---- check 28 and the report allow-list edit: the near miss and the hit.
+    Case("28: 'reports' - the plural near miss - still WARNS", 28, "cli",
+         "bundle", m_report_misspelled_plural,
+         "'reports', which is a near miss for 'report'", kind="warns",
+         where="tutorial.yaml"),
+    Case("28: 'report' spelled correctly is silent", 28, "cli", "bundle",
+         m_report_https_github, kind="silent"),
     # ---- check 31: `assesses` (belay#33)
     Case("31: assesses names a misspelled concept id", 31, "broker", "bundle",
          m_assesses_misspelled, "'partition-ofsets'", where=BROKER_LESSON),
@@ -8747,6 +8928,40 @@ def test_assessment_checks_status() -> None:
     )
 
 
+def test_report_check_status() -> None:
+    """Check 34's STATUS line: n/a with no report, ran with one.
+
+    A "silent" case is satisfied by a check that never ran, and for a MAY
+    that is the failure that matters. So the n/a is paired with the same
+    baseline reporting `ran` once a report is declared.
+    """
+    print("\ncheck 34: the status line, both modes:")
+    for mode in ("bundle", "instance"):
+        for mutate, want, label in (
+            (m_no_report, (vb.NOT_APPLICABLE, "the bundle declares no report"),
+             "no report: n/a, with the reason"),
+            (m_report_https_github, (vb.RAN, "declared"),
+             "a good report: ran, declared"),
+            (m_report_http, (vb.RAN, "declared, malformed"),
+             "a bad report: ran, declared, malformed"),
+        ):
+            with tempfile.TemporaryDirectory() as tmpdir:
+                root = fresh("cli", Path(tmpdir))
+                if mode == "instance":
+                    to_instance(root)
+                mutate(root)
+                report = vb.validate(root, mode)
+            got = report.status.get(34)
+            record(got == want, f"{mode}: {label}", f"status = {got!r}")
+    record(
+        34 not in vb.BUNDLE_ONLY and 34 not in vb.INSTANCE_ONLY
+        and 34 not in vb.WARNING_ONLY,
+        "check 34 is a FINDING in BOTH modes",
+        f"BUNDLE_ONLY = {vb.BUNDLE_ONLY}, INSTANCE_ONLY = {vb.INSTANCE_ONLY}, "
+        f"WARNING_ONLY = {vb.WARNING_ONLY}",
+    )
+
+
 def test_learning_record_check_status() -> None:
     """Check 33 is n/a without a record, instance-only, and warning-only."""
     print("\nlearning record check reports n/a where there is no record:")
@@ -8912,6 +9127,7 @@ def main() -> int:
     test_skipped_and_passed_are_distinguishable()
     test_assessment_checks_status()
     test_learning_record_check_status()
+    test_report_check_status()
     test_the_total_is_reproducible_from_this_commit()
     test_check_coverage()
 
