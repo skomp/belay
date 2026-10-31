@@ -1,7 +1,7 @@
 # Generic Tutorial Runner + Portable Tutorial Bundles — Design
 
 **Date:** 2026-09-11
-**Last amended:** 2026-10-30
+**Last amended:** 2026-10-31
 **Status:** Design approved. Formats and first bundle implemented; runner in progress.
 **Repositories:** `belay` (runner), `belay-bundles` (courses), `automaton-db` (a learner)
 
@@ -658,11 +658,13 @@ differ in *when*: `catalogs.py` runs at discovery, `validate_bundle.py` at mater
 
 | Command | Runs when | Does |
 |---|---|---|
+| `find-instance` | every session, once, to orient | finds `tutorial/tutorial.yaml` from the cwd up to the repository root and classifies it; takes no path (§15f) |
 | `discover` | a discovery request starts | refreshes every catalogue, prints the merged catalogue and per-source status |
 | `status` | explaining the configuration or a failure | reports from disk; fetches nothing |
 | `resolve <id>` | the learner has chosen | prints the entry and the bundle directory, and checks the bundle is there |
 | `materialize <id>` | the learner has chosen | resolves as `resolve` does and creates `tutorial/` in the current directory: copy, `STATE.md`, stamp. Refuses over an existing `tutorial/` |
 | `place-supplies` | materialization, after validation; after an update | places the manifest's `supplies` from the source the stamp names; create-only |
+| `report` | the learner wants to send a defect report | prints a link that sends `tutorial/REPORT.md` to its target; sends nothing (§15e) |
 
 Options: `--config`, `--cache-dir`, `--timeout`, `--offline`, `--json`. Exit codes: `0`
 all current, `1` partial (something cached or unavailable), `2` the configuration is
@@ -844,8 +846,8 @@ teaching task — after the choice has been made.
 ## 8. Runner protocol
 
 ```
-ORIENT
-  ├─ <cwd>/tutorial/tutorial.yaml exists (walking up to repo root)?
+ORIENT  catalogs.py find-instance (cwd, then parents, to the repo root; §15f)
+  ├─ an instance? (in a parent directory: name it; the session starts there)
   │    ├─ yes + "continue" / no subject named ──────────► RESUME
   │    └─ yes + different subject named ────────────────► ask
   └─ no ─────────────────────────────────────────────────► DISCOVER
@@ -853,7 +855,7 @@ ORIENT
                             → catalogue metadata → match → choice
                                                         ↓
                                                   MATERIALIZE
-                       catalogs.py resolve <id> → copy → STATE.template.md
+                       catalogs.py materialize <id> → copy → STATE.template.md
                                     → STATE.md → stamp instance
                                                         ↓
                                   ┌───────────────► TEACH LOOP ◄──────┐
@@ -1596,6 +1598,50 @@ learner and stopped there. Nothing in either format said where it should go next
 
 ---
 
+## 15f. Finding the instance from inside one process
+
+**Decided 2026-10-31, belay#83.** `SKILL.md` step 1 told the tutor to walk up from the
+current directory towards the repository root, or to `/` outside a repository, looking for
+`tutorial/tutorial.yaml`. Under `permissions.blockReadsOutsideWorkingDirectories` every
+directory above the session's working directory is outside it. Measured on Claude Code
+2.1.308, `claude -p`, in an empty directory that was not a Git repository: the tutor ran
+`git rev-parse --show-toplevel`, which exited 128, then `ls <parent>/tutorial/tutorial.yaml`
+for each parent, and the read block denied every one.
+
+**What was decided:**
+
+- **The search is a command, `belay-catalogs find-instance`, with no path argument**, for
+  the reason §7.2 gives: a bare `bin/` command is not checked for what it reads in-process,
+  and an argument naming a path outside the workspace is. It checks
+  `<dir>/tutorial/tutorial.yaml` from the cwd upward, and stops at the first hit, at the
+  repository root, or at the filesystem root.
+- **The repository root is the first directory holding `.git`, a directory or a file**,
+  decided by looking rather than by running `git`. A worktree's or a submodule's `.git` is
+  a file. The instance check comes before the `.git` check at each level, so an instance at
+  the repository root is found and nothing above it is looked at.
+- **It classifies the hit and reads nothing more than that needs**: which of `STATE.md` and
+  `STATE.template.md` exist (§3), and the manifest's `id`. Exit `0` an instance, `1` none,
+  `2` a `tutorial/` that is not a usable instance — a bundle, both state files, neither, or
+  a manifest that does not parse. A `tutorial/` holding only `STATE.template.md` is named a
+  bundle, with the note that it may be a materialization that did not finish, because the
+  pair of files cannot tell those apart (`state-lifecycle.md` section 3 step 3).
+- **An instance in a parent directory is reported, not adopted.** The session's working
+  directory is then a subdirectory of the workspace, so every read of `tutorial/` may ask,
+  the rules' relative paths are wrong, and the commands that work from the cwd do not find
+  the instance. The tutor names the workspace root and tells the learner to start the
+  session there, and continues in the current session only if the learner chooses to. The
+  command's output says this itself, so the tutor does not have to reason it out.
+
+Measured after the change, 2026-10-31, same host and setting, with the branch as
+`--plugin-dir`: from an empty non-Git directory the tutor's first command was
+`belay-catalogs find-instance`, which searched seven directories to `/` and exited 1 with no
+denial; from a subdirectory two levels below an instance it named the workspace root,
+recommended a new session there, and opened nothing in `tutorial/` before the learner chose.
+
+`runner-protocol.md` section 1, **Finding the instance**, is the behaviour.
+
+---
+
 ## 16. Deferred: telemetry feedback
 
 Generated lessons are the course's only quality signal from real use. A later version
@@ -1694,10 +1740,11 @@ real files. One repository cannot satisfy both without duplication.
 | Knowledge assessments (`assesses`, `## Assessments`, `kind: practice`) | **done** — 2026-10-16, belay#33; `runner-protocol.md` §15, `state-lifecycle.md` §11, checks 31-32. The question-and-answer loop is untested, as above |
 | Learning-evidence record (`tutorial/EVENTS.jsonl`, `skills/belay/scripts/evidence.py`) | **done** — 2026-10-16, belay#34; `state-lifecycle.md` §12, `runner-protocol.md` §16, check 33 (warning only); `tests/test_evidence.py`, 89 assertions. Whether the tutor writes the events in conversation is untested, as above |
 | Multi-catalogue support (`skills/belay/scripts/catalogs.py`) | **done** — 2026-09-12, §7 |
-| Catalogue test suite (`tests/test_catalogs.py`) | **done** — 467 assertions; every failure kind proven firing |
+| Catalogue test suite (`tests/test_catalogs.py`) | **done** — 482 assertions; every failure kind proven firing |
 | Instance update (`skills/belay/scripts/plan_update.py`, `state-lifecycle.md` §3.2) | **done** — 2026-10-14, belay#50, §15c; source from the stamp, `--diff`, `--apply`, `--check-version` 2026-10-28, belay#76; `tests/test_plan_update.py`, 129 assertions |
 | Materialization and supplies placement by command (`catalogs.py materialize`, `place-supplies`) | **done** — 2026-10-28, belay#76, §7.2; `tests/test_catalogs.py` |
 | Defect reports (`report` key, check 34, `catalogs.py report`, the `reported` event) | **done** — 2026-10-30, belay#86, §15e; `runner-protocol.md` §17. Whether the tutor offers, drafts and records in conversation is untested, as above |
+| Finding the instance by command (`catalogs.py find-instance`) | **done** — 2026-10-31, belay#83, §15f; `runner-protocol.md` §1; `tests/test_catalogs.py` |
 | Shared YAML reader (`skills/belay/scripts/yamlite.py`) | **done** — the only reader; the PyYAML preference was removed 2026-09-13, belay#29 |
 | `catalog.yaml` inside `belay-bundles` | **done** — 2026-09-12, §15 item 6; generated by `belay-authoring`'s `catalog.py` |
 | `SKILL.md` (the runner control plane) | **done** |

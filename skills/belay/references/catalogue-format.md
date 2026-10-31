@@ -103,6 +103,7 @@ for the other three commands. It needs Python 3 and the `git` command, and nothi
 
 | Command | When | What it does |
 |---|---|---|
+| `belay-catalogs find-instance` | every session, once, to orient (`SKILL.md` step 1) | looks for `tutorial/tutorial.yaml` from the current directory up to the repository root, and says whether it is an instance and whether its workspace root is the current directory; reads no catalogue (`runner-protocol.md` section 1, **Finding the instance**) |
 | `belay-catalogs discover` | a discovery request starts | refreshes every catalogue, then prints the merged catalogue and the status of each source |
 | `belay-catalogs status` | the learner asks what is configured, or a failure needs explaining | prints each catalogue's state from disk; fetches nothing |
 | `belay-catalogs resolve <id>` | the learner has chosen, and wants to know where the course comes from | prints that entry and the bundle directory it resolves to, and checks the bundle is really there |
@@ -129,14 +130,17 @@ usage, `3` refused with nothing written, and for `place-supplies` `1` when a lea
 stands in the way of a target. `report` has its own, tabled in `runner-protocol.md` section
 17.5: `0` a link was printed, `1` there is no target and the draft is the learner's to
 send by hand, `2` usage, or no instance or no usable draft. It writes nothing, so it has no
-refusal.
+refusal. `find-instance` has its own, tabled in `runner-protocol.md` section 1: `0` an
+instance was found, `1` none was found, `2` a `tutorial/` that is not a usable instance.
 
 **No command here is given a bundle path** (belay#76). A bundle sits outside the learner's
 workspace, and under `permissions.blockReadsOutsideWorkingDirectories` the host asks before
 any command that names such a path. `materialize` takes the id and `place-supplies` reads
 the instance stamp; both open the bundle inside their own process, fetch nothing, and run
 nothing the bundle declares. `report` reads the instance, its draft and the catalogues on
-disk, and opens no bundle at all.
+disk, and opens no bundle at all. `find-instance` looks in the directories above the
+current one inside its own process, because each of them is outside the workspace too
+(belay#83).
 
 ### When to refresh
 

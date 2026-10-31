@@ -77,6 +77,8 @@ Continue the tutorial.
 
 No catalogue is read and no choice is offered. The runner finds `tutorial/`, reads your
 progress file, and resumes at the pending task — in a brand new conversation, weeks later.
+Started in a subdirectory instead, the tutor says where the course is and suggests starting
+the session there.
 
 ### Update Belay in the middle of a course
 
@@ -313,7 +315,7 @@ wrapper in [`bin/`](bin), and the tutor calls the wrapper by its bare name:
 
 | Command | Runs | When |
 |---|---|---|
-| `belay-catalogs` | `skills/belay/scripts/catalogs.py` | discovery: refresh and list courses, resolve the one you chose, follow-ups; then create `tutorial/` from it and place its supplied files. When the tutor finds a defect in the course, `belay-catalogs report` turns the report it drafted, and you read, into a link you open to send it to the author yourself |
+| `belay-catalogs` | `skills/belay/scripts/catalogs.py` | the start of every session: `belay-catalogs find-instance` finds `tutorial/` in this directory or a parent. Then discovery: refresh and list courses, resolve the one you chose, follow-ups; then create `tutorial/` from it and place its supplied files. When the tutor finds a defect in the course, `belay-catalogs report` turns the report it drafted, and you read, into a link you open to send it to the author yourself |
 | `belay-validate` | `skills/belay/scripts/validate_bundle.py` | checks a new instance before the first task; authors check bundles and catalogues with it |
 | `belay-plan-update` | `skills/belay/scripts/plan_update.py` | you asked to update a course; it plans, shows each difference, and applies only what you accepted. A resume may ask it whether the course has a newer version |
 | `belay-evidence` | `skills/belay/scripts/evidence.py` | a lesson completed; it compacts `tutorial/EVENTS.jsonl` |
@@ -328,7 +330,9 @@ argument that names a path outside the workspace, such as a bundle directory in 
 still asks, so no command is ever given one: `belay-catalogs materialize <id>` takes the
 course id, and placing supplies and updating read the course's location from the stamp in
 `tutorial/tutorial.yaml`. Each reads the course inside its own process, so starting a course
-from a Git catalogue needs no `/add-dir`.
+from a Git catalogue needs no `/add-dir`. For the same reason the tutor never looks in the
+directories above your workspace itself: `belay-catalogs find-instance` does that search
+inside its process, and takes no path.
 
 After installing or updating the plugin, start a new session: `/reload-plugins` is
 reported not to refresh the `PATH`. On a host that does not put plugin `bin/` on `PATH` — the Codex skill
@@ -453,7 +457,7 @@ No pytest; five plain scripts, run from a checkout of this repository.
 
 ```
 python3 tests/test_validate_bundle.py     # 873 assertions
-python3 tests/test_catalogs.py            # 467 assertions
+python3 tests/test_catalogs.py            # 482 assertions
 python3 tests/test_plan_update.py         # 129 assertions
 python3 tests/test_evidence.py            # 89 assertions
 python3 tests/test_bin_wrappers.py        # 57 assertions

@@ -74,10 +74,11 @@ A bundle contains `STATE.template.md` and never `STATE.md`. An instance contains
 
 ## Step 1 — orient
 
-Starting from the current working directory, walk up towards the repository root (stop at
-the repository root, or at the filesystem root if there is no repository) and look for
-`tutorial/tutorial.yaml`. The first one found is the active instance, and its parent
-directory is the workspace root.
+Run `belay-catalogs find-instance` (on `command not found`,
+`python3 <skill dir>/scripts/catalogs.py find-instance`) and act on what it prints; never
+look above this directory yourself. A workspace root it names that is not the current
+directory: tell the learner to start the session there (`references/runner-protocol.md`
+section 1, **Finding the instance**).
 
 Do not read `COURSE.md`, the lesson files, or anything but the manifest and `STATE.md`
 while orienting.
@@ -260,7 +261,8 @@ Load a reference when its condition holds, not before.
 | `references/bundle-format.md` | authoring, importing or repairing a **bundle**, including promoting a generated lesson into one. Not needed to teach. |
 
 A learner's session runs four scripts, each at one moment, never per turn.
-`belay-catalogs` belongs to discovery and materialization; a resume runs only `report`.
+`belay-catalogs` orients, discovers and materializes; after orienting, a resume runs only
+`report`.
 `belay-validate --instance tutorial` checks the instance
 materialization has just created, before the first task: a finding stops the course from
 starting, a warning never does, and an indeterminate run is not a pass.

@@ -7,6 +7,11 @@ else. No third-party packages, no network client of its own, no credential
 handling: `git` borrows whatever access the user already granted it.
 
 Usage:
+    catalogs.py find-instance       find tutorial/tutorial.yaml from the
+                                    current directory upward, stopping at the
+                                    repository root (a directory holding
+                                    .git) or the filesystem root; read the
+                                    manifest only; fetch nothing
     catalogs.py discover            refresh every catalogue, print the merged
                                     catalogue and the per-catalogue status
     catalogs.py status              print the per-catalogue status from what
@@ -56,12 +61,20 @@ Exit codes:
     0  a link was printed
     1  there is no target: the draft is the learner's to send by hand
     2  usage, or the instance or the draft is unusable
+`find-instance` has its own:
+    0  an instance was found
+    1  none was found before the repository root or the filesystem root
+    2  a tutorial/tutorial.yaml was found that is not a usable instance - a
+       bundle, both state files or neither, or a manifest that does not
+       parse - or the current directory cannot be read
 `materialize` refuses when tutorial/ already exists, when no catalogue
 supplies the id, and when the bundle is not usable. `place-supplies`
 refuses when the stamp is missing or names no readable local source, and
 when an entry is malformed or reaches outside the bundle or the workspace.
 Neither is ever given a bundle path (belay#76): a path outside the
 workspace on the command line is what makes the host ask the learner.
+`find-instance` takes no path for the same reason (belay#83): it looks in
+the directories above the current one inside its own process.
 
 Three rules this script exists to keep:
 
@@ -3558,6 +3571,225 @@ def command_report(args, stream) -> int:
 
 
 # --------------------------------------------------------------------------
+# Finding the instance: `find-instance`
+# --------------------------------------------------------------------------
+#
+# SKILL.md step 1 used to tell the tutor to walk up from the current directory
+# itself. Every directory above the session's working directory is outside
+# it, so under `permissions.blockReadsOutsideWorkingDirectories` each look
+# asked the learner, or was refused (belay#83). This command does the same
+# walk inside its own process, takes no path, and reads only what it needs to
+# say what it found: whether the two state files exist, and the manifest's
+# `id`. It never opens STATE.md, a lesson, COURSE.md or DESIGN.md.
+#
+# The repository root is a directory holding `.git`, a directory or a file
+# (a worktree's or a submodule's `.git` is a file). It is decided by looking,
+# not by running `git`: `git rev-parse` outside a repository exits 128, and a
+# search that needs a subprocess to know where to stop is one more thing that
+# can fail.
+
+EXIT_FIND_INSTANCE = 0
+EXIT_FIND_NONE = 1
+EXIT_FIND_UNUSABLE = 2
+
+STATE_FILE = "STATE.md"
+STATE_TEMPLATE = "STATE.template.md"
+
+
+@dataclass
+class InstanceSearch:
+    cwd: Path
+    searched: list[Path]
+    stopped_at: Path
+    stop_reason: str  # "found" | "repository-root" | "filesystem-root"
+    kind: str | None = None  # "instance" | "bundle" | "inconsistent" | "unreadable-manifest"
+    course_id: str | None = None
+    problem: str | None = None
+
+    @property
+    def found(self) -> bool:
+        return self.stop_reason == "found"
+
+    @property
+    def workspace_root(self) -> Path | None:
+        return self.stopped_at if self.found else None
+
+    @property
+    def instance(self) -> Path | None:
+        return self.stopped_at / INSTANCE_DIR if self.found else None
+
+    @property
+    def workspace_is_cwd(self) -> bool | None:
+        return self.stopped_at == self.cwd if self.found else None
+
+    @property
+    def exit_code(self) -> int:
+        if not self.found:
+            return EXIT_FIND_NONE
+        return EXIT_FIND_INSTANCE if self.kind == "instance" else EXIT_FIND_UNUSABLE
+
+
+def search_for_instance(start: Path) -> InstanceSearch:
+    """Walk from `start` upward to the first `tutorial/tutorial.yaml`.
+
+    Each directory is checked for the instance before it is checked for
+    `.git`, so an instance at the repository root is found, and nothing above
+    the repository root is looked at.
+    """
+    searched: list[Path] = []
+    here = start
+    while True:
+        searched.append(here)
+        if (here / INSTANCE_DIR / "tutorial.yaml").is_file():
+            result = InstanceSearch(start, searched, here, "found")
+            classify_instance(here / INSTANCE_DIR, result)
+            return result
+        if os.path.lexists(here / ".git"):
+            return InstanceSearch(start, searched, here, "repository-root")
+        if here.parent == here:
+            return InstanceSearch(start, searched, here, "filesystem-root")
+        here = here.parent
+
+
+def classify_instance(directory: Path, result: InstanceSearch) -> None:
+    """Instance, bundle or neither, from the state-file pair and the manifest."""
+    has_state = (directory / STATE_FILE).exists()
+    has_template = (directory / STATE_TEMPLATE).exists()
+    try:
+        manifest = read_manifest(directory / "tutorial.yaml", "the manifest")
+    except Refusal as exc:
+        manifest = None
+        manifest_problem = str(exc)
+    else:
+        identifier = manifest.get("id")
+        result.course_id = identifier if isinstance(identifier, str) else None
+        manifest_problem = None
+    if has_template and not has_state:
+        result.kind = "bundle"
+        result.problem = (
+            f"{directory} holds {STATE_TEMPLATE} and no {STATE_FILE}, so it is "
+            f"a bundle, not an instance: a bundle copied in by hand, or a "
+            f"materialization that did not finish"
+        )
+    elif has_template and has_state:
+        result.kind = "inconsistent"
+        result.problem = (
+            f"{directory} holds both {STATE_FILE} and {STATE_TEMPLATE}; an "
+            f"instance holds {STATE_FILE} only, so materialization did not "
+            f"finish"
+        )
+    elif not has_state:
+        result.kind = "inconsistent"
+        result.problem = (
+            f"{directory} holds neither {STATE_FILE} nor {STATE_TEMPLATE}, so "
+            f"it is neither an instance nor a bundle"
+        )
+    elif manifest is None:
+        result.kind = "unreadable-manifest"
+        result.problem = manifest_problem
+    else:
+        result.kind = "instance"
+
+
+def find_instance_advice(result: InstanceSearch) -> str:
+    """What the tutor does next. The command says it so the tutor need not
+    work it out (runner-protocol.md section 1, **Finding the instance**)."""
+    if not result.found:
+        return (
+            "No instance exists. Go to step 2; a course chosen now is "
+            "materialized in the current directory."
+        )
+    root = result.workspace_root
+    if result.kind != "instance":
+        return (
+            f"Do not teach from it, and do not materialize over it. Tell the "
+            f"learner what {INSTANCE_DIR}/ in {root} is, in the words above "
+            f"(SKILL.md, When something is wrong)."
+        )
+    if result.workspace_is_cwd:
+        return "This is the active instance. Go to step 2."
+    return (
+        f"The instance is in {root}, a parent of the current directory, so "
+        f"this session's paths are not the workspace's. Tell the learner the "
+        f"course is in {root} and that, to continue it, they start a new "
+        f"session in {root}. Continue in this session only if the learner "
+        f"chooses to, and say first that the host may ask before every read "
+        f"of {root}/{INSTANCE_DIR}/, and that the runner's other commands work "
+        f"from the current directory and will not find the instance from here."
+    )
+
+
+def command_find_instance(args, stream) -> int:
+    """SKILL.md step 1: find the active instance; read no lesson."""
+    try:
+        cwd = Path.cwd()
+    except OSError as exc:
+        print(f"error: the current directory cannot be read: {exc}", file=sys.stderr)
+        return EXIT_USAGE
+    result = search_for_instance(cwd)
+    advice = find_instance_advice(result)
+    code = result.exit_code
+
+    def text(path: Path | None) -> str | None:
+        return None if path is None else str(path)
+
+    if args.json:
+        print(
+            json.dumps(
+                {
+                    "command": "find-instance",
+                    "cwd": str(cwd),
+                    "searched": len(result.searched),
+                    "searched_dirs": [str(p) for p in result.searched],
+                    "stopped_at": str(result.stopped_at),
+                    "stop_reason": result.stop_reason,
+                    "found": result.found,
+                    "kind": result.kind,
+                    "workspace_root": text(result.workspace_root),
+                    "instance": text(result.instance),
+                    "workspace_is_cwd": result.workspace_is_cwd,
+                    "course_id": result.course_id,
+                    "problem": result.problem,
+                    "advice": advice,
+                    "exit_code": code,
+                },
+                indent=2,
+                sort_keys=True,
+            ),
+            file=stream,
+        )
+        return code
+
+    why = {
+        "found": f"{INSTANCE_DIR}/tutorial.yaml is there",
+        "repository-root": "it is the repository root (it holds .git)",
+        "filesystem-root": "it is the filesystem root",
+    }[result.stop_reason]
+    count = len(result.searched)
+    w = stream.write
+    w("Belay catalogues - find-instance\n\n")
+    w(f"  searched:       {count} director{'y' if count == 1 else 'ies'}, "
+      f"from {cwd} upward\n")
+    w(f"  stopped at:     {result.stopped_at}, because {why}\n")
+    if result.found:
+        w(f"  workspace root: {result.workspace_root}"
+          f"{' (the current directory)' if result.workspace_is_cwd else ' (NOT the current directory)'}\n")
+        w(f"  instance:       {result.instance}\n")
+        w(f"  kind:           {result.kind}\n")
+        w(f"  course id:      {result.course_id or '(none readable)'}\n")
+    w("\n")
+    if result.problem:
+        w(f"problem: {result.problem}.\n")
+    elif not result.found:
+        w(f"No {INSTANCE_DIR}/tutorial.yaml was found.\n")
+    w(f"{advice}\n")
+    if result.found:
+        w("This command opened the manifest and nothing else. While "
+          "orienting, read only the manifest and STATE.md.\n")
+    return code
+
+
+# --------------------------------------------------------------------------
 # The relationship commands
 # --------------------------------------------------------------------------
 #
@@ -3698,6 +3930,13 @@ def build_parser() -> argparse.ArgumentParser:
         "status", help="report each catalogue from disk, without fetching"
     )
     status.set_defaults(run=command_status, offline=True)
+
+    find_instance = sub.add_parser(
+        "find-instance",
+        help="find tutorial/tutorial.yaml from the current directory upward, "
+        "to the repository root; takes no path",
+    )
+    find_instance.set_defaults(run=command_find_instance, offline=True)
 
     resolve = sub.add_parser(
         "resolve", help="print one entry and the bundle directory it names"
