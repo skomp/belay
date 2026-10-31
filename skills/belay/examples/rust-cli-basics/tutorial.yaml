@@ -1,6 +1,6 @@
 bundle_format: 1
 id: rust-cli-basics
-version: "1.0"
+version: "1.1"
 title: Rust Fundamentals Through a Command-Line Tool
 description: >
   Core Rust taught by building `tally`, a small command-line tool that counts
@@ -61,3 +61,8 @@ failure_modes:
 one_task_at_a_time: true
 solution_code: on-request-only
 advance_on: validated-evidence-only
+
+# Where a learner reports a defect in this course (bundle-format.md, Defect reports).
+report:
+  url: https://github.com/skomp/belay/issues/new
+  prefill: github
