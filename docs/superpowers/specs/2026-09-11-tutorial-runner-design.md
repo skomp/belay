@@ -1635,14 +1635,17 @@ for each parent, and the read block denied every one.
   directory is then a subdirectory of the workspace, so every read of `tutorial/` may ask,
   the rules' relative paths are wrong, and the commands that work from the cwd do not find
   the instance. The tutor names the workspace root and tells the learner to start the
-  session there, and continues in the current session only if the learner chooses to. The
-  command's output says this itself, so the tutor does not have to reason it out.
+  session there. It does not offer to continue from the subdirectory: the runner's commands
+  would not find the instance, and `../tutorial` as an argument is refused by the read
+  block, so the option could not work. The command's output says this itself, so the tutor
+  does not have to reason it out.
 
 Measured after the change, 2026-10-31, same host and setting, with the branch as
 `--plugin-dir`: from an empty non-Git directory the tutor's first command was
 `belay-catalogs find-instance`, which searched seven directories to `/` and exited 1 with no
 denial; from a subdirectory two levels below an instance it named the workspace root,
-recommended a new session there, and opened nothing in `tutorial/` before the learner chose.
+recommended a new session there, offered no way to continue from the subdirectory, and
+opened nothing in `tutorial/`; `permission_denials` was empty.
 
 `runner-protocol.md` section 1, **Finding the instance**, is the behaviour.
 

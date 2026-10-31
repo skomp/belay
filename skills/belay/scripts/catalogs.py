@@ -3712,10 +3712,11 @@ def find_instance_advice(result: InstanceSearch) -> str:
         f"The instance is in {root}, a parent of the current directory, so "
         f"this session's paths are not the workspace's. Tell the learner the "
         f"course is in {root} and that, to continue it, they start a new "
-        f"session in {root}. Continue in this session only if the learner "
-        f"chooses to, and say first that the host may ask before every read "
-        f"of {root}/{INSTANCE_DIR}/, and that the runner's other commands work "
-        f"from the current directory and will not find the instance from here."
+        f"session in {root}. Do not teach it from this session: the runner's "
+        f"other commands work from the current directory and will not find "
+        f"the instance from here, and the host may ask before every read of "
+        f"{root}/{INSTANCE_DIR}/. Do not start a second course here either "
+        f"unless the learner asks for one."
     )
 
 
