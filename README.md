@@ -378,7 +378,7 @@ course that walks a learner through building it themselves.
 
 ## Project status
 
-Version 0.12.0. Early, in active use, and honest about its edges.
+Version 0.12.1. Early, in active use, and honest about its edges.
 
 **What works today.** Discovery across many catalogues, local or Git-hosted, with caching
 and per-source failure reporting. Materialising a course into a workspace and validating it
