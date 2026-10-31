@@ -1077,8 +1077,14 @@ Install:
 
 ```
 Claude Code:  /plugin marketplace add skomp/belay ; /plugin install belay@belay
-Codex:        codex plugin marketplace add <repo> ; codex plugin add belay
+Codex:        git clone git@github.com:skomp/belay.git ~/.local/share/belay
+              mkdir -p ~/.agents/skills
+              ln -s ~/.local/share/belay/skills/belay ~/.agents/skills/belay
 ```
+
+Codex has no working plugin route: `codex plugin add` reports success and installs no
+skill (§17). Its user skills scope follows the symlink, and `README.md` carries the same
+three commands.
 
 ### Host-neutrality rules (all verified, see §13)
 
