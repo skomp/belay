@@ -3808,6 +3808,227 @@ def test_the_reader_keeps_report_on_an_entry() -> None:
         )
 
 
+# --------------------------------------------------------------------------
+# find-instance (belay#83)
+# --------------------------------------------------------------------------
+
+
+def make_tutorial(directory: Path, *, state: bool = True, template: bool = False,
+                  manifest: str = "id: found-course\n") -> Path:
+    instance = directory / "tutorial"
+    instance.mkdir(parents=True, exist_ok=True)
+    (instance / "tutorial.yaml").write_text(manifest, encoding="utf-8")
+    if state:
+        (instance / "STATE.md").write_text("---\nstatus: active\n---\n", encoding="utf-8")
+    if template:
+        (instance / "STATE.template.md").write_text(
+            "---\nstatus: not-started\n---\n", encoding="utf-8"
+        )
+    return instance
+
+
+def find_json(env: "Env", directory: Path) -> tuple[int, dict]:
+    with in_directory(directory):
+        return env.run_json("find-instance")
+
+
+def test_find_instance() -> None:
+    print("\nfind-instance: where the instance is, and where the search stops:")
+    with temp_env() as env:
+        top = Path(os.path.realpath(env.root)) / "tree"
+        top.mkdir()
+        (top / ".git").mkdir()  # nothing above the temp tree can answer
+
+        # In the current directory.
+        ws = top / "here"
+        make_tutorial(ws)
+        code, payload = find_json(env, ws)
+        record(
+            code == cat.EXIT_FIND_INSTANCE == 0 and payload.get("kind") == "instance"
+            and payload.get("workspace_root") == str(ws)
+            and payload.get("instance") == str(ws / "tutorial")
+            and payload.get("workspace_is_cwd") is True
+            and payload.get("course_id") == "found-course"
+            and payload.get("searched") == 1 and payload.get("stop_reason") == "found",
+            "an instance in the cwd: exit 0, the root is the cwd, the id is read",
+            f"exit {code} {payload!r}",
+        )
+        with in_directory(ws):
+            code, out = env.run("find-instance")
+        record(
+            code == 0 and f"workspace root: {ws} (the current directory)" in out
+            and "course id:      found-course" in out and "Go to step 2" in out,
+            "the text report names the root as the current directory",
+            out,
+        )
+
+        # Two levels up, in a tree with no .git between.
+        parent = top / "parent"
+        make_tutorial(parent)
+        deep = parent / "src" / "deep"
+        deep.mkdir(parents=True)
+        code, payload = find_json(env, deep)
+        record(
+            code == 0 and payload.get("workspace_root") == str(parent)
+            and payload.get("workspace_is_cwd") is False
+            and payload.get("searched") == 3
+            and payload.get("searched_dirs") == [str(deep), str(deep.parent), str(parent)]
+            and f"start a new session in {parent}" in (payload.get("advice") or ""),
+            "an instance two levels up: exit 0, the parent is the root, NOT the cwd, "
+            "and the advice is to start the session there",
+            f"exit {code} {payload!r}",
+        )
+        with in_directory(deep):
+            code, out = env.run("find-instance")
+        record(
+            code == 0 and "(NOT the current directory)" in out
+            and f"start a new session in {parent}" in out
+            and "may ask before every read" in out,
+            "the text report says the root is not the cwd and what to tell the learner",
+            out,
+        )
+
+        # A .git between the cwd and an instance above it stops the search.
+        repo = parent / "src" / "repo"
+        (repo / "inner").mkdir(parents=True)
+        (repo / ".git").write_text("gitdir: /elsewhere\n", encoding="utf-8")
+        code, payload = find_json(env, repo / "inner")
+        record(
+            code == cat.EXIT_FIND_NONE == 1 and payload.get("found") is False
+            and payload.get("stop_reason") == "repository-root"
+            and payload.get("stopped_at") == str(repo)
+            and payload.get("workspace_root") is None
+            and payload.get("searched_dirs") == [str(repo / "inner"), str(repo)]
+            and str(parent / "tutorial") not in json.dumps(payload),
+            "a .git file between the cwd and an instance above stops the search: "
+            "exit 1, the instance above is not reported",
+            f"exit {code} {payload!r}",
+        )
+        with in_directory(repo / "inner"):
+            code, out = env.run("find-instance")
+        record(
+            code == 1 and "it is the repository root (it holds .git)" in out
+            and str(parent / "tutorial") not in out,
+            "the text report says it stopped at the repository root",
+            out,
+        )
+
+        # An instance at the repository root itself is found.
+        make_tutorial(repo)
+        code, payload = find_json(env, repo / "inner")
+        record(
+            code == 0 and payload.get("workspace_root") == str(repo),
+            "an instance at the repository root is found before the stop",
+            f"exit {code} {payload!r}",
+        )
+
+        # Nothing at all, inside the marked tree: stops at the marker.
+        empty = top / "empty" / "a" / "b"
+        empty.mkdir(parents=True)
+        code, payload = find_json(env, empty)
+        record(
+            code == 1 and payload.get("stop_reason") == "repository-root"
+            and payload.get("stopped_at") == str(top) and payload.get("searched") == 4,
+            "nothing found: exit 1, stopped at the temp tree's own .git, 4 directories",
+            f"exit {code} {payload!r}",
+        )
+
+        # A bundle at tutorial/.
+        bundle_ws = top / "bundle"
+        make_tutorial(bundle_ws, state=False, template=True)
+        code, payload = find_json(env, bundle_ws)
+        record(
+            code == cat.EXIT_FIND_UNUSABLE == 2 and payload.get("kind") == "bundle"
+            and "it is a bundle, not an instance" in (payload.get("problem") or "")
+            and payload.get("course_id") == "found-course",
+            "a bundle at tutorial/: exit 2, named as a bundle",
+            f"exit {code} {payload!r}",
+        )
+        with in_directory(bundle_ws):
+            code, out = env.run("find-instance")
+        record(
+            code == 2 and "kind:           bundle" in out and "not an instance" in out
+            and "do not materialize over it" in out,
+            "the text report names the bundle and says not to teach from it",
+            out,
+        )
+
+        # Both state files, and neither.
+        both = top / "both"
+        make_tutorial(both, state=True, template=True)
+        code, payload = find_json(env, both)
+        record(
+            code == 2 and payload.get("kind") == "inconsistent"
+            and "both STATE.md and STATE.template.md" in (payload.get("problem") or ""),
+            "both state files: exit 2, inconsistent",
+            f"exit {code} {payload!r}",
+        )
+        neither = top / "neither"
+        make_tutorial(neither, state=False)
+        code, payload = find_json(env, neither)
+        record(
+            code == 2 and payload.get("kind") == "inconsistent"
+            and "neither STATE.md nor STATE.template.md" in (payload.get("problem") or ""),
+            "neither state file: exit 2, inconsistent",
+            f"exit {code} {payload!r}",
+        )
+
+        # A manifest that does not parse.
+        broken = top / "broken"
+        make_tutorial(broken, manifest="id: [unclosed\n")
+        code, payload = find_json(env, broken)
+        record(
+            code == 2 and payload.get("kind") == "unreadable-manifest"
+            and "does not parse" in (payload.get("problem") or ""),
+            "an instance whose manifest does not parse: exit 2",
+            f"exit {code} {payload!r}",
+        )
+
+        # It reads no lesson, COURSE.md or STATE.md content: unreadable files
+        # there make no difference.
+        guarded = top / "guarded"
+        instance = make_tutorial(guarded)
+        for name in ("COURSE.md", "DESIGN.md", "STATE.md"):
+            (instance / name).write_text("x", encoding="utf-8")
+            (instance / name).chmod(0)
+        try:
+            code, payload = find_json(env, guarded)
+        finally:
+            for name in ("COURSE.md", "DESIGN.md", "STATE.md"):
+                (instance / name).chmod(0o644)
+        record(
+            code == 0 and payload.get("kind") == "instance",
+            "it opens neither STATE.md nor COURSE.md nor DESIGN.md",
+            f"exit {code} {payload!r}",
+        )
+
+    # To the filesystem root. Only honest when nothing above the temp
+    # directory could answer, so that is checked first, not assumed.
+    with temp_env() as env:
+        start = Path(os.path.realpath(env.root)) / "x" / "y"
+        start.mkdir(parents=True)
+        chain = [start, *start.parents]
+        blockers = [
+            str(d) for d in chain
+            if os.path.lexists(d / ".git") or (d / "tutorial" / "tutorial.yaml").is_file()
+        ]
+        if blockers:
+            note(
+                "find-instance to the filesystem root was not exercised: "
+                f"{blockers[0]} holds .git or tutorial/tutorial.yaml"
+            )
+            return
+        code, payload = find_json(env, start)
+        record(
+            code == 1 and payload.get("stop_reason") == "filesystem-root"
+            and payload.get("stopped_at") == os.sep
+            and payload.get("searched") == len(chain),
+            f"nothing to the filesystem root: exit 1, {len(chain)} directories, "
+            "stopped at /",
+            f"exit {code} {payload!r}",
+        )
+
+
 def main() -> int:
     print("catalogs.py test suite")
     print(f"  script:      {SCRIPTS / 'catalogs.py'}")
@@ -3871,6 +4092,7 @@ def main() -> int:
         test_report_link_forms,
         test_repository_issue_page,
         test_the_reader_keeps_report_on_an_entry,
+        test_find_instance,
     ):
         try:
             test()
