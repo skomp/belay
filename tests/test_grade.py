@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Test suite for skills/belay/scripts/grade.py - the scheme and the grade store.
+"""Test suite for skills/belay/scripts/grade.py - the scheme, the store, collect and run.
 
 Run it with:  python3 tests/test_grade.py
 
@@ -7,15 +7,25 @@ No pytest. Every case points XDG_DATA_HOME at a temporary directory, so the
 real home is never touched, and asserts VALUES: paths, exit codes, what is left
 on disk. Each refusal has a control showing the same call succeeds without the
 fault.
+
+Nothing here needs docker. BELAY_CONTAINER_RUNTIME points at a stub that records
+its arguments and environment and runs the command directly. The fake cohort is
+a local bare repository; the repository URL rules refuse a local path, so a test
+gitconfig rewrites an https URL to it with url.<base>.insteadOf, and grade.py has
+no test-only way in.
 """
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
+import signal
+import stat
 import subprocess
 import sys
 import tempfile
+import time
 import traceback
 from pathlib import Path
 
@@ -161,7 +171,7 @@ def test_store_dir_follows_xdg() -> None:
             record(path == expected, "store_dir is <XDG_DATA_HOME>/belay/grading/<cohort>/<module>",
                    str(path))
             record(not (Path(tmp) / "data").exists(), "store_dir creates nothing")
-            for bad in ("../x", "a/b", "..", ""):
+            for bad in ("../x", "a/b", "..", "", gr.CACHE_NAME):
                 record(refused(gr.store_dir, "https://h/o/r", bad) is not None,
                        f"module id {bad!r} is refused")
         saved = {k: os.environ.get(k) for k in ("XDG_DATA_HOME", "HOME")}
@@ -286,9 +296,936 @@ def test_cli() -> None:
         record(not (Path(tmp) / "belay").exists(), "no command wrote anything into the store")
 
 
+
+# --------------------------------------------------------------------------
+# collect and run: the fake cohort and the stub runtime
+# --------------------------------------------------------------------------
+
+COHORT_URL = "https://cohort.invalid/acme/team-1.git"
+TOKEN_URL = "https://user:s3cr3t-t0ken@cohort.invalid/acme/team-1.git"
+IMAGE = "python:3.12-slim"
+SECRET = "sk-grading-VALUE-123456"
+UNDECLARED = "sk-trainer-PERSONAL-987"
+MOUNT = "/workspace"
+
+MODULE_YAML = """\
+id: m1
+version: 1.2.0
+validators:
+  scorer-tests: { kind: command, command: [sh, run-tests.sh] }
+  lint: { kind: command, command: [sh, lint.sh] }
+  has-readme: { kind: file-exists, path: README.md }
+  has-test: { kind: file-contains, path: src/main.py, pattern: "^def test_[a-z]+" }
+grading:
+  image: python:3.12-slim
+  env: [GRADE_KEY, GRADE_MISSING]
+  timeout_minutes: 15
+  validators:
+    scorer-tests: { points: 30, gate: true }
+    lint: { points: 10 }
+    has-readme: { points: 10 }
+    has-test: { points: 10 }
+  rubric:
+    - id: design
+      points: 20
+      standard: The choice is justified.
+"""
+
+PARTICIPANTS = {
+    "alice": {  # passes everything
+        "README.md": "alice\n",
+        "run-tests.sh": 'echo "tests ok key=$GRADE_KEY"\nexit 0\n',
+        "lint.sh": "exit 0\n",
+        "src/main.py": "def test_x():\n    pass\n",
+    },
+    "bob": {  # fails the gate validator
+        "README.md": "bob\n",
+        "run-tests.sh": 'echo "2 failed"\nexit 1\n',
+        "lint.sh": "exit 0\n",
+        "src/main.py": "def test_y():\n    pass\n",
+    },
+    "carol": {  # passes the gate, fails the rest but the readme
+        "README.md": "carol\n",
+        "run-tests.sh": "exit 0\n",
+        "lint.sh": 'echo "lint: bad"\nexit 3\n',
+        "src/main.py": "print('no tests')\n",
+    },
+}
+
+HOSTILE_BRANCHES = ("-x/m1", "$(touch${IFS}pwned)/m1", "a;touch${IFS}pwned/m1", "deep/er/m1")
+
+STUB = """#!{python}
+import json, os, signal, subprocess, sys
+RECORD = {record!r}
+INFO_FAILS = {info_fails!r}
+KILL_FAILS = {kill_fails!r}
+args = sys.argv[1:]
+entry = dict(argv=args, env=dict(os.environ))
+cmd = args[0] if args else ""
+parsed = None
+if cmd == "run":
+    i = 1
+    parsed = dict(rm=False, name=None, network=None, mounts=[], workdir=None, env=[])
+    while args[i].startswith("-"):
+        flag = args[i]
+        if flag == "--rm":
+            parsed["rm"] = True; i += 1; continue
+        value = args[i + 1]
+        if flag == "--name": parsed["name"] = value
+        elif flag == "--network": parsed["network"] = value
+        elif flag == "-v": parsed["mounts"].append(value)
+        elif flag == "-w": parsed["workdir"] = value
+        elif flag == "-e": parsed["env"].append(value)
+        else: parsed.setdefault("unknown", []).append(flag)
+        i += 2
+    parsed["image"] = args[i]
+    parsed["command"] = args[i + 1:]
+    src = parsed["mounts"][0].split(":")[0]
+    git = os.path.join(src, ".git")
+    entry["checkout"] = dict(
+        src=src,
+        files=sorted(n for n in os.listdir(src) if n != ".git"),
+        git_config=open(os.path.join(git, "config")).read() if os.path.isdir(git) else None,
+        hooks_dir=os.path.exists(os.path.join(git, "hooks")),
+        heads=sorted(os.path.relpath(os.path.join(d, f), os.path.join(git, "refs", "heads"))
+                     for d, _, fs in os.walk(os.path.join(git, "refs", "heads")) for f in fs),
+    )
+entry["parsed"] = parsed
+with open(RECORD, "a") as handle:
+    handle.write(json.dumps(entry) + "\\n")
+if cmd == "info":
+    sys.exit(1 if INFO_FAILS else 0)
+if cmd == "pull":
+    sys.exit(0)
+if cmd == "kill":
+    if KILL_FAILS:
+        print("kill refused", file=sys.stderr)
+        sys.exit(1)
+    os.kill(int(open(RECORD + "." + args[1]).read()), signal.SIGKILL)
+    sys.exit(0)
+if cmd == "run":
+    with open(RECORD + "." + parsed["name"], "w") as handle:
+        handle.write(str(os.getpid()))
+    os.chdir(src)
+    env = dict(PATH=os.environ.get("PATH", ""))
+    for name in parsed["env"]:
+        if name in os.environ:
+            env[name] = os.environ[name]
+    command = [a.replace("{mount}", src) for a in parsed["command"]]
+    os.execvpe(command[0], command, env)
+sys.exit(2)
+"""
+
+
+def git_fixture(*args: str, cwd: Path) -> str:
+    env = {"PATH": os.environ["PATH"], "HOME": str(cwd), "GIT_CONFIG_NOSYSTEM": "1",
+           "GIT_CONFIG_GLOBAL": os.devnull}
+    done = subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t.invalid",
+                           "-c", "init.defaultBranch=main", *args],
+                          cwd=cwd, env=env, capture_output=True, text=True, check=True)
+    return done.stdout.strip()
+
+
+_orphans = iter(range(10 ** 6))
+
+
+def commit_branch(work: Path, branch: str, files: dict[str, str | tuple]) -> str:
+    """One orphan commit holding exactly `files`; a tuple value is a symlink target."""
+    git_fixture("checkout", "-q", "--orphan", f"w{next(_orphans)}", cwd=work)
+    git_fixture("rm", "-rfq", "--ignore-unmatch", ".", cwd=work)
+    for rel, content in files.items():
+        path = work / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if isinstance(content, tuple):
+            path.symlink_to(content[0])
+        else:
+            path.write_text(content)
+    git_fixture("add", "-A", cwd=work)
+    git_fixture("commit", "-q", "--allow-empty", "-m", branch, cwd=work)
+    return git_fixture("rev-parse", "HEAD", cwd=work)
+
+
+class Scene:
+    """A temp world: a bare cohort, a stub runtime, a data home, a test git config."""
+
+    def __init__(self, tmp: str, *, info_fails: bool = False, kill_fails: bool = False,
+                 module_yaml: str = MODULE_YAML) -> None:
+        self.tmp = Path(tmp).resolve()
+        self.data = self.tmp / "data"
+        self.bare = self.tmp / "cohort.git"
+        self.work = self.tmp / "work"
+        self.cwd = self.tmp / "cwd"
+        self.cwd.mkdir()
+        self.work.mkdir()
+        git_fixture("init", "-q", "--bare", str(self.bare), cwd=self.tmp)
+        git_fixture("init", "-q", str(self.work), cwd=self.tmp)
+        self.commits: dict[str, str] = {}
+        for who, files in PARTICIPANTS.items():
+            self.add_branch(f"{who}/m1", files)
+        self.add_branch("main", {"README.md": "cohort\n"})
+        self.add_branch("alice/m2", {"README.md": "another module\n"})
+        config = self.tmp / "gitconfig"
+        config.write_text(
+            f'[url "file://{self.bare}"]\n\tinsteadOf = {COHORT_URL}\n\tinsteadOf = {TOKEN_URL}\n')
+        self.record = self.tmp / "stub-record.jsonl"
+        self.stub = self.tmp / "stub-runtime"
+        self.write_stub(self.stub, info_fails, kill_fails)
+        self.bundle = self.tmp / "bundle"
+        self.bundle.mkdir()
+        (self.bundle / "tutorial.yaml").write_text(module_yaml)
+        self.env = {
+            "PATH": os.environ["PATH"],
+            "HOME": str(self.tmp / "home"),
+            "XDG_DATA_HOME": str(self.data),
+            "XDG_RUNTIME_DIR": str(self.tmp / "run"),
+            "GIT_CONFIG_GLOBAL": str(config),
+            "GIT_CONFIG_NOSYSTEM": "1",
+            "BELAY_CONTAINER_RUNTIME": str(self.stub),
+            "GRADE_KEY": SECRET,
+            "UNDECLARED_SECRET": UNDECLARED,
+            "SSH_AUTH_SOCK": "/run/agent.sock",
+            "GH_TOKEN": "gh-token-value",
+            "GIT_ASKPASS": "/usr/bin/askpass",
+            "TMPDIR": str(self.tmp),
+        }
+
+    def write_stub(self, path: Path, info_fails: bool = False, kill_fails: bool = False) -> None:
+        path.write_text(STUB.replace("{python}", sys.executable)
+                        .replace("{record!r}", repr(str(self.record)))
+                        .replace("{info_fails!r}", repr(info_fails))
+                        .replace("{kill_fails!r}", repr(kill_fails))
+                        .replace("{mount}", MOUNT))
+        path.chmod(path.stat().st_mode | stat.S_IXUSR)
+
+    def add_branch(self, branch: str, files: dict) -> None:
+        self.commits[branch] = commit_branch(self.work, branch, files)
+        git_fixture("push", "-q", str(self.bare), f"+HEAD:refs/heads/{branch}", cwd=self.work)
+
+    def add_hostile_branches(self) -> None:
+        sha = self.commits["alice/m1"]
+        for branch in HOSTILE_BRANCHES:
+            git_fixture("--git-dir", str(self.bare), "update-ref", f"refs/heads/{branch}", sha,
+                        cwd=self.tmp)
+
+    def cli(self, *args: str, prelude: str = "", env: dict | None = None) -> tuple[int, str, str]:
+        if prelude:
+            argv = [sys.executable, "-B", "-c",
+                    "import sys\nsys.path.insert(0, " + repr(str(SCRIPTS)) + ")\nimport grade\n"
+                    + prelude + "\nsys.exit(grade.main(sys.argv[1:]))", *args]
+        else:
+            argv = [sys.executable, "-B", str(SCRIPT), *args]
+        done = subprocess.run(argv, capture_output=True, text=True, cwd=self.cwd,
+                              env=self.env if env is None else env)
+        return done.returncode, done.stdout, done.stderr
+
+    def run_all(self, *extra: str, url: str = COHORT_URL, prelude: str = "") -> tuple[int, str, str]:
+        return self.cli("run", "--bundle", str(self.bundle), url, "m1", *extra, prelude=prelude)
+
+    def records(self, command: str | None = None) -> list[dict]:
+        if not self.record.exists():
+            return []
+        rows = [json.loads(line) for line in self.record.read_text().splitlines()]
+        return [r for r in rows if command is None or r["argv"][:1] == [command]]
+
+    def store(self) -> Path:
+        with Env(self.data):
+            return gr.store_dir(COHORT_URL, "m1")
+
+    def results(self) -> dict:
+        return json.loads((self.store() / "run.json").read_text())
+
+    def leftovers(self) -> list[str]:
+        return sorted(p.name for p in self.tmp.glob("belay-grade-*"))
+
+
+LIMIT_PRELUDE = "grade.SECONDS_PER_MINUTE = 3"  # timeout_minutes: 1 is three seconds
+
+
+def hang_yaml(validators: str, order: str) -> str:
+    return f"""\
+id: m1
+validators:
+{validators}
+grading:
+  image: python:3.12-slim
+  timeout_minutes: 1
+  validators:
+{order}
+  rubric: []
+"""
+
+
+def test_classify_branch() -> None:
+    table = [
+        ("alice/m1", "participant", "alice"),
+        ("A.b_c-9/m1", "participant", "A.b_c-9"),
+        ("a b/m1", "refused", None),
+        ("../x/m1", "refused", None),
+        ("-x/m1", "refused", None),
+        ("../m1", "refused", None),
+        ("./m1", "refused", None),
+        ("/m1", "refused", None),
+        ("a/b/m1", "refused", None),
+        ("$(id)/m1", "refused", None),
+        ("a;b/m1", "refused", None),
+        ("a\n/m1", "refused", None),
+        ("aé/m1", "refused", None),
+        ("main", "other", None),
+        ("alice/m2", "other", None),
+        ("alice/m1x", "other", None),
+        ("m1", "other", None),
+    ]
+    for branch, kind, who in table:
+        got = gr.classify_branch(branch, "m1")
+        record(got == (kind, who), f"branch {branch!r} is {kind}", str(got))
+
+
+def test_collect() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = Scene(tmp)
+        scene.add_hostile_branches()
+        code, out, err = scene.cli("collect", COHORT_URL, "m1")
+        record(code == 0, "collect succeeds", f"{code} {err}")
+        cohort = gr.cohort_name(COHORT_URL)
+        record(f"cohort: {cohort}" in out, "collect prints the cohort name forget takes", out)
+        lines = out.splitlines()
+        for who in PARTICIPANTS:
+            sha = scene.commits[f"{who}/m1"]
+            row = [l for l in lines if l.split()[:2] == [who, f"{who}/m1"]]
+            record(len(row) == 1 and sha[:12] in row[0] and "T" in row[0].split()[3],
+                   f"collect lists {who} with branch, last commit and date", str(row))
+        head_refused = lines.index(next(l for l in lines if l.startswith("refused")))
+        head_other = lines.index(next(l for l in lines if l.startswith("no convention")))
+        refused_rows = [l.strip() for l in lines[head_refused + 1:head_other] if l.strip()]
+        other_rows = [l.strip() for l in lines[head_other + 1:] if l.strip()]
+        record(sorted(refused_rows) == sorted(HOSTILE_BRANCHES),
+               "hostile participant names are listed apart as refused", str(refused_rows))
+        record(sorted(other_rows) == ["alice/m2", "main"],
+               "branches outside the convention are listed apart", str(other_rows))
+        participants_block = "\n".join(lines[:head_refused])
+        record(not any(b in participants_block for b in HOSTILE_BRANCHES),
+               "no hostile name is in the participants' block", participants_block)
+        record(not (scene.cwd / "pwned").exists(), "a branch name is never run through a shell")
+
+        cache = scene.data / "belay" / "grading" / cohort / ".repo.git"
+        record(cache.is_dir() and not (cache / ".git").exists(),
+               "the cache is a bare repository in the store", str(cache))
+        record(not (cache / "hooks").exists(), "the cache has no hooks directory")
+        # A second collect updates the cache: a moved and a deleted branch show.
+        scene.add_branch("alice/m1", {"README.md": "moved\n"})
+        git_fixture("--git-dir", str(scene.bare), "update-ref", "-d", "refs/heads/carol/m1", cwd=scene.tmp)
+        code, out, err = scene.cli("collect", COHORT_URL, "m1")
+        record(scene.commits["alice/m1"][:12] in out, "collect again shows a moved branch", out)
+        record("carol" not in out, "collect again drops a deleted branch", out)
+        code, out, err = scene.cli("forget", cohort)
+        record(code == 0 and not (scene.data / "belay" / "grading" / cohort).exists(),
+               "forget with the printed name removes the cohort, cache included", f"{code} {out}{err}")
+
+
+def test_collect_keeps_credentials_out() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = Scene(tmp)
+        code, out, err = scene.cli("collect", TOKEN_URL, "m1")
+        record(code == 0, "collect accepts a URL holding a credential", f"{code} {err}")
+        record("s3cr3t" not in out + err, "the credential is not printed", out + err)
+        root = scene.data / "belay" / "grading"
+
+        def holding() -> list[str]:
+            return [str(p) for p in root.rglob("*") if p.is_file() and b"s3cr3t" in p.read_bytes()]
+
+        record(holding() == [], "the credential is in no file of the cache", str(holding()))
+        canary = root / "canary"
+        canary.write_text("s3cr3t")
+        record(holding() == [str(canary)], "control: that search does find a planted credential")
+        canary.unlink()
+        # A failing fetch's message does not carry it either.
+        broken = dict(scene.env, GIT_CONFIG_GLOBAL=os.devnull)
+        code, out, err = scene.cli("collect", "https://user:s3cr3t-t0ken@127.0.0.1:9/acme/x.git", "m1", env=broken)
+        record(code != 0 and "s3cr3t" not in out + err,
+               "a failed fetch says so with no credential in the message", f"{code} {out}{err}")
+
+
+def test_collect_url_rules() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = Scene(tmp)
+        for bad in (str(scene.bare), f"file://{scene.bare}", "http://h/o/r", "ext::sh -c id",
+                    "https://h/o/r;id", "https://-oProxy/x"):
+            for command in (("collect", bad, "m1"),
+                            ("run", "--bundle", str(scene.bundle), bad, "m1")):
+                code, out, err = scene.cli(*command)
+                record(code == gr.EXIT_REFUSED and "not a Git URL" in err,
+                       f"{command[0]} refuses repository {bad!r}", f"{code} {err}")
+        code, out, err = scene.cli("collect", "-upload-pack=x", "m1")
+        record(code == gr.EXIT_USAGE, "an option as the repository is a usage error", f"{code} {err}")
+        code, out, err = scene.cli("collect", "--", "-upload-pack=x", "m1")
+        record(code == gr.EXIT_REFUSED and "not a Git URL" in err,
+               "an option as the repository after -- is refused", f"{code} {err}")
+        record(not scene.data.exists(), "a refused URL created nothing")
+        record(scene.records() == [], "a refused URL ran nothing")
+        code, out, err = scene.cli("collect", COHORT_URL, "../m1")
+        record(code == gr.EXIT_USAGE and not scene.data.exists(), "a module id with a slash is refused",
+               f"{code} {err}")
+        with_tree = scene.tmp / "tree"
+        with_tree.mkdir()
+        git_fixture("init", "-q", str(with_tree), cwd=scene.tmp)
+        env = dict(scene.env, XDG_DATA_HOME=str(with_tree / "data"))
+        code, out, err = scene.cli("collect", COHORT_URL, "m1", env=env)
+        record(code == gr.EXIT_REFUSED and "work tree" in err and not (with_tree / "data").exists(),
+               "collect refuses a store inside a Git work tree", f"{code} {err}")
+
+
+def test_run_results() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = Scene(tmp)
+        scene.add_hostile_branches()
+        scene.cli("collect", COHORT_URL, "m1")
+        code, out, err = scene.run_all()
+        record(code == 0, "run succeeds", f"{code} {out} {err}")
+        data = scene.results()
+        record(sorted(data["branches"]) == ["alice", "bob", "carol"],
+               "exactly the three conforming branches are graded", str(sorted(data["branches"])))
+        expected = {
+            "alice": dict(zip(("scorer-tests", "lint", "has-readme", "has-test"), (True, True, True, True))),
+            "bob": dict(zip(("scorer-tests", "lint", "has-readme", "has-test"), (False, True, True, True))),
+            "carol": dict(zip(("scorer-tests", "lint", "has-readme", "has-test"), (True, False, True, False))),
+        }
+        for who, want in expected.items():
+            branch = data["branches"][who]
+            got = {k: v["passed"] for k, v in branch["validators"].items()}
+            record(got == want, f"{who}: each validator's result", str(got))
+            record(list(branch["validators"]) == list(want),
+                   f"{who}: results keep the declared order", str(list(branch["validators"])))
+            record(branch["commit"] == scene.commits[f"{who}/m1"] and branch["branch"] == f"{who}/m1",
+                   f"{who}: the graded commit is recorded", str(branch["commit"]))
+            record(branch["validators"]["scorer-tests"]["gate"] is True
+                   and branch["validators"]["lint"]["gate"] is False,
+                   f"{who}: the gate flag follows the scheme")
+        bob = data["branches"]["bob"]["validators"]["scorer-tests"]
+        record("2 failed" in bob["output"] and "exit status 1" in bob["reason"],
+               "a failed command keeps its output and says why", str(bob))
+        carol_lint = data["branches"]["carol"]["validators"]["lint"]
+        record("lint: bad" in carol_lint["output"] and "exit status 3" in carol_lint["reason"],
+               "the exit status is reported", str(carol_lint))
+        record(data["module"] == "m1" and data["bundle_version"] == "1.2.0"
+               and data["cohort"] == gr.cohort_name(COHORT_URL),
+               "the working file names the module, version and cohort", str(data)[:200])
+        record(sorted(data["refused"]) == sorted(HOSTILE_BRANCHES), "the working file lists refused branches",
+               str(data["refused"]))
+        for branch in HOSTILE_BRANCHES:
+            record(branch in out, f"run lists {branch!r} as not graded", out)
+        record(not (scene.cwd / "pwned").exists() and not any(
+            b in " ".join(r["argv"]) for r in scene.records() for b in HOSTILE_BRANCHES),
+            "no hostile branch name reached the runtime or a shell")
+        record("alice (alice/m1" in out and "lint  FAIL: exit status 3" in out
+               and "scorer-tests (gate)  FAIL: exit status 1" in out and "has-readme  pass" in out,
+               "the summary reports each branch's results", out)
+        record(scene.leftovers() == [], "every checkout is removed", str(scene.leftovers()))
+        store = scene.store()
+        record(stat.S_IMODE((store / "run.json").stat().st_mode) == 0o600,
+               "the working file is private to the trainer")
+
+
+def test_container_command() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = Scene(tmp)
+        scene.cli("collect", COHORT_URL, "m1")
+        scene.run_all()
+        runs = scene.records("run")
+        record(len(runs) == 6, "only command validators reach the container: 2 per branch",
+               str(len(runs)))
+        names = set()
+        for row in runs:
+            p = row["parsed"]
+            src = row["checkout"]["src"]
+            names.add(p["name"])
+            want = ["run", "--rm", "--name", p["name"], "--network", "none",
+                    "-v", f"{src}:{MOUNT}", "-w", MOUNT, "-e", "GRADE_KEY",
+                    IMAGE, "sh", p["command"][1]]
+            record(row["argv"] == want, "the container command is exactly the declared shape",
+                   str(row["argv"]))
+            record(len(p["mounts"]) == 1 and src.startswith(str(scene.tmp)) and "unknown" not in p,
+                   "exactly one mount, the checkout", str(p["mounts"]))
+            env = row["env"]
+            record(env.get("GRADE_KEY") == SECRET, "a declared variable's value reaches the runtime's env")
+            allowed = set(gr.RUNTIME_ENV_KEYS) | {"GRADE_KEY", "LC_CTYPE"}  # Python's own locale coercion
+            record(set(env) <= allowed, "the runtime's env holds only what it needs and what is declared",
+                   str(sorted(set(env) - allowed)))
+            record("UNDECLARED_SECRET" not in env and "GH_TOKEN" not in env and "SSH_AUTH_SOCK" not in env
+                   and "GIT_ASKPASS" not in env and "GIT_CONFIG_GLOBAL" not in env,
+                   "no undeclared variable and no git access reaches the runtime")
+            record(env.get("XDG_RUNTIME_DIR") == scene.env["XDG_RUNTIME_DIR"]
+                   and env.get("HOME") == scene.env["HOME"] and "PATH" in env,
+                   "the runtime keeps PATH, HOME and XDG_RUNTIME_DIR")
+            joined = " ".join(row["argv"])
+            record(SECRET not in joined and UNDECLARED not in joined,
+                   "no value is on any command line")
+            co = row["checkout"]
+            record(co["git_config"] is not None and "url" not in co["git_config"]
+                   and "remote" not in co["git_config"] and "cohort" not in co["git_config"],
+                   "the checkout's git config has no remote", str(co["git_config"]))
+            record(co["hooks_dir"] is False, "the checkout has no hooks directory")
+            record(len(co["heads"]) == 1 and co["heads"][0] in {f"{w}/m1" for w in PARTICIPANTS},
+                   "the checkout holds only this participant's branch", str(co["heads"]))
+            record("README.md" in co["files"] and "src" in co["files"], "the files are checked out",
+                   str(co["files"]))
+            record(not Path(src).exists(), "the mounted checkout is gone afterwards", src)
+        record(len(names) == 6, "each container gets its own generated name", str(names))
+        for row in scene.records():
+            if row["argv"][0] != "run":
+                record("GRADE_KEY" not in row["env"],
+                       f"`{row['argv'][0]}` does not receive the declared variables")
+        record(scene.records("info") != [], "the runtime is probed first")
+        record([r["argv"] for r in scene.records("pull")] == [["pull", IMAGE]],
+               "the image is pulled once, before any branch's clock starts",
+               str(scene.records("pull")))
+        (scene.bundle / "tutorial.yaml").write_text(
+            MODULE_YAML.replace("  env: [GRADE_KEY, GRADE_MISSING]\n", "  network: true\n"))
+        scene.record.unlink()
+        scene.run_all("--only", "alice")
+        runs = scene.records("run")
+        record(runs and all("--network" not in r["argv"] for r in runs),
+               "network: true passes no --network flag", str(runs[0]["argv"]))
+        record(all(not r["parsed"]["env"] and "GRADE_KEY" not in r["env"] for r in runs),
+               "with no declared env, none is passed")
+
+
+def test_env_warning_and_masking() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = Scene(tmp)
+        scene.cli("collect", COHORT_URL, "m1")
+        code, out, err = scene.run_all()
+        record(code == 0 and "GRADE_MISSING" in err and "warning" in err,
+               "a missing declared variable warns and the run continues", f"{code} {err}")
+        record(any("GRADE_MISSING" in w for w in scene.results()["warnings"]),
+               "the warning is in the working file")
+        record(all("GRADE_MISSING" not in r["argv"] for r in scene.records("run")),
+               "a missing variable is not passed")
+        alice = scene.results()["branches"]["alice"]["validators"]["scorer-tests"]
+        record("tests ok key=[masked:GRADE_KEY]" in alice["output"],
+               "a declared value is masked in stored output", alice["output"])
+        text = (scene.store() / "run.json").read_text()
+        record(SECRET not in text and SECRET not in out and SECRET not in err,
+               "the value is nowhere in the working file or the output")
+
+
+def test_clean_output() -> None:
+    limit = gr.OUTPUT_LIMIT
+    secret = "ABCDEFGHIJKLMNOPQRST"
+    secrets = {"KEY": secret}
+
+    def no_part(text: str) -> bool:
+        # no run of 5+ characters of the secret survives
+        return not any(secret[i:i + 5] in text for i in range(len(secret) - 4))
+
+    straddling = ("x" * (limit - 8) + secret + "y" * 100).encode()
+    text = gr.clean_output(straddling, False, secrets)
+    record(no_part(text), "a value straddling the size limit is masked, not cut in half", text[-60:])
+    control = straddling.decode()[:limit]
+    record(not no_part(control), "control: truncating first would have left part of the value")
+    record(text.endswith(gr.TRUNCATED_MARK) and len(text) <= limit + len(gr.TRUNCATED_MARK),
+           "output over the limit is truncated and says so", str(len(text)))
+    record(gr.clean_output(b"short", False, secrets) == "short", "short output is unchanged")
+    many = (secret * 1000 + secret[:9]).encode()
+    text = gr.clean_output(many, True, secrets)
+    record(no_part(text) and secret[:9] not in text,
+           "a value cut by the capture cap itself does not survive, even after masks shrink the text",
+           text[-60:])
+    record(gr.TRUNCATED_MARK in text, "a capped capture says it was truncated")
+    text = gr.clean_output(b"key=ABC and key=ABCDEF", False, {"A": "ABC", "B": "ABCDEF", "C": ""})
+    record(text == "key=[masked:A] and key=[masked:B]",
+           "the longer value is masked first, and an empty value masks nothing", text)
+    text = gr.clean_output(b"x caf\xe9 y", False, {"KEY": "caf\udce9"})
+    record(text == "x [masked:KEY] y", "a value that is not UTF-8 is masked too", repr(text))
+    text = gr.clean_output(b"\xff\xfe binary " + secret.encode(), False, secrets)
+    record(secret not in text and "[masked:KEY]" in text, "undecodable bytes do not stop masking", text)
+
+
+def test_huge_output_end_to_end() -> None:
+    yaml = hang_yaml(
+        '  flood: { kind: command, command: [sh, -c, "head -c 3000000 /dev/zero | tr \\"\\\\000\\" x; echo ; exit 1"] }',
+        "    flood: { points: 10 }")
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = Scene(tmp, module_yaml=yaml)
+        scene.cli("collect", COHORT_URL, "m1")
+        code, out, err = scene.run_all("--only", "alice")
+        got = scene.results()["branches"]["alice"]["validators"]["flood"]
+        record(code == 0 and got["passed"] is False and "exit status 1" in got["reason"],
+               "a flood of output neither blocks the run nor loses the exit status", f"{code} {err} {got['reason']}")
+        record(gr.TRUNCATED_MARK in got["output"]
+               and len(got["output"]) <= gr.OUTPUT_LIMIT + len(gr.TRUNCATED_MARK),
+               "stored output is cut to the fixed size", str(len(got["output"])))
+
+
+def test_time_limit() -> None:
+    yaml = hang_yaml(
+        '  quick: { kind: command, command: [sh, -c, "echo fine"] }\n'
+        '  hang: { kind: command, command: [sh, -c, "echo started; sleep 60"] }\n'
+        '  after: { kind: command, command: [sh, -c, "echo after"] }\n'
+        '  has-readme: { kind: file-exists, path: README.md }',
+        "    quick: { points: 10 }\n    hang: { points: 10, gate: true }\n"
+        "    after: { points: 10 }\n    has-readme: { points: 10 }")
+    for kill_fails in (False, True):
+        with tempfile.TemporaryDirectory() as tmp:
+            scene = Scene(tmp, module_yaml=yaml, kill_fails=kill_fails)
+            scene.cli("collect", COHORT_URL, "m1")
+            began = time.monotonic()
+            code, out, err = scene.run_all("--only", "alice", prelude=LIMIT_PRELUDE)
+            took = time.monotonic() - began
+            data = scene.results()["branches"]["alice"]
+            got = data["validators"]
+            tag = "kill refused: " if kill_fails else ""
+            record(code == 0 and took < 40, tag + "a hanging validator does not hang the run",
+                   f"{code} {took:.1f}s {err}")
+            record(data["timed_out"] is True, tag + "the branch is marked as having hit its limit")
+            record(got["quick"]["passed"] is True and got["has-readme"]["passed"] is True,
+                   tag + "what finished before the limit keeps its result", str(got))
+            record(got["hang"]["passed"] is False and "time limit" in got["hang"]["reason"]
+                   and "started" in got["hang"]["output"] and got["hang"]["gate"] is True,
+                   tag + "the hanging validator fails with the reason and its output so far", str(got["hang"]))
+            record(got["after"]["passed"] is False and "time limit" in got["after"]["reason"]
+                   and "not run" in got["after"]["reason"],
+                   tag + "the remaining validator counts as failed, with the reason", str(got["after"]))
+            runs = scene.records("run")
+            record([r["parsed"]["command"][-1] for r in runs] == ["echo fine", "echo started; sleep 60"],
+                   tag + "the remaining validator never starts a container", str(len(runs)))
+            kills = scene.records("kill")
+            hang = runs[1]["parsed"]["name"]
+            record([k["argv"] for k in kills] == [["kill", hang]],
+                   tag + "the time limit issues `<runtime> kill <the generated name>`", str(kills))
+            record(runs[1]["parsed"]["rm"] is True, tag + "the container runs with --rm")
+            record(scene.leftovers() == [], tag + "the checkout is removed after a timeout",
+                   str(scene.leftovers()))
+            warned = hang in err and any(hang in w for w in scene.results()["warnings"])
+            record(warned is kill_fails, tag + "a failed kill warns naming the container; a good one does not",
+                   err)
+
+
+def test_interrupted_run_kills_the_container() -> None:
+    yaml = hang_yaml('  hang: { kind: command, command: [sh, -c, "sleep 60"] }',
+                     "    hang: { points: 10 }")
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = Scene(tmp, module_yaml=yaml)
+        scene.cli("collect", COHORT_URL, "m1")
+        proc = subprocess.Popen(
+            [sys.executable, "-B", str(SCRIPT), "run", "--bundle", str(scene.bundle), COHORT_URL, "m1",
+             "--only", "alice"], env=scene.env, cwd=scene.cwd,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        waited = 0.0
+        while not scene.records("run") and waited < 30:
+            time.sleep(0.1)
+            waited += 0.1
+        name = scene.records("run")[0]["parsed"]["name"]
+        pidfile = Path(str(scene.record) + "." + name)
+        while not pidfile.exists() and waited < 30:
+            time.sleep(0.1)
+            waited += 0.1
+        proc.send_signal(signal.SIGTERM)
+        code = proc.wait(timeout=30)
+        record(code != 0, "a terminated run exits non-zero", str(code))
+        record([k["argv"] for k in scene.records("kill")] == [["kill", name]],
+               "terminating the run kills the container", str(scene.records("kill")))
+        record(scene.leftovers() == [], "terminating the run removes the checkout", str(scene.leftovers()))
+
+
+def test_hanging_regex() -> None:
+    yaml = hang_yaml(
+        '  evil: { kind: file-contains, path: slow.txt, pattern: "^(a+)+$" }\n'
+        '  later: { kind: command, command: [sh, -c, "echo later"] }',
+        "    evil: { points: 10 }\n    later: { points: 10 }")
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = Scene(tmp, module_yaml=yaml)
+        scene.add_branch("erin/m1", {"slow.txt": "a" * 64 + "b\n"})
+        scene.cli("collect", COHORT_URL, "m1")
+        began = time.monotonic()
+        code, out, err = scene.run_all("--only", "erin", prelude=LIMIT_PRELUDE)
+        took = time.monotonic() - began
+        got = scene.results()["branches"]["erin"]["validators"]
+        record(code == 0 and took < 40, "a pathological regex does not hang the run", f"{code} {took:.1f}s {err}")
+        record(got["evil"]["passed"] is False and "time limit" in got["evil"]["reason"],
+               "the regex is stopped by the branch's time limit", str(got["evil"]))
+        record(got["later"]["passed"] is False and "not run" in got["later"]["reason"],
+               "the remaining validator counts as failed", str(got["later"]))
+        record(scene.records("run") == [], "no container started after the limit")
+        record(scene.leftovers() == [], "the checkout is removed", str(scene.leftovers()))
+
+
+def test_file_checks() -> None:
+    yaml = hang_yaml(
+        '  plain: { kind: file-contains, path: notes.md, pattern: "#\\\\[test\\\\]" }\n'
+        '  word: { kind: file-contains, path: notes.md, pattern: "^second line$" }\n'
+        '  no-match: { kind: file-contains, path: notes.md, pattern: "absent" }\n'
+        '  missing: { kind: file-contains, path: nope.md, pattern: "x" }\n'
+        '  a-dir: { kind: file-exists, path: sub }\n'
+        '  inner-link: { kind: file-contains, path: inner, pattern: "second" }\n'
+        '  out-link: { kind: file-contains, path: out, pattern: "." }\n'
+        '  out-exists: { kind: file-exists, path: out }\n'
+        '  via-dir: { kind: file-exists, path: etc/passwd }\n'
+        '  dotdot: { kind: file-exists, path: ../../../../etc/passwd }\n'
+        '  absolute: { kind: file-exists, path: /etc/passwd }\n'
+        '  planted: { kind: file-exists, path: planted.txt }\n'
+        '  plant: { kind: command, command: [sh, -c, "echo y > planted.txt; rm notes.md"] }\n'
+        '  after-plant: { kind: file-exists, path: notes.md }',
+        "\n".join(f"    {n}: {{ points: 10 }}" for n in (
+            "plant", "plain", "word", "no-match", "missing", "a-dir", "inner-link", "out-link",
+            "out-exists", "via-dir", "dotdot", "absolute", "planted", "after-plant")))
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = Scene(tmp, module_yaml=yaml)
+        scene.add_branch("erin/m1", {
+            "notes.md": "first #[test]\nsecond line\n",
+            "sub/x": "x\n",
+            "inner": ("notes.md",),
+            "out": ("/etc/passwd",),
+            "etc": ("/etc",),
+        })
+        scene.cli("collect", COHORT_URL, "m1")
+        code, out, err = scene.run_all("--only", "erin")
+        got = scene.results()["branches"]["erin"]["validators"]
+        want = {"plant": True, "plain": True, "word": True, "no-match": False, "missing": False,
+                "a-dir": True, "inner-link": True, "out-link": False, "out-exists": False,
+                "via-dir": False, "dotdot": False, "absolute": False,
+                "planted": False, "after-plant": True}
+        for name, passed in want.items():
+            record(got[name]["passed"] is passed, f"file check {name}: {'pass' if passed else 'fail'}",
+                   str(got[name]))
+        for name in ("out-link", "out-exists", "via-dir", "dotdot", "absolute"):
+            record("outside the checkout" in got[name]["reason"], f"{name} says it left the checkout",
+                   str(got[name]["reason"]))
+        record(all("/etc" not in r["argv"] for r in scene.records("run")),
+               "file checks run in no container")
+        record(len(scene.records("run")) == 1, "only the command validator started a container")
+
+
+def test_no_runtime() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = Scene(tmp)
+        scene.cli("collect", COHORT_URL, "m1")
+        env = dict(scene.env, BELAY_CONTAINER_RUNTIME=str(scene.tmp / "no-such-runtime"))
+        code, out, err = scene.cli("run", "--bundle", str(scene.bundle), COHORT_URL, "m1", env=env)
+        record(code == gr.EXIT_REFUSED and "no-such-runtime" in err,
+               "a named runtime that does not exist stops the run", f"{code} {err}")
+        empty = scene.tmp / "emptybin"
+        empty.mkdir()
+        env = {k: v for k, v in scene.env.items() if k != "BELAY_CONTAINER_RUNTIME"}
+        env["PATH"] = str(empty)
+        code, out, err = scene.cli("run", "--bundle", str(scene.bundle), COHORT_URL, "m1", env=env)
+        record(code == gr.EXIT_REFUSED and "docker" in err and "podman" in err,
+               "no docker and no podman stops the run", f"{code} {err}")
+        record(scene.records() == [] and scene.leftovers() == [] and not (scene.store() / "run.json").exists(),
+               "with no runtime nothing ran, nothing was checked out, nothing was written")
+        record("alice" not in out, "with no runtime no participant is reported", out)
+        # selection order
+        both = scene.tmp / "both"
+        both.mkdir()
+        for name in ("docker", "podman"):
+            scene.write_stub(both / name)
+        only = scene.tmp / "only"
+        only.mkdir()
+        scene.write_stub(only / "podman")
+        saved = {k: os.environ.get(k) for k in ("PATH", "BELAY_CONTAINER_RUNTIME")}
+        try:
+            os.environ.pop("BELAY_CONTAINER_RUNTIME", None)
+            os.environ["PATH"] = str(both)
+            record(gr.find_runtime() == str(both / "docker"), "docker is preferred", gr.find_runtime())
+            os.environ["PATH"] = str(only)
+            record(gr.find_runtime() == str(only / "podman"), "else podman", gr.find_runtime())
+            os.environ["PATH"] = str(both)
+            os.environ["BELAY_CONTAINER_RUNTIME"] = str(only / "podman")
+            record(gr.find_runtime() == str(only / "podman"), "the variable wins")
+            os.environ["BELAY_CONTAINER_RUNTIME"] = str(empty / "gone")
+            record(refused(gr.find_runtime) is not None,
+                   "a named runtime that is missing never falls back to docker")
+        finally:
+            for k, v in saved.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = Scene(tmp, info_fails=True)
+        scene.cli("collect", COHORT_URL, "m1")
+        code, out, err = scene.run_all()
+        record(code == gr.EXIT_REFUSED and "does not answer" in err, "a runtime that does not answer stops the run",
+               f"{code} {err}")
+        record(scene.records("run") == [] and not (scene.store() / "run.json").exists(),
+               "no participant is failed because the runtime is down")
+
+
+def test_run_refusals() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = Scene(tmp)
+        code, out, err = scene.run_all()
+        record(code == gr.EXIT_REFUSED and "collect" in err and scene.records("run") == [],
+               "run before collect is refused, naming collect", f"{code} {err}")
+        scene.cli("collect", COHORT_URL, "m1")
+        code, out, err = scene.run_all("--only", "alice", "nobody")
+        record(code == gr.EXIT_REFUSED and "nobody" in err and scene.records("run") == [],
+               "--only with an unknown participant runs nothing", f"{code} {err}")
+        code, out, err = scene.cli("run", "--bundle", str(scene.bundle), COHORT_URL, "m2")
+        record(code == gr.EXIT_REFUSED and "m1" in err and "m2" in err,
+               "a module id that is not the bundle's is refused", f"{code} {err}")
+        for label, bad, needle in (
+            ("a manual validator", MODULE_YAML.replace("kind: file-exists, path: README.md", "kind: manual"), "has-readme"),
+            ("a shell-string command", MODULE_YAML.replace("command: [sh, lint.sh]", 'command: "sh lint.sh"'), "lint"),
+            ("an undeclared validator", MODULE_YAML.replace("  lint: { kind: command, command: [sh, lint.sh] }\n", ""), "lint"),
+            ("a bad regex", MODULE_YAML.replace("^def test_[a-z]+", "(unclosed"), "has-test"),
+            ("no image", MODULE_YAML.replace("  image: python:3.12-slim\n", ""), "image"),
+            ("an option as image", MODULE_YAML.replace("image: python:3.12-slim", "image: --privileged"), "image"),
+            ("a variable with a value", MODULE_YAML.replace("GRADE_MISSING", '"A=b"'), "A=b"),
+        ):
+            (scene.bundle / "tutorial.yaml").write_text(bad)
+            code, out, err = scene.run_all()
+            record(code == gr.EXIT_REFUSED and needle in err and scene.records("run") == [],
+                   f"{label} is refused before anything runs", f"{code} {err}")
+        (scene.bundle / "tutorial.yaml").write_text(MODULE_YAML)
+        colon = scene.tmp / "a:b"
+        colon.mkdir()
+        code, out, err = scene.cli("run", "--bundle", str(scene.bundle), COHORT_URL, "m1",
+                                   env=dict(scene.env, TMPDIR=str(colon)))
+        record(code == gr.EXIT_REFUSED and "':'" in err and scene.records("run") == [],
+               "a temporary directory that cannot be mounted is refused", f"{code} {err}")
+        (scene.bundle / "tutorial.yaml").write_text("id: m1\nversion: 1\n")
+        code, out, err = scene.run_all()
+        record(code == gr.EXIT_REFUSED and "`grading`" in err, "a bundle with no grading is refused",
+               f"{code} {err}")
+        (scene.bundle / "tutorial.yaml").write_text(MODULE_YAML.replace("  timeout_minutes: 15\n", ""))
+        code, out, err = scene.run_all("--only", "alice")
+        record(code == 0 and scene.results()["timeout_minutes"] == gr.DEFAULT_TIMEOUT_MINUTES,
+               "control: no timeout_minutes still has a limit, the default", f"{code} {err}")
+
+
+def test_run_again_and_only() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = Scene(tmp)
+        scene.cli("collect", COHORT_URL, "m1")
+        scene.run_all()
+        before = scene.results()["branches"]["alice"]["commit"]
+        # A push after collect is not picked up by run: the trainer confirmed the list.
+        scene.add_branch("bob/m1", PARTICIPANTS["alice"])
+        code, out, err = scene.run_all("--only", "bob")
+        data = scene.results()
+        record(code == 0 and sorted(data["branches"]) == ["alice", "bob", "carol"],
+               "--only keeps the other participants' results", str(sorted(data["branches"])))
+        record(data["branches"]["alice"]["commit"] == before, "their results are untouched")
+        record(data["branches"]["bob"]["validators"]["scorer-tests"]["passed"] is False,
+               "run grades what collect fetched, not a later push")
+        record(len(scene.records("run")) == 8, "--only ran one branch more", str(len(scene.records("run"))))
+        scene.cli("collect", COHORT_URL, "m1")
+        code, out, err = scene.run_all("--only", "bob")
+        record(scene.results()["branches"]["bob"]["validators"]["scorer-tests"]["passed"] is True,
+               "after collect again, run sees the new commit")
+        (scene.bundle / "tutorial.yaml").write_text(MODULE_YAML.replace("points: 30", "points: 40"))
+        code, out, err = scene.run_all("--only", "carol")
+        data = scene.results()
+        record(sorted(data["branches"]) == ["carol"] and "scheme" in err,
+               "a changed scheme discards results made under the old one, and says so",
+               f"{sorted(data['branches'])} {err}")
+
+
+def test_exit_125_is_not_a_silent_fail() -> None:
+    yaml = hang_yaml('  boom: { kind: command, command: [sh, -c, "exit 125"] }', "    boom: { points: 10 }")
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = Scene(tmp, module_yaml=yaml)
+        scene.cli("collect", COHORT_URL, "m1")
+        code, out, err = scene.run_all("--only", "alice")
+        got = scene.results()["branches"]["alice"]["validators"]["boom"]
+        record(code == gr.EXIT_REFUSED and "125" in err and got["passed"] is False
+               and "runtime" in got["reason"],
+               "exit 125 is reported as possibly the runtime's fault, and the exit code says so",
+               f"{code} {err} {got}")
+
+
+def test_checkout_removal() -> None:
+    yaml = hang_yaml('  lock: { kind: command, command: [sh, -c, "mkdir locked; echo x > locked/f; chmod 000 locked"] }',
+                     "    lock: { points: 10 }")
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = Scene(tmp, module_yaml=yaml)
+        scene.cli("collect", COHORT_URL, "m1")
+        code, out, err = scene.run_all("--only", "alice")
+        record(code == 0 and scene.leftovers() == [], "a directory the code locked is still removed",
+               f"{scene.leftovers()} {err}")
+        # Files a rootful container left owned by root: the trainer cannot delete
+        # them, so the same image removes them, then the trainer removes the rest.
+        prelude = (
+            "real = grade.force_remove\ncalls = []\n"
+            "def fake(p):\n    calls.append(p)\n    return real(p) if len(calls) > 1 else False\n"
+            "grade.force_remove = fake")
+        scene.record.unlink()
+        code, out, err = scene.run_all("--only", "alice", prelude=prelude)
+        runs = scene.records("run")
+        record(len(runs) == 2 and runs[1]["parsed"]["command"] == ["find", MOUNT, "-mindepth", "1", "-delete"]
+               and runs[1]["parsed"]["network"] == "none" and runs[1]["parsed"]["image"] == "python:3.12-slim",
+               "a checkout the trainer cannot delete is emptied by the same image, with no network",
+               str([r["parsed"]["command"] for r in runs]))
+        record(all("GRADE_KEY" not in r["env"] for r in runs[1:]), "that cleanup gets no declared variable")
+        record(scene.leftovers() == [], "and the checkout is gone", str(scene.leftovers()))
+        prelude = "grade.force_remove = lambda p: False"
+        code, out, err = scene.run_all("--only", "alice", prelude=prelude)
+        left = scene.leftovers()
+        record(left and left[0] in err and "could not remove" in err,
+               "a checkout that cannot be removed is reported, naming it", f"{left} {err}")
+        for name in left:
+            shutil.rmtree(scene.tmp / name, ignore_errors=True)
+    # A failed checkout is removed too, and counts against no one silently.
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = Scene(tmp)
+        scene.cli("collect", COHORT_URL, "m1")
+        code, out, err = scene.run_all(
+            "--only", "alice",
+            prelude="def boom(*a):\n    raise grade.CheckoutFailed('cannot')\ngrade.make_checkout = boom")
+        got = scene.results()["branches"]["alice"]["validators"]
+        record(all(v["passed"] is False and "checkout failed" in v["reason"] for v in got.values()),
+               "a failed checkout fails each validator with the reason", str(got))
+        record(scene.records("run") == [] and scene.leftovers() == [],
+               "a failed checkout starts no container and leaves nothing", str(scene.leftovers()))
+        record(code == gr.EXIT_REFUSED, "a failed checkout shows in the exit code", str(code))
+
+
+def test_trainer_git_config_does_not_reach_the_checkout() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = Scene(tmp)
+        scene.add_branch("erin/m1", {".gitattributes": "README.md filter=canary\n", "README.md": "erin\n"})
+        scene.cli("collect", COHORT_URL, "m1")
+        hooks = scene.tmp / "trainer-hooks"
+        hooks.mkdir()
+        canary = scene.tmp / "hook-fired"
+        hook = hooks / "post-checkout"
+        hook.write_text(f"#!/bin/sh\ntouch {canary}\n")
+        hook.chmod(0o755)
+        config = scene.tmp / "trainer-gitconfig"
+        smudged = scene.tmp / "filter-fired"
+        config.write_text(f"[core]\n\thooksPath = {hooks}\n[init]\n\ttemplateDir = {hooks}\n"
+                          f"[filter \"canary\"]\n\tsmudge = \"touch {smudged}; cat\"\n"
+                          f"[url \"{scene.bare}\"]\n\tinsteadOf = x\n")
+        env = dict(scene.env, GIT_CONFIG_GLOBAL=str(config))
+        control = scene.tmp / "control"
+        subprocess.run(["git", "clone", "-q", str(scene.bare), str(control), "-b", "alice/m1"],
+                       env=env, capture_output=True, check=True)
+        record(canary.exists(), "control: that config does fire a checkout hook in plain git")
+        canary.unlink()
+        code, out, err = scene.cli("run", "--bundle", str(scene.bundle), COHORT_URL, "m1", "--only", "alice", env=env)
+        record(code == 0 and not canary.exists(), "the trainer's git hooks do not run on participant code",
+               f"{code} {err}")
+        control = scene.tmp / "control-filter"
+        subprocess.run(["git", "clone", "-q", str(scene.bare), str(control), "-b", "erin/m1"],
+                       env=env, capture_output=True, check=True)
+        record(smudged.exists(), "control: that config does run a smudge filter a branch asks for")
+        smudged.unlink()
+        code, out, err = scene.cli("run", "--bundle", str(scene.bundle), COHORT_URL, "m1", "--only", "erin", env=env)
+        record(code == 0 and not smudged.exists(),
+               "a filter in the trainer's git config does not run on participant content", f"{code} {err}")
+        co = scene.records("run")[0]["checkout"]
+        record(str(hooks) not in co["git_config"], "the trainer's git config is not in the checkout")
+
+
 def main() -> int:
     for test in (test_cohort_from_url_forms, test_store_dir_follows_xdg, test_work_tree_refusal,
-                 test_forget, test_scheme, test_cli):
+                 test_forget, test_scheme, test_cli, test_classify_branch, test_collect,
+                 test_collect_keeps_credentials_out, test_collect_url_rules, test_run_results,
+                 test_container_command, test_env_warning_and_masking, test_clean_output,
+                 test_huge_output_end_to_end, test_time_limit, test_interrupted_run_kills_the_container,
+                 test_hanging_regex, test_file_checks, test_no_runtime, test_run_refusals,
+                 test_run_again_and_only, test_exit_125_is_not_a_silent_fail, test_checkout_removal,
+                 test_trainer_git_config_does_not_reach_the_checkout):
         try:
             test()
         except Exception:  # pragma: no cover
