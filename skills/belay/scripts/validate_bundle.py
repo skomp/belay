@@ -6095,11 +6095,17 @@ def check_grading_validators(manifest: Any, report: Report) -> None:
         report.ran(48, "declared, malformed")
         return
     declared = manifest.get("validators")
+    # A null `validators:` is empty, as in check 2. A present value that is
+    # not a mapping is check 8's finding; looking names up in it would add
+    # one false "undeclared" per entry, so those tests are skipped.
+    names_unchecked = declared is not None and not isinstance(declared, dict)
     declared = declared if isinstance(declared, dict) else {}
     for name, entry in entries.items():
         where = f"tutorial.yaml (grading.validators.{name})"
         definition = declared.get(name)
-        if not isinstance(definition, dict):
+        if names_unchecked:
+            pass
+        elif not isinstance(definition, dict):
             report.add(
                 48, where,
                 f"{name!r} is not a declared validator; grading.validators "
@@ -6129,7 +6135,10 @@ def check_grading_validators(manifest: Any, report: Report) -> None:
             )
         if "gate" in entry and not isinstance(entry["gate"], bool):
             report.add(48, where, f"gate is {entry['gate']!r}; it must be true or false")
-    report.ran(48, "declared, malformed" if len(report.findings) > before else "declared")
+    status = "declared, malformed" if len(report.findings) > before else "declared"
+    if names_unchecked:
+        status += "; names and kinds NOT checked, the manifest 'validators' is malformed (check 8)"
+    report.ran(48, status)
 
 
 def check_grading_rubric(manifest: Any, report: Report) -> None:

@@ -4452,6 +4452,25 @@ def m_grading_validator_unknown_key(root: Path) -> None:
         validators="    cargo-test: { points: 60, weight: 2 }\n    has-test: { points: 20 }\n"))
 
 
+def m_grading_validator_points_bool(root: Path) -> None:
+    _grading(root, _grading_valid_with(
+        validators="    cargo-test: { points: true }\n    has-test: { points: 80 }\n"))
+
+
+def m_grading_rubric_points_bool(root: Path) -> None:
+    _grading(root, _grading_valid_with(
+        rubric="    - id: a\n      points: true\n      standard: One.\n"))
+
+
+def m_grading_with_malformed_manifest_validators(root: Path) -> None:
+    manifest = root / "tutorial.yaml"
+    text = manifest.read_text()
+    start = text.index("\nvalidators:\n")
+    end = text.index("\nfailure_modes:", start)
+    manifest.write_text(text[:start] + "\nvalidators: [cargo-test]\n" + text[end:])
+    _grading(root, _grading_valid_with())
+
+
 def m_grading_rubric_no_id(root: Path) -> None:
     _grading(root, _grading_valid_with(
         rubric="    - points: 20\n      standard: A standard.\n"))
@@ -5726,6 +5745,12 @@ CASES: list[Case] = [
          'gate', where='tutorial.yaml (grading.validators.cargo-test)'),
     Case("48: an unknown key in an entry", 48, "cli", "bundle", m_grading_validator_unknown_key,
          "unknown key 'weight'", where='tutorial.yaml (grading.validators.cargo-test)'),
+    Case("48: boolean points", 48, "cli", "bundle",
+         m_grading_validator_points_bool, "points",
+         where="tutorial.yaml (grading.validators.cargo-test)"),
+    Case("49: boolean points", 49, "cli", "bundle",
+         m_grading_rubric_points_bool, "points",
+         where="tutorial.yaml (grading.rubric[a])"),
     Case("49: a criterion without id", 49, "cli", "bundle", m_grading_rubric_no_id,
          "'id'", where='tutorial.yaml (grading.rubric[0])'),
     Case("49: points as a string", 49, "cli", "bundle", m_grading_rubric_points_string,
@@ -10372,6 +10397,23 @@ def test_ledger_checks_status() -> None:
            f"{noisy!r}, status = {report.status.get(40)!r}")
 
 
+def test_grading_with_malformed_manifest_validators() -> None:
+    """Check 48 adds no false undeclared-name finding over a malformed manifest."""
+    print("\ncheck 48: a malformed manifest 'validators' and a valid grading:")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = fresh("cli", Path(tmpdir))
+        m_grading_with_malformed_manifest_validators(root)
+        report = vb.validate(root, "bundle")
+    record([f for f in report.findings if f.check == 8],
+           "the malformed validators is check 8's finding (positive control)",
+           f"{report.findings!r}")
+    record(not [f for f in report.findings if f.check == 48],
+           "check 48 adds no finding", f"{report.findings!r}")
+    record("NOT checked" in report.status.get(48, ("", ""))[1],
+           "check 48 says the names were not checked",
+           f"{report.status.get(48)!r}")
+
+
 def test_task_rows_check_status() -> None:
     """Check 46: n/a without the section, ran with it, instance only."""
     print("\ncheck 46: the status line, bundle mode, and the row parser:")
@@ -10934,6 +10976,7 @@ def main() -> int:
     test_lesson_levels_check_status()
     test_ledger_checks_status()
     test_task_rows_check_status()
+    test_grading_with_malformed_manifest_validators()
     test_tasks_mode()
     test_the_total_is_reproducible_from_this_commit()
     test_levelled_programme_is_clean_end_to_end()
