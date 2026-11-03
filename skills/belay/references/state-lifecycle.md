@@ -1645,7 +1645,8 @@ is recorded.
 
 **One row per learning objective, updated in place**, in the shape *Assessments* and
 *Optional lessons* already use: `` - `<objective id>` — <level> — <source> <date> ``, and
-an optional parenthesis.
+an optional parenthesis. Write the separators as em dashes; check 40 also reads an en dash
+or a hyphen, as the *Assessments* check does, because the ids are in backticks.
 
 - **The level** is `A`, `B` or `C`.
 - **The source** is what set it: `placement` for the placement lesson, the lesson path of
@@ -1701,7 +1702,7 @@ level was set from.
 
 **One row per finished module of the programme**, in the order they were finished:
 `` - `<module id>` — complete <date> — branch <branch> ``, then optionally `;` and a
-summary.
+summary. The separators are read as for *Levels* (13.1).
 
 - **The module id** is the previous instance's `tutorial_id`.
 - **The date** is the day that module was completed — its `STATE.md`'s `updated` once its
@@ -1727,7 +1728,7 @@ It runs **once**, when a module that declares `starts_from: ref` is materialized
    repository. When the branch is not in this checkout, that step had the learner fetch it,
    and the name to read is `<remote>/<their-previous-branch>`. **Never read the
    winner's** — not from the winner's branch, and not from the `tutorial/` that came with
-   the winner's code, which section 18.6 removed unread.
+   the winner's code, which `runner-protocol.md` section 18.6 removed unread.
 2. **Copy its `## Levels` into the new `STATE.md` unchanged** — every row, including rows
    for objectives this module does not cover.
 3. **Copy its `## Modules`, and append one row** for the module just finished (13.3). When
@@ -1745,8 +1746,11 @@ Both sections are written in step 2 to 4 even when there is nothing to copy, so 
 continues on another machine. So a `starts_from: ref` module, when the learner is asked
 where their progress is kept, asks for **`remote`**, and says why: the next module reads
 this `STATE.md` from this branch, through Git (the `remote` and `local` choice is PR:
-belay#71). A learner who keeps progress `local` gets step 4 on any other machine — an empty
-ledger, and every objective back at A.
+belay#71). `git show <branch>:tutorial/STATE.md` reads only what is committed, so a learner
+who keeps progress `local` gets step 4 on every machine, this one included — an empty
+ledger, and every objective back at A. Their uncommitted `STATE.md` is still in the
+working tree, and `runner-protocol.md` section 18.6 steps 4 and 5 stop before the branch
+switch or the removal can delete it.
 
 ### 13.5 Inconsistencies to report rather than repair
 

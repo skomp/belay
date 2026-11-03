@@ -1742,14 +1742,14 @@ real files. One repository cannot satisfy both without duplication.
 | `rust-automaton-db` bundle | **done** — imported, corrected, verified |
 | `automaton-db/tutorial/` instance + `STATE.md` | **done** — uncommitted |
 | Validator (`skills/belay/scripts/validate_bundle.py`) | **done** — 41 bundle checks + 9 catalogue checks |
-| Validator test suite | **done** — 1015 assertions on a clean checkout, the same on any machine; every check proven firing or warning. `BELAY_SWEEP_SIBLING_REPOS=1` adds the published bundles, counted separately (belay#37) |
+| Validator test suite | **done** — 1024 assertions on a clean checkout, the same on any machine; every check proven firing or warning. `BELAY_SWEEP_SIBLING_REPOS=1` adds the published bundles, counted separately (belay#37) |
 | Optional lessons (`optional_lessons`, `failure_modes`) | **done** — 2026-09-12, §6; checks 18-21 |
 | First-load banner + `teaching_method` | **done** — 2026-09-13, released in 0.6.0; `state-lifecycle.md` §3 step 7, check 27; belay#23 |
 | Offer / defer / re-offer behaviour | **untested** — no harness exercises it; belay#22 |
 | Knowledge assessments (`assesses`, `## Assessments`, `kind: practice`) | **done** — 2026-10-16, belay#33; `runner-protocol.md` §15, `state-lifecycle.md` §11, checks 31-32. The question-and-answer loop is untested, as above |
 | Learning-evidence record (`tutorial/EVENTS.jsonl`, `skills/belay/scripts/evidence.py`) | **done** — 2026-10-16, belay#34; `state-lifecycle.md` §12, `runner-protocol.md` §16, check 33 (warning only); `tests/test_evidence.py`, 89 assertions. Whether the tutor writes the events in conversation is untested, as above |
 | Multi-catalogue support (`skills/belay/scripts/catalogs.py`) | **done** — 2026-09-12, §7 |
-| Catalogue test suite (`tests/test_catalogs.py`) | **done** — 529 assertions; every failure kind proven firing |
+| Catalogue test suite (`tests/test_catalogs.py`) | **done** — 565 assertions; every failure kind proven firing |
 | Instance update (`skills/belay/scripts/plan_update.py`, `state-lifecycle.md` §3.2) | **done** — 2026-10-14, belay#50, §15c; source from the stamp, `--diff`, `--apply`, `--check-version` 2026-10-28, belay#76; `tests/test_plan_update.py`, 129 assertions |
 | Materialization and supplies placement by command (`catalogs.py materialize`, `place-supplies`) | **done** — 2026-10-28, belay#76, §7.2; `tests/test_catalogs.py` |
 | Defect reports (`report` key, check 34, `catalogs.py report`, the `reported` event) | **done** — 2026-10-30, belay#86, §15e; `runner-protocol.md` §17. Whether the tutor offers, drafts and records in conversation is untested, as above |

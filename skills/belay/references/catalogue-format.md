@@ -390,8 +390,12 @@ teaches, for the people who run it and for the designs that build on this one.
 
 | Field | Required | Meaning |
 |---|---|---|
-| `repo` | MUST | a Git URL: `https://…`, `ssh://…`, or scp-style `user@host:path`. Plain `http://`, `file://` and a local path are refused — the learner fetches from it |
-| `ref` | MUST | the branch or tag the module starts from |
+| `repo` | MUST | a Git URL: `https://…`, `ssh://…`, or scp-style `user@host:path`, whose host — and any user before it — begins with a letter or digit, and which holds no whitespace and none of `` ` $ ; \| & < > ( ) ' " \ ``. Plain `http://`, `file://` and a local path are refused — the learner fetches from it |
+| `ref` | MUST | the branch or tag the module starts from: `[A-Za-z0-9_][A-Za-z0-9._/-]*`, with no `..`, `//` or `/.`, and not ending in `/`, `.` or `.lock` — the shape `git check-ref-format` accepts, narrowed |
+
+Both are refused so narrowly because the tutor builds a `git fetch` from them that the
+learner pastes into a shell: a dash-led host or ref would be read as an option, and a
+shell character would run something else.
 
 It belongs on the entry of a module whose bundle declares `starts_from: ref`, and it is set
 once the start has been chosen — after the previous module's review has picked a winning
@@ -405,7 +409,7 @@ on every entry, so a consumer never has to ask whether the key was considered:
 | The entry's `start_from` | In the JSON |
 |---|---|
 | a mapping with a usable `repo` and `ref` | `{"repo": …, "ref": …}` |
-| present and malformed — not a mapping, a key missing or empty, an unknown key, a `repo` that is not a Git URL | `null`, and the reason in that entry's `metadata_notes` |
+| present and malformed — not a mapping, a key missing or empty, an unknown key, a `repo` or `ref` outside the shapes above | `null`, and the reason in that entry's `metadata_notes` |
 | absent | `null`, and no note |
 
 A malformed `start_from` is dropped whole, never passed on half-formed: it is a value the

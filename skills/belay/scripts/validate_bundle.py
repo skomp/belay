@@ -379,13 +379,13 @@ LEDGER_LEVELS = ("A", "B", "C")
 _LEDGER_ID_RE = re.compile(r"[a-z0-9-]+")
 _DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 _LEVEL_RECORD_RE = re.compile(
-    r"^[-*+][ \t]+`(?P<id>[^`]+)`[ \t]*\u2014[ \t]*(?P<level>\S+)[ \t]*"
-    r"\u2014[ \t]*(?P<source>\S+)[ \t]+(?P<date>\d{4}-\d{2}-\d{2})"
+    r"^[-*+][ \t]+`(?P<id>[^`]+)`[ \t]*[\u2014\u2013-][ \t]*(?P<level>\S+)[ \t]*"
+    r"[\u2014\u2013-][ \t]*(?P<source>\S+)[ \t]+(?P<date>\d{4}-\d{2}-\d{2})"
     r"(?:[ \t]+\((?P<note>.*)\))?[ \t]*$"
 )
 _MODULE_RECORD_RE = re.compile(
-    r"^[-*+][ \t]+`(?P<id>[^`]+)`[ \t]*\u2014[ \t]*complete[ \t]+"
-    r"(?P<date>\d{4}-\d{2}-\d{2})[ \t]*\u2014[ \t]*branch[ \t]+"
+    r"^[-*+][ \t]+`(?P<id>[^`]+)`[ \t]*[\u2014\u2013-][ \t]*complete[ \t]+"
+    r"(?P<date>\d{4}-\d{2}-\d{2})[ \t]*[\u2014\u2013-][ \t]*branch[ \t]+"
     r"(?P<branch>[^\s;]+)[ \t]*(?:;(?P<note>.*))?$"
 )
 
@@ -1724,6 +1724,10 @@ def check_material_reachable(
     A path in `declared_material` - a file a lesson's `material` key declared
     and check 38 accepted - is exempt for the same reason, and counts in the
     same "cleared by a declaration" tally.
+
+    `text` is the whole LESSON.md, frontmatter included, on purpose: a
+    validator older than `material` accepts those files only because the
+    declaration in the frontmatter names them. Do not strip the frontmatter.
     """
     foldered = [lesson for lesson in lessons if lesson.folder is not None]
     if not foldered:
@@ -2236,10 +2240,19 @@ def check_optional_frontmatter(
     report.ran(20, f"{checked} lessons, {len(optional_keys)} of them optional")
 
 
-def section_lines(body: str, heading: str) -> list[str] | None:
-    """The lines under '## <heading>', or None when the section is absent."""
+def section_lines(
+    body: str, heading: str, depth: int | None = None
+) -> list[str] | None:
+    """The lines under '## <heading>', or None when the section is absent.
+
+    With no `depth`, a heading of any depth matches, as the older sections
+    have always been read. With a `depth`, only a heading of exactly that
+    many '#' does, so a `### Modules` under some other section is not taken
+    for the `## Modules` ledger.
+    """
+    hashes = "#+" if depth is None else "#" * depth
     pattern = re.compile(
-        rf"^#+[ \t]+{re.escape(heading)}[ \t]*$", re.IGNORECASE
+        rf"^{hashes}[ \t]+{re.escape(heading)}[ \t]*$", re.IGNORECASE
     )
     lines = body.splitlines()
     for index, line in enumerate(lines):
@@ -2863,7 +2876,7 @@ def _ledger_lines(
         report.na(num, "STATE.md could not be read (see check 11)")
         return None
     _, body = split_frontmatter(text)
-    lines = section_lines(body, section)
+    lines = section_lines(body, section, depth=2)
     if lines is None:
         report.na(num, f"STATE.md has no '## {section}' section")
     return lines
@@ -2901,9 +2914,9 @@ def check_levels_ledger(root: Path, report: Report) -> None:
                 40,
                 where,
                 f"the entry {entry[:70]!r} is not a level row. Each one is the "
-                f"concept id in backticks, a dash, {', '.join(LEDGER_LEVELS)}, "
-                f"a dash, the source (placement, learner or a lesson path) and "
-                f"a YYYY-MM-DD date.",
+                f"concept id in backticks, a dash (an em dash, an en dash or "
+                f"'-'), {', '.join(LEDGER_LEVELS)}, a dash, the source "
+                f"(placement, learner or a lesson path) and a YYYY-MM-DD date.",
             )
             continue
         rows += 1
@@ -2967,8 +2980,9 @@ def check_modules_ledger(root: Path, report: Report) -> None:
                 41,
                 where,
                 f"the entry {entry[:70]!r} is not a module row. Each one is the "
-                f"module id in backticks, 'complete' and a YYYY-MM-DD date, and "
-                f"'branch' and the branch name, with an optional ';' and text.",
+                f"module id in backticks, a dash (an em dash, an en dash or "
+                f"'-'), 'complete' and a YYYY-MM-DD date, a dash, and 'branch' "
+                f"and the branch name, with an optional ';' and text.",
             )
             continue
         rows += 1

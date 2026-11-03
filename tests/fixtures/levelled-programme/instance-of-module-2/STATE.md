@@ -35,7 +35,7 @@ None.
 
 ## Levels
 
-- `stock-counting` — B — placement 2026-11-03 (carried forward from the first module)
+- `stock-counting` — B — placement 2026-10-01
 - `demand-forecasting` — A — learner 2026-11-03
 
 ## Modules

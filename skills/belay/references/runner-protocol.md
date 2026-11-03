@@ -1260,7 +1260,7 @@ the cheaper mistake than writing a new one.
 - **Copying a finished course's workspace into a follow-up.** Relationship metadata says
   nothing about source code. Section 12.5.
 - **Running the Git commands that start a module yourself**, or proposing one whose
-  repository or ref begins with `-`. Section 18.6.
+  repository or ref begins with `-` or holds a shell character. Section 18.6.
 - **Teaching from an instance nobody validated.** Materialization runs the validator once,
   on the instance it just created, before the first task. An instance whose stamp carries
   no `validated` key has never been checked, and the first defect in it will be found by
@@ -2642,10 +2642,15 @@ This runs **after the learner has chosen the course and before materialization**
      the previous module's review has not published a starting point, and stop. The
      `tutorial/` just created holds no progress; offer to remove it, because the module is
      materialized again on the branch its start creates, and let the learner decide.
-2. **Refuse a `repo` or `ref` that begins with `-`.** Propose no command at all; say the
-   entry's `start_from` cannot be used, and that whoever runs the catalogue must correct
-   it. Git reads a leading `-` as an option, and the URL check the catalogue passes accepts
-   a dash-led ssh host or scp user, so this check is yours.
+2. **Refuse a `repo` or `ref` that begins with `-` or holds whitespace or any of
+   `` ` $ ; | & < > ( ) ' " \ ``.** Propose no command at all; say the entry's
+   `start_from` cannot be used, and that whoever runs the catalogue must correct it. The
+   catalogue reader already drops such a value — it requires the host, and any user
+   before it, to begin with a letter or digit, refuses those characters in `repo`, and
+   requires `ref` to match `[A-Za-z0-9_][A-Za-z0-9._/-]*` with no `..`, `//` or `/.` and
+   no trailing `/`, `.` or `.lock` (`catalogue-format.md` section 5.3) — so a mapping that
+   reaches you should pass. Check anyway: you are about to propose a command the learner
+   pastes into a shell, and the check costs nothing.
 3. **Ask for two branch names**: the learner's **own** branch of the previous module, which
    the carry-forward reads (`state-lifecycle.md` section 13.4), and the name of the new
    branch, for example `<their-name>/<module-id>`. Remind them that the previous branch's
@@ -2662,7 +2667,16 @@ This runs **after the learner has chosen the course and before materialization**
    which leaves it readable as `<remote>/<their-previous-branch>` (`git remote` lists the
    names; `origin` is the usual one). A remote or branch name that begins with `-` is
    refused as in step 2: propose nothing, and ask for another.
-4. **Propose the commands, and let the learner run them**:
+4. **Check `tutorial/` for the learner's own uncommitted files first**, with
+   `git status --porcelain --ignored -- tutorial/`, which changes nothing. A line
+   beginning `??` (untracked) or `!!` (ignored) is a file of theirs that no commit holds —
+   under the `local` progress choice (PR: belay#71), their `STATE.md` and `EVENTS.jsonl`
+   are exactly that. **Stop**: say that these are their own files, that switching branch
+   overwrites an ignored file the new branch tracks without asking, and let them decide
+   what to do with each — commit it, or move it out of the workspace. Never move or
+   delete one yourself. Go on when the check shows no such line.
+
+   Then **propose the commands, and let the learner run them**:
 
    ```
    git fetch -- <repo> <ref>
@@ -2676,10 +2690,18 @@ This runs **after the learner has chosen the course and before materialization**
    repository: proposing is yours, running is theirs. When one fails, read its message
    with them; never resolve it by moving or deleting a file of theirs.
 5. **Remove the `tutorial/` that came with the winner's code**, once the learner is on the
-   new branch: say what you are removing and why, then remove it, without reading it. It
-   is another learner's instance. **The winner's code carries over; the winner's progress
-   never does.** The deletion shows in the learner's `git status`, and committing it is
-   theirs.
+   new branch, and remove only that: what `git ls-files -- tutorial/` lists. First run
+   `git status --porcelain --ignored -- tutorial/` again; any `??` or `!!` line is a file
+   of the learner's, not the winner's, and you stop exactly as in step 4. When it shows
+   none, say what is being removed and why, and propose, for the learner to run:
+
+   ```
+   git rm -r --quiet -- tutorial/
+   ```
+
+   which deletes the tracked files and nothing else. Never read them: they are another
+   learner's instance. **The winner's code carries over; the winner's progress never
+   does.** The deletion is staged in the learner's index, and committing it is theirs.
 6. **Materialize as for any course** — `state-lifecycle.md` section 3, from its first step,
    where the `start_from` precondition is now met by steps 1 to 5 above —
    and then run the carry-forward of `state-lifecycle.md` section 13.4 before the first
@@ -2706,6 +2728,8 @@ on a new branch, and the previous module's instance stays on the learner's previ
 - **Starting a `starts_from: ref` module from anything but its winning entry's
   `start_from`** — a guess, a shadowed entry, the learner's previous branch. Section 18.6.
 - **Running a Git command that changes the learner's repository**, or proposing one whose
-  repository or ref begins with `-`. Section 18.6.
+  repository or ref begins with `-` or holds a shell character. Section 18.6.
 - **Reading the winner's `tutorial/`**, or carrying anything of it forward. Section 18.6,
   and `state-lifecycle.md` section 13.4.
+- **Switching branch, or removing `tutorial/`, over an untracked or ignored file in it**:
+  that is the learner's own, and the procedure stops for them. Section 18.6, steps 4 and 5.

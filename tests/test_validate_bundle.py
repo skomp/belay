@@ -3990,6 +3990,36 @@ m_modules_wrapped = _ledger(
     f"- `intro-module` {D} complete 2026-11-03\n  {D} branch module/intro;\n"
     f"  merged later\n",
 )
+EN = "\u2013"
+m_levels_en_dash = _ledger(
+    "Levels", f"- `partition-offsets` {EN} A {EN} placement 2026-11-03\n"
+)
+m_levels_hyphen = _ledger(
+    "Levels", "- `partition-offsets` - B - lessons/01-hello.md 2026-11-03\n"
+)
+m_levels_bad_date = _ledger(
+    "Levels", f"- `partition-offsets` {D} A {D} placement 2027-02-30\n"
+)
+m_modules_en_dash = _ledger(
+    "Modules", f"- `intro-module` {EN} complete 2026-11-03 {EN} branch a/b\n"
+)
+m_modules_hyphen = _ledger(
+    "Modules", "- `intro-module` - complete 2026-11-03 - branch a/b\n"
+)
+m_modules_bad_date = _ledger(
+    "Modules", f"- `intro-module` {D} complete 2027-02-30 {D} branch a\n"
+)
+m_modules_bad_id = _ledger(
+    "Modules", f"- `Intro_Module` {D} complete 2026-11-03 {D} branch a\n"
+)
+# A deeper heading of the same name elsewhere is not the ledger: its bullet
+# would be a malformed row if it were read as one.
+m_modules_subsection = _ledger(
+    "Decisions", "### Modules\n\n- split by topic, not by week\n"
+)
+m_levels_subsection = _ledger(
+    "Decisions", "### Levels\n\n- everyone starts at A\n"
+)
 
 
 @dataclass
@@ -5100,6 +5130,27 @@ CASES: list[Case] = [
          where="STATE.md (## Modules)"),
     Case("41: one module recorded twice", 41, "broker", "instance",
          m_modules_duplicate, "recorded twice", where="STATE.md (## Modules)"),
+    Case("40: a row separated by en dashes is silent", 40, "broker",
+         "instance", m_levels_en_dash, kind="silent"),
+    Case("40: a row separated by hyphens is silent", 40, "broker",
+         "instance", m_levels_hyphen, kind="silent"),
+    Case("40: a date that is not a calendar date", 40, "broker", "instance",
+         m_levels_bad_date, "not a calendar date",
+         where="STATE.md (## Levels)"),
+    Case("40: a '### Levels' under another section is not the ledger", 40,
+         "broker", "instance", m_levels_subsection, kind="silent"),
+    Case("41: a row separated by en dashes is silent", 41, "broker",
+         "instance", m_modules_en_dash, kind="silent"),
+    Case("41: a row separated by hyphens is silent", 41, "broker",
+         "instance", m_modules_hyphen, kind="silent"),
+    Case("41: a date that is not a calendar date", 41, "broker", "instance",
+         m_modules_bad_date, "not a calendar date",
+         where="STATE.md (## Modules)"),
+    Case("41: a malformed module id", 41, "broker", "instance",
+         m_modules_bad_id, "is not a module id",
+         where="STATE.md (## Modules)"),
+    Case("41: a '### Modules' under another section is not the ledger", 41,
+         "broker", "instance", m_modules_subsection, kind="silent"),
     # ---- check 33 (warning only: the record is evidence, never progress)
     Case("33 (control): a well-formed learning record is quiet", 33, "cli",
          "instance", m_events_valid, kind="silent"),

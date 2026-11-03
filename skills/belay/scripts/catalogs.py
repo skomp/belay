@@ -973,8 +973,23 @@ def read_optional_lesson_count(
 
 
 _GIT_URL = re.compile(
-    r"(?:https://[^\s/]\S*|ssh://[^\s/]\S*|[A-Za-z0-9._-]+@[A-Za-z0-9._-]+:\S+)"
+    r"(?:https|ssh)://(?:[A-Za-z0-9][^@/\s]*@)?[A-Za-z0-9][^@/\s]*(?:/\S*)?"
+    r"|[A-Za-z0-9][A-Za-z0-9._-]*@[A-Za-z0-9][A-Za-z0-9._-]*:\S+"
 )
+
+# Characters a shell gives meaning to. The tutor proposes a `git fetch` the
+# learner pastes into a shell, so neither `repo` nor `ref` may carry one.
+SHELL_CHARACTERS = frozenset("`$;|&<>()'\"\\")
+
+# `git check-ref-format`, narrowed: a ref starts with a letter, digit or `_`
+# (never `-`, which git would read as an option) and holds only letters,
+# digits and `._/-`. `ref_is_safe` adds the sequences git itself refuses.
+_GIT_REF = re.compile(r"[A-Za-z0-9_][A-Za-z0-9._/-]*")
+
+
+def has_shell_character(value: str) -> bool:
+    """True when `value` holds whitespace or a character a shell interprets."""
+    return any(c in SHELL_CHARACTERS or c.isspace() for c in value)
 
 
 def is_git_url(value: Any) -> bool:
@@ -982,9 +997,33 @@ def is_git_url(value: Any) -> bool:
 
     Plain `http://`, a local path and `file://` are refused: the tutor would
     clone this, and a repository named by an unauthenticated or local
-    address is not one a catalogue should hand over.
+    address is not one a catalogue should hand over. The host, and any user
+    before it, must begin with a letter or digit, so neither can be read as
+    an ssh option (`ssh://-oProxyCommand=...`); and nothing a shell would
+    interpret is allowed anywhere in it.
     """
-    return isinstance(value, str) and _GIT_URL.fullmatch(value) is not None
+    return (
+        isinstance(value, str)
+        and not has_shell_character(value)
+        and _GIT_URL.fullmatch(value) is not None
+    )
+
+
+def is_git_ref(value: Any) -> bool:
+    """True for a branch or tag name the tutor may put in a `git fetch`.
+
+    `[A-Za-z0-9_][A-Za-z0-9._/-]*`, with no `..`, no `//`, no component
+    beginning with `.`, and no trailing `/`, `.` or `.lock`. `@{` cannot
+    occur, since `@` is not in the set.
+    """
+    return (
+        isinstance(value, str)
+        and _GIT_REF.fullmatch(value) is not None
+        and ".." not in value
+        and "//" not in value
+        and "/." not in value
+        and not value.endswith(("/", ".", ".lock"))
+    )
 
 
 def start_from_problems(value: Any) -> list[str]:
@@ -1017,7 +1056,16 @@ def start_from_problems(value: Any) -> list[str]:
     if isinstance(repo, str) and repo.strip() and not is_git_url(repo):
         problems.append(
             f"'start_from.repo' {repo!r} is not a Git URL; use https://..., "
-            f"ssh://... or user@host:path"
+            f"ssh://... or user@host:path, whose host (and any user) begins "
+            f"with a letter or digit, and which holds no whitespace and none "
+            f"of ` $ ; | & < > ( ) ' \" \\"
+        )
+    ref = value.get("ref")
+    if isinstance(ref, str) and ref.strip() and not is_git_ref(ref):
+        problems.append(
+            f"'start_from.ref' {ref!r} is not a usable branch or tag name; it "
+            f"must match [A-Za-z0-9_][A-Za-z0-9._/-]*, with no '..', '//' or "
+            f"'/.', and must not end in '/', '.' or '.lock'"
         )
     return problems
 

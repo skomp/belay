@@ -157,8 +157,13 @@ catalog is the trainer's single place to say it.
    `git fetch <repo> <ref> && git switch -c <participant>/<module-id> FETCH_HEAD`. The runner
    never runs a Git operation that changes the participant's repository on its own, as
    `instance_git.py` already does not.
-3. The tutor removes the `tutorial/` directory that came with the winner's code. **The
-   winner's code carries over; the winner's progress never does.**
+3. The tutor has the participant remove the `tutorial/` directory that came with the
+   winner's code — only its tracked files, with `git rm -r -- tutorial/`. **The winner's
+   code carries over; the winner's progress never does.** Before the branch switch and
+   again before the removal, an untracked or ignored file in `tutorial/` (`git status
+   --porcelain --ignored`) is the participant's own and stops the procedure until they
+   decide what to do with it: `git switch` silently overwrites an ignored file the new
+   branch tracks.
 4. Materialization proceeds as for any bundle, then the carry-forward of section 2.4 runs.
 
 One instance per workspace (2026-09-11 spec, section 15b) is unchanged: module n+1's instance
@@ -229,8 +234,9 @@ module starts. It is a summary of that module's `## Assessments`, never a copy o
 
 The carry-forward needs the previous `STATE.md` to be committed and pushed: the `remote`
 choice PR: belay#71 introduces. **A `starts_from: ref` module asks for `remote` and says
-why**; a participant who keeps progress `local` gets the empty-ledger path of step 4 on
-another machine.
+why**. `git show` reads only committed content, so a participant who keeps progress
+`local` gets the empty-ledger path of step 4 on every machine, the one they worked on
+included.
 
 ### 2.5 How a level is set
 
@@ -332,6 +338,12 @@ Every new key is additive and MAY: `goals` and `start_from` in a catalog; `level
 | an older runner | unknown keys, ignored | the body for everyone, guided as today; the placement lesson runs as an ordinary assessment and offers practice; a `starts_from: ref` module starts in whatever workspace it is given, without the winner's code |
 | an older validator | unknown top-level keys and entry fields; unknown lesson frontmatter keys | check 28 and catalog checks 1 and 3 **warn** and never reject; lesson frontmatter keys are read by name, so the new ones are not seen at all. Measured on 2026-11-03: nothing this design adds is inside a structure an older validator checks key by key |
 
+An older validator accepts a folder lesson's `material` files for one reason only: its
+check 6 (`names_file`) searches the whole `LESSON.md`, frontmatter included, so the
+`material` declaration itself names each file. Making `names_file` skip the frontmatter
+would turn every such file into a check 6 finding for every validator that does not read
+`material`.
+
 `bundle-format.md` section 13 gains the row for the older runner, as it has for every
 additive key. The older runner's behaviour on `starts_from` is a real degradation, and the
 section says so plainly: a programme that uses it needs a runner that knows it.
@@ -362,7 +374,7 @@ set in an earlier module; that is not a finding.
 | Check | Reports |
 |---|---|
 | goals | `goals` not a map; a goal id not matching `[a-z0-9-]+`; a goal without a non-empty `title`; `objectives` not a non-empty list of strings; an unknown key inside a goal; an objective that no entry's `covers` declares; an objective listed under two goals |
-| start_from | `start_from` without both `repo` and `ref`; a `repo` that is not an `https://`, `ssh://` or scp-style Git URL; an unknown key inside it |
+| start_from | `start_from` without both `repo` and `ref`; a `repo` that is not an `https://`, `ssh://` or scp-style Git URL whose host (and any user) begins with a letter or digit, or that holds whitespace or a shell character; a `ref` outside `[A-Za-z0-9_][A-Za-z0-9._/-]*` or holding `..`, `//`, `/.`, or ending in `/`, `.` or `.lock`; an unknown key inside it |
 
 Check 28's list of known top-level keys gains `levels` and `starts_from`; the catalog's
 known top-level keys gain `goals`, and its known entry fields gain `start_from`. Lesson
@@ -436,9 +448,13 @@ each is stated once, where the tutor reads it.
    just-created `tutorial/` left for the learner to remove (`runner-protocol.md` §18.6). A
    later `resolve` that also printed the bundle's `starts_from` — it is allowed to open the
    bundle — would remove the second case.
-2. **Git argument hygiene is the protocol's.** The URL check accepts a dash-led ssh host or
-   scp user, so the tutor refuses a `repo` or `ref` beginning with `-`, puts `--` before
-   them in `git fetch`, and never runs the commands itself (`runner-protocol.md` §18.6).
+2. **Git argument hygiene is the reader's and the protocol's.** The catalogue reader drops
+   a `start_from` whose `repo` host or scp user does not begin with a letter or digit,
+   whose `repo` holds whitespace or any of `` ` $ ; | & < > ( ) ' " \ ``, or whose `ref`
+   is not `[A-Za-z0-9_][A-Za-z0-9._/-]*` free of `..`, `//`, `/.` and a trailing `/`, `.`
+   or `.lock` (`catalogue-format.md` §5.3). The tutor still refuses a `repo` or `ref`
+   beginning with `-` or holding those characters, puts `--` before them in `git fetch`,
+   and never runs the commands itself (`runner-protocol.md` §18.6).
    The same rules cover the fetch of the learner's own previous branch when it is not in
    the checkout, which the carry-forward then reads as `<remote>/<branch>`
    (`state-lifecycle.md` §13.4).
