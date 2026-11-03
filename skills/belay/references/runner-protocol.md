@@ -2780,8 +2780,8 @@ These terms are used through this section:
 - **The active task** is the open task that has a row, unless that row's parenthesis names
   another lesson. There is at most one (`one_task_at_a_time` holds), and a row in a state the
   active lesson does not declare is never it. A request-written task left open under an earlier
-  lesson is therefore not active: if this lesson's offer lists it, it is open, and when the
-  learner takes it again its parenthesis is rewritten to name this lesson. The active task is not
+  lesson is therefore not active: if this lesson's offer lists it and its state is declared
+  here, it is open, and when the learner takes it again its parenthesis is rewritten to name this lesson. The active task is not
   one turn's task: section 2.2 still asks for one actionable step per turn.
 
 The rows' shape, and when each is written, is `state-lifecycle.md` section 14.
@@ -2802,7 +2802,10 @@ Offer when no task is active: when the lesson opens, and each time a task closes
    Building the offer never reads a task's body. You read a task's body when it is active
    (19.2), and when you review a task file the learner wrote (19.6).
 3. **List the open tasks in priority order**, lowest number first, a tie going to the lower
-   `id`, and propose the first.
+   `id`, and propose the first. Below them, name as closed each file the learner wrote whose
+   `id` has a closed row, and never drop one silently. A new file whose `id` happens to match
+   another task's row reads the same way, so this is how the learner sees it, and can rename it
+   (19.6).
 4. **Taking a later one first, or skipping one, needs a reason the learner states.** Ask for
    the reason when they give none. Record it; do not judge it.
    - **Skipping:** write the row in `skipped`, with the reason in its parenthesis. The task is
@@ -2818,13 +2821,14 @@ skipping it for a stated reason.
 **A row is in the state whose work is under way.** Write it in the first state when the learner
 takes the task, and not when you offer it. Move it to the next state when the body's condition
 for the current state is met, and back to an earlier state when the body says so. Apart from a
-skip and a reopening, nothing else moves it.
+skip, a reopening and the move below for a state the body does not describe, nothing else moves
+it.
 
 **Only the last state differs: it is entered once its work is finished.** Its work happens while
 the row is in the state before it, so the last state means done. With the default states,
-`in-progress` is under way and `done` is finished. When a lesson has only one state, write the
-row when the work is finished, because the row closes the task; until then the active task is the
-one *Next task* names.
+`in-progress` is under way and `done` is finished. So the state before the last holds two pieces
+of work, its own and the last state's. No write marks the boundary between them, so a cold
+session may repeat that state's validators and its question, which is harmless.
 
 Read the active task's file, and follow the lesson body for the state whose work is under way:
 the row's state, or the last state once the work of the state before it is done.
@@ -2840,7 +2844,9 @@ The row entering the last state closes the task, and is a completed task in the 
 `state-lifecycle.md` section 4. Offer again (19.1).
 
 **A closed task stays closed unless the learner asks to reopen it.** Then, with no other task
-active, move its row back to the state they name, and a `skipped` row to the first state.
+active, move its row back to the state of this lesson they name, and a `skipped` row to the first
+state. Rewrite the parenthesis as you do: drop any stale skip reason, and an earlier lesson's name,
+which for a request-written task becomes this lesson's, so the task can be active here.
 
 **The lesson completes when every task is closed.** That means every task the offer can list,
 so a learner's own tasks count when the lesson declares `own_tasks`, except as 19.6 says.
@@ -2930,13 +2936,16 @@ file, and before each offer in a lesson that declares `own_tasks`.
    | Exit | Meaning | What you do |
    |---|---|---|
    | 0 | every `.md` file directly inside is well-formed. An empty directory also exits 0, with a warning | go on to step 2 |
-   | 1 | findings | say them verbatim. The file is the learner's, so they correct it. It is no bundle defect, and section 13.3 does not apply |
+   | 1 | findings | say them verbatim. The file is the learner's, so they correct it. It is no bundle defect, and section 13.3 does not apply. Go on to step 2 for the files that passed, so a clashing file cannot reach the offer |
    | 2 | no such directory, or a usage error | correct the invocation |
 
-2. **Compare each file's `id` with the other tasks'**: the `id` lines the offer reads (19.1), and
-   the ids in `## Tasks` other than the row for this same file. `--tasks` compares inside one
-   directory only, and a row names a task by its id alone. When an `id` is taken, say so: the
-   learner renames the file and its `id`.
+2. **Compare each file's `id` with those of the other files in the offer**, from the `id` lines
+   the offer reads (19.1). `--tasks` compares inside one directory only. When an `id` is taken,
+   say so: the learner renames the file and its `id`.
+
+A clash with a `## Tasks` row **cannot be detected cold**. A row names a task by its id alone, so
+a row with this file's `id` cannot be told apart from this file's own row. The offer makes it
+visible instead (19.1).
 
 A file that fails either step stays out of the offer until the learner corrects it. The offer's
 grep alone would not catch this: it reads three lines and judges none of them, so a missing

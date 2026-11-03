@@ -4274,6 +4274,14 @@ def m_states_empty(root: Path) -> None:
     _states(root, "[]")
 
 
+def m_states_one(root: Path) -> None:
+    _states(root, "[done]")
+
+
+def m_states_two(root: Path) -> None:
+    _states(root, "[work, done]")
+
+
 def m_states_bad_entry(root: Path) -> None:
     _states(root, "[Hand_Off, done]")
 
@@ -5369,9 +5377,13 @@ CASES: list[Case] = [
          m_states_without_tasks, "task_states without 'tasks'",
          where=CLI_LESSON_01),
     Case("44: task_states as a string fires", 44, "cli", "bundle",
-         m_states_string, "must be a non-empty list", where=CLI_LESSON_01),
+         m_states_string, "must be a list of at least two", where=CLI_LESSON_01),
     Case("44: an empty task_states fires", 44, "cli", "bundle",
-         m_states_empty, "must be a non-empty list", where=CLI_LESSON_01),
+         m_states_empty, "must be a list of at least two", where=CLI_LESSON_01),
+    Case("44: one state fires", 44, "cli", "bundle", m_states_one,
+         "which is one state", where=CLI_LESSON_01),
+    Case("44: two states are silent", 44, "cli", "bundle", m_states_two,
+         kind="silent"),
     Case("44: a state that does not match the pattern fires", 44, "cli",
          "bundle", m_states_bad_entry, "'Hand_Off', which is not a state name",
          where=CLI_LESSON_01),

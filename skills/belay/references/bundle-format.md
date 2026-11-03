@@ -1588,7 +1588,7 @@ An assessment only, and optional there: questions to ask verbatim.
 | `material` | MAY | Folder lessons only. For each objective in this lesson's `teaches`, a mapping of level — `A`, `B` or `C` — to a file in the lesson's own folder (check 38). See **Writing levelled material** below. |
 | `placement` | MAY | `true` on the one assessment that places a learner on the levels. It needs `assesses`, a bundle has at most one, and it is never an optional lesson (check 39). `false` says nothing. See **Writing a placement lesson** below. |
 | `tasks` | MAY | Folder lessons only. A directory inside this lesson's folder holding its task files; relative, no `..` segment (check 42). Declaring it is what makes the lesson a **task lesson**. See **Writing a task lesson** below. |
-| `task_states` | MAY | The states a task passes through, in order; default `[in-progress, done]`. **The last state means done.** At least one state, each matching `[a-z0-9-]+` and listed once. `skipped` is reserved and always available, so it is not listed (check 44). Needs `tasks`. |
+| `task_states` | MAY | The states a task passes through, in order; default `[in-progress, done]`. **The last state means done.** At least two states, because a row is written in the first when a task is taken and the last closes it; each matches `[a-z0-9-]+` and is listed once. `skipped` is reserved and always available, so it is not listed (check 44). Needs `tasks`. |
 | `own_tasks` | MAY | A directory in the learner's **workspace** where the learner writes task files of their own; relative to the workspace root, no `..` segment (check 45). Needs `tasks`. |
 
 `design_refs` is how a lesson stays cheap. A lesson about splitting a file into a
@@ -1826,7 +1826,8 @@ As a member of the sales team I want incoming leads scored so that I call the be
 | `priority` | MUST | an integer; lower is earlier; ties are broken by `id` |
 
 Check 43 reports a breach of each of these but one: nothing can check that an `id` stayed
-stable once published, and that is yours to hold. **The body is yours**: a user story carries acceptance
+stable once published, and that is yours to hold. **The body is yours**: a user story carries
+acceptance
 criteria, an exercise a statement and a check, and the format requires nothing of it. A
 subfolder of the `tasks` directory holds no task files. A file directly inside it that is not
 `.md` is ordinary lesson material, which this section's naming rule still covers.
@@ -1860,9 +1861,10 @@ not exist.
 has to be true for that work to count as done, and anything that sends the task back. **A
 row is in the state whose work is under way. Only the last state differs: it is entered once its
 work is finished**, and that work happens while the row is in the state before it, so the last
-state means done (`runner-protocol.md` section 19.2). Give each state its own section, except that the last needs none unless it has work of its own. Under
-`levels: true`, name the learning objective the state exercises, from this
-lesson's `teaches`. Where you want the tutor to review the work, give the state a checklist;
+state means done (`runner-protocol.md` section 19.2). Give each state its own section, except
+that the last needs none unless it has work of its own. Under `levels: true`, name the learning
+objective the state exercises, from this lesson's `teaches`. Where you want the tutor to review
+the work, give the state a checklist;
 the tutor reviews against it and names what is not met, and its review never stops the
 learner moving on. To make something stop them, declare it as a validator or a completion
 condition. A task lesson keeps both, and adds one condition of its own: every task closed
@@ -2216,8 +2218,8 @@ Confirm each of these by looking, not by remembering:
       `priority`; no id repeats, in the directory or across the bundle's task lessons
 - [ ] every task lesson's body lists each of its task files by path, and lists no path that
       does not exist
-- [ ] `task_states` and `own_tasks` appear only beside `tasks`; `task_states` is a non-empty
-      list of distinct `[a-z0-9-]+` names without `skipped`; `own_tasks` is a relative
+- [ ] `task_states` and `own_tasks` appear only beside `tasks`; `task_states` is a list of at
+      least two distinct `[a-z0-9-]+` names without `skipped`; `own_tasks` is a relative
       workspace path with no `..` segment
 - [ ] every task lesson's body says what each state but the last asks and when that work is
       done, and makes sense to a runner that has never heard of `tasks` (section 13)

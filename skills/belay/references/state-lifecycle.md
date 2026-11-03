@@ -1803,7 +1803,8 @@ is read as part of that bullet, so the date and the parenthesis may sit on a lat
 - **The date** is the day of the last change to the row, `YYYY-MM-DD`.
 - **The parenthesis** holds the reason for a skip, or for taking a task out of order, and for a
   task the learner asked to add it also names the lesson it was taken in. It survives a state
-  change, so an out-of-order reason is not lost.
+  change, so an out-of-order reason is not lost; only a reopening rewrites it
+  (`runner-protocol.md` section 19.2).
 
 > **A task with no row has not been started.**
 
@@ -1817,8 +1818,7 @@ date and `updated`:
 
 1. **the learner takes a task** — the row, in the first state. It records that they took the
    task, which has happened, and claims nothing about the work (section 1). A task taken out of
-   order carries the reason in its parenthesis. A lesson with one state writes this row when the
-   work is finished (`runner-protocol.md` section 19.2);
+   order carries the reason in its parenthesis;
 2. **the learner skips a task** — the row, in `skipped`, with the reason in its parenthesis;
 3. **the state changes**, forwards or back, a reopening included, by `runner-protocol.md` section
    19.2 — the row is rewritten in place, and *Next task* with it;

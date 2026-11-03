@@ -160,7 +160,7 @@ CHECKS: dict[int, str] = {
     43: "every task file is well-formed: id, title and priority; ids unique "
         "and equal to the filename; each listed by the lesson body, and every "
         "task path the body lists exists",
-    44: "task_states, where a lesson declares it, is a non-empty list of "
+    44: "task_states, where a lesson declares it, is a list of at least two "
         "distinct [a-z0-9-]+ names, never 'skipped', and needs tasks",
     45: "own_tasks, where a lesson declares it, is a relative workspace path "
         "and needs tasks",
@@ -3077,9 +3077,10 @@ def check_task_states(lessons: list[Lesson], report: Report) -> None:
     """Check 44 - both modes.
 
     `task_states` names the states a task passes through, in order; the last
-    one means done. It needs `tasks`, must be a non-empty list of distinct
+    one means done. It needs `tasks`, must be a list of at least two distinct
     names matching [a-z0-9-]+, and must not list `skipped`, which is reserved
-    and always available. A bundle with no `task_states` is silent and n/a.
+    and always available. Two, because a row is written in the first state
+    when a task is taken, and the last state closes the task. A bundle with no `task_states` is silent and n/a.
     """
     declared = 0
     for lesson in lessons:
@@ -3101,10 +3102,20 @@ def check_task_states(lessons: list[Lesson], report: Report) -> None:
             report.add(
                 44,
                 lesson.rel,
-                f"task_states is {shown}; it must be a non-empty list of "
+                f"task_states is {shown}; it must be a list of at least two "
                 f"state names, in order. Omit it to get [in-progress, done].",
             )
             continue
+        if len(value) < 2:
+            report.add(
+                44,
+                lesson.rel,
+                f"task_states is {value!r}, which is one state; it must list "
+                f"at least two. A row is written in the first state when a "
+                f"task is taken and the last state closes the task, so one "
+                f"state would close it on taking. Omit it to get "
+                f"[in-progress, done].",
+            )
         seen: set[str] = set()
         for entry in value:
             if not isinstance(entry, str) or not _TASK_ID_RE.fullmatch(entry):
