@@ -34,6 +34,13 @@ the programme, and are not part of any course.
   session, started by the participant. The tutor never implements, and the implementation
   session never tutors. So the offer's "the AI implements" is met by that session, and the
   tutor's `ownership_policy` is unchanged.
+- **Working with the implementation agent is what the course teaches**, not a way around it.
+  The programme teaches participants to implement with Claude Code and a spec-driven workflow
+  (the Superpowers plugin). The participant writes the specification with the tutor first,
+  then gives it to Superpowers as the input to its own specification interview. That the
+  implementation session could also do the participant's thinking is not a defect to guard
+  against: the course's grading (the module's validators and the trainer's review) is where
+  the participant's own work is judged.
 - **The tutor never decides whether an implementation is correct for a story.** The module's
   validators and the trainer's review decide that.
 - **The course keeps control of what is assessed**: the objectives a story lesson `teaches`,
@@ -203,13 +210,19 @@ branch. Its shape is the course's `## Spec criteria`, not the runner's.
    noted in the row. This is the assessments design's rule that a tutor's judgement never
    blocks, applied here.
 3. **Hand-off.** The tutor writes the row as `handed-off` and tells the participant to open a
-   second Claude Code session in the same repository, give it the specification's path, and
-   have it work on a story branch `<participant-branch>/<story-id>` and open a pull request into
-   the participant's module branch. **The tutor writes no code and starts no session.** Who
-   creates the story branch follows belay#100; until that lands, the participant does.
+   second Claude Code session in the same repository, start the spec-driven workflow there
+   with the specification as its input, and have it work on a story branch
+   `<participant-branch>/<story-id>` and open a pull request into the participant's module
+   branch. The workflow interviews the participant about the specification before it plans;
+   the participant answers from their specification, and a decision that changes it is written
+   back into the specification file, so the file stays the record of what was asked for.
+   **The tutor writes no code and starts no session.** Who creates the story branch follows
+   belay#100; until that lands, the participant does.
 4. **Return.** The participant comes back with the pull request. The tutor reads the diff
    through Git — reading is always allowed — runs the module's validators, and writes the row
-   as `implemented` with the pull request's number.
+   as `implemented` with the pull request's number. It also compares the specification file
+   with the one handed off and asks the participant about each change: why the interview
+   changed it, and whether the change was theirs to make.
 5. **Review.** The participant walks through the diff against the story's acceptance criteria.
    This is assessment-shaped: one question per turn, the help ladder stops at rung 3, and the
    outcome sets the level of the code-review objective (section 3.1; by the
