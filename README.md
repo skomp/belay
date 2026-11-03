@@ -467,7 +467,7 @@ No pytest; five plain scripts, run from a checkout of this repository.
 
 ```
 python3 tests/test_validate_bundle.py     # 1024 assertions
-python3 tests/test_catalogs.py            # 583 assertions
+python3 tests/test_catalogs.py            # 589 assertions
 python3 tests/test_plan_update.py         # 129 assertions
 python3 tests/test_evidence.py            # 89 assertions
 python3 tests/test_bin_wrappers.py        # 60 assertions

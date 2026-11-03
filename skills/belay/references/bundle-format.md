@@ -2402,8 +2402,8 @@ keys, and ignores them. The effect on a learner is precise, and worth stating pl
 - **a `starts_from: ref` module starts without the code it starts from.** This is the one
   key here whose loss is a real degradation rather than a missing convenience, and it is
   worth saying plainly: an older runner ignores `starts_from`, never asks where to start,
-  never reads the catalogue entry's `start_from`, and materializes the module in whatever workspace it is given, with
-  none of the code its lessons were written against and no levels carried forward. **A
+  never reads the catalogue entry's `start_from`, and materializes the module in whatever
+  workspace it is given, with none of the code its lessons were written against and no levels carried forward. **A
   programme that uses `starts_from: ref` needs a runner that knows it.** An older validator
   warns about the key as an unrecognised top-level field and accepts the bundle, so nothing
   at authoring time will tell you which runner your learners have;

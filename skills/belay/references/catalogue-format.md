@@ -28,7 +28,8 @@ only for local sources and silently breaks the provider boundary.
 
 `belay-catalogs discover` keeps the rule mechanically: it never opens, lists or stats
 anything under a bundle path. `belay-catalogs resolve <id>` and `belay-catalogs materialize
-<id>`, which run **after** the learner has chosen, are the steps that are allowed to look.
+<id>`, which run **after** the learner has chosen, are the steps that are allowed to look;
+that is how `belay-catalogs --json resolve <id>` can say whether the bundle `starts_from` a ref.
 
 ---
 
@@ -106,7 +107,7 @@ for the other three commands. It needs Python 3 and the `git` command, and nothi
 | `belay-catalogs find-instance` | every session, once, to orient (`SKILL.md` step 1) | looks for `tutorial/tutorial.yaml` from the current directory up to the repository root, and says whether it is an instance and whether its workspace root is the current directory; reads no catalogue (`runner-protocol.md` section 1, **Finding the instance**) |
 | `belay-catalogs discover` | a discovery request starts | refreshes every catalogue, then prints the merged catalogue and the status of each source |
 | `belay-catalogs status` | the learner asks what is configured, or a failure needs explaining | prints each catalogue's state from disk; fetches nothing |
-| `belay-catalogs resolve <id>` | the learner has chosen, and wants to know where the course comes from | prints that entry and the bundle directory it resolves to, and checks the bundle is really there |
+| `belay-catalogs resolve <id>` | the learner has chosen, and wants to know where the course comes from | prints that entry and the bundle directory it resolves to, and checks the bundle is really there. With `--json` it also carries the bundle's `starts_from` (section 5.3) |
 | `belay-catalogs materialize <id>` | the learner has chosen | resolves the entry as `resolve` does and creates `tutorial/` in the current directory from it: copy, `STATE.md`, stamp (`state-lifecycle.md` section 3) |
 | `belay-catalogs place-supplies` | materialization, after validation; and after an update | places the manifest's `supplies` from the source the instance stamp names, never overwriting (`state-lifecycle.md` section 3 step 8) |
 | `belay-catalogs check-start -- '<repo>' '<ref>'` | a learner has named where a `starts_from: ref` module starts (`runner-protocol.md` section 18.6) | applies section 5.3's rules for `start_from` to the two values: exit 0 when usable, exit 1 with each problem. Reads no file and contacts nothing, so it cannot say the ref exists |
@@ -138,7 +139,8 @@ instance was found, `1` none was found, `2` a `tutorial/` that is not a usable i
 workspace, and under `permissions.blockReadsOutsideWorkingDirectories` the host asks before
 any command that names such a path. `materialize` takes the id and `place-supplies` reads
 the instance stamp; both open the bundle inside their own process, fetch nothing, and run
-nothing the bundle declares. `report` reads the instance, its draft and the catalogues on
+nothing the bundle declares. `resolve` takes the id and does the same. `check-start` reads
+nothing at all and takes only the two values it checks. `report` reads the instance, its draft and the catalogues on
 disk, and opens no bundle at all. `find-instance` looks in the directories above the
 current one inside its own process, because each of them is outside the workspace too
 (belay#83).
@@ -396,8 +398,10 @@ It is a mapping of exactly two keys:
 | `ref` | MUST | the branch or tag the module starts from: `[A-Za-z0-9_][A-Za-z0-9._/-]*`, with no `..`, `//` or `/.`, and not ending in `/`, `.` or `.lock` — the shape `git check-ref-format` accepts, narrowed |
 
 Both are refused so narrowly because the tutor builds a `git fetch` from them that the
-learner pastes into a shell: a dash-led host or ref would be read as an option, and a
-shell character would run something else. **What a learner types is held to the same
+learner pastes into a shell: a dash-led host or ref would be read as an option, and the
+characters listed would run something else. The list is not every character a shell gives
+meaning to: `` { } ! * ? [ ] ~ # `` still pass in a `repo` (belay#98), which is why the
+commands the tutor proposes single-quote these values. **What a learner types is held to the same
 rules**, by `belay-catalogs check-start`, which calls the one function the reader and check
 9 call.
 
@@ -417,8 +421,13 @@ on every entry, so a consumer never has to ask whether the key was considered:
 | present and malformed — not a mapping, a key missing or empty, an unknown key, a `repo` or `ref` outside the shapes above | `null`, and the reason in that entry's `metadata_notes` |
 | absent | `null`, and no note |
 
+**`belay-catalogs --json resolve <id>` also carries `starts_from`**, read from the bundle's
+own `tutorial.yaml`: the value when the bundle declares it, and `null` when it does not or the
+bundle cannot be read. It is how the tutor knows to ask, before anything is materialized.
+`discover` does not carry it, because `discover` never opens a bundle.
+
 A malformed `start_from` is dropped whole, never passed on half-formed: it is a value the
-tutor might suggest a Git command from. The course is still offered, without a suggestion:
+tutor would offer as the source of a Git command. The course is still offered, without a suggestion:
 the tutor passes the note on and asks the learner, and whoever runs the catalogue should
 still correct the entry.
 

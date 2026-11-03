@@ -123,14 +123,13 @@ Preconditions:
 - the entry's `source` resolves to a readable bundle directory. `belay-catalogs materialize`
   resolves it itself, exactly as `belay-catalogs resolve` does, from what discovery left on
   disk, and refuses when it does not;
-- the chosen entry's `start_from` has been read, with `belay-catalogs --json resolve <id>`.
-  When it is a mapping, or `null` with a `metadata_notes` entry about it, the module starts
-  from a ref, and `runner-protocol.md` section 18.6 comes first: the learner's new branch,
-  and the removal of the `tutorial/` that came with it, are what make the last precondition
-  below true. Once that section's steps 1 to 5 are done, this precondition is met and you go
-  on from step 1 below. When it is `null` with no note, the course may still start from a
-  ref, and that section's step 1 says what to check, both when `tutorial/` already exists and
-  once step 6 below has verified the instance;
+- the chosen entry has been read, with `belay-catalogs --json resolve <id>`. When its
+  `starts_from` is `ref`, the module starts from a ref, and `runner-protocol.md` section 18.6
+  comes first, unless it has already put the learner on the new branch: that branch, and the
+  removal of the `tutorial/` that came with it, are what make the last precondition below
+  true. Once that section's steps 1 to 5 are done, this precondition is met and you go on
+  from step 1 below. Any other `starts_from` is an ordinary course, and this asks nothing
+  more of it;
 - the workspace root is known, and satisfies the bundle's `workspace_kind`;
 - there is no existing `tutorial/` in that workspace. If there is, stop — `tutorial/` is
   singular, and materializing over it destroys a learner's progress. When the existing
@@ -153,8 +152,6 @@ names nothing outside the workspace. So do not copy, list or diff the bundle you
 do not ask the learner to add its directory with `/add-dir`. Every later read of the source
 goes through a command as well: `belay-catalogs place-supplies` (step 8) and
 `belay-plan-update` (section 3.2, and the resume check in `runner-protocol.md` section 1).
-The one exception is reading the `starts_from` key when this command refuses over an existing
-`tutorial/`, and it may ask the learner (`runner-protocol.md` section 18.6, step 1).
 
 The command fetches nothing, runs nothing the bundle declares, and builds the instance in a
 hidden staging directory that it renames to `tutorial/` only when every file is in place, so
@@ -1728,20 +1725,22 @@ It runs **once**, when a module that declares `starts_from: ref` is materialized
 
 1. **Read the learner's own previous `STATE.md`, through Git.** The branch is the one they
    named at `runner-protocol.md` section 18.6 step 3; read it with
-   `git show <their-previous-branch>:tutorial/STATE.md`, which changes nothing in their
+   `git show '<their-previous-branch>:tutorial/STATE.md'`, which changes nothing in their
    repository. When the branch is not in this checkout, that step had the learner fetch it,
-   and the name to read is `<remote>/<their-previous-branch>`. **Never read the
-   winner's** — not from the winner's branch, and not from the `tutorial/` that came with
-   the winner's code, which `runner-protocol.md` section 18.6 removed unread.
+   and the name to read is `<remote>/<their-previous-branch>`. **Never read anyone else's**
+   — not from the branch the start came from, unless that is also their own previous branch,
+   and not from the `tutorial/` that came with the starting code, which `runner-protocol.md`
+   section 18.6 removed unread.
 2. **Copy its `## Levels` into the new `STATE.md` unchanged** — every row, including rows
    for objectives this module does not cover.
 3. **Copy its `## Modules`, and append one row** for the module just finished (13.3). When
    that module's `status` is not `complete`, append nothing for it, and say so: the row
    records a finished module, and an unfinished one has no completion date to give it.
-4. **If the previous branch or its `STATE.md` cannot be read**, say so — which one, and
-   why — then write an empty *Levels* and an empty *Modules*, each saying `None.`, and
+4. **If the previous branch or its `STATE.md` cannot be read, or the learner has no
+   previous branch or chose at `runner-protocol.md` section 18.6 step 3 to go on without
+   carrying levels forward**, say so — which one, and why — then write an empty *Levels* and an empty *Modules*, each saying `None.`, and
    continue: every objective is at A (13.1). **Never borrow another learner's record** to
-   fill the gap, the winner's included. A level is a statement about one person.
+   fill the gap, including the one the start came from. A level is a statement about one person.
 
 Both sections are written in step 2 to 4 even when there is nothing to copy, so the new
 `STATE.md` shows that the carry-forward ran.

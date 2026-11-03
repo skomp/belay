@@ -151,8 +151,9 @@ without: section 7, item 7.)
 
 **Starting the module:**
 
-1. The runner reads `start_from` from the catalog entry that won the merge for the bundle's
-   `id`, and the tutor asks where to start, offering it as the suggestion when it is usable.
+1. `belay-catalogs --json resolve <id>` prints the bundle's `starts_from` and the `start_from`
+   of the catalog entry that won the merge for its `id`. When `starts_from` is `ref`, the tutor
+   asks where to start, offering `start_from` as the suggestion when it is usable.
    **With no usable `start_from` the tutor asks with no suggestion; the module does not
    stop.** `belay-catalogs check-start <repo> <ref>` holds the answer to the rules a
    `start_from` is held to, before any command is built from it, and on a failure the tutor
@@ -163,8 +164,9 @@ without: section 7, item 7.)
    never runs a Git operation that changes the participant's repository on its own, as
    `instance_git.py` already does not.
 3. The tutor has the participant remove the `tutorial/` directory that came with the
-   winner's code — only its tracked files, with `git rm -r -- tutorial/`. **The winner's
-   code carries over; the winner's progress never does.** Before the branch switch and
+   starting code — only its tracked files, with `git rm -r -- tutorial/`, and nothing when
+   `git ls-files -- tutorial/` lists none, as for a ref that never held an instance. **The
+   code carries over; its progress never does.** Before the branch switch and
    again before the removal, an untracked or ignored file in `tutorial/` (`git status
    --porcelain --ignored`) is the participant's own and stops the procedure until they
    decide what to do with it: `git switch` silently overwrites an ignored file the new
@@ -234,8 +236,8 @@ module starts. It is a summary of that module's `## Assessments`, never a copy o
 2.2, step 4):
 
 1. The tutor asks the participant for their **own** previous branch and reads its
-   `tutorial/STATE.md` through Git (`git show <branch>:tutorial/STATE.md`). It never reads the
-   winner's.
+   `tutorial/STATE.md` through Git (`git show <branch>:tutorial/STATE.md`). It never reads
+   anyone else's.
 2. It copies `## Levels` into the new `STATE.md` unchanged.
 3. It copies `## Modules` and appends one row for the module just finished.
 4. If the previous branch or its `STATE.md` cannot be read, the tutor says so, writes an
@@ -345,7 +347,7 @@ Every new key is additive and MAY: `goals` and `start_from` in a catalog; `level
 | Reader | Sees a course using this design | Result |
 |---|---|---|
 | this runner, `levels` and `starts_from` absent | — | exactly today's behaviour |
-| an older runner | unknown keys, ignored | the body for everyone, guided as today; the placement lesson runs as an ordinary assessment and offers practice; a `starts_from: ref` module starts in whatever workspace it is given, without the winner's code |
+| an older runner | unknown keys, ignored | the body for everyone, guided as today; the placement lesson runs as an ordinary assessment and offers practice; a `starts_from: ref` module starts in whatever workspace it is given, without its starting code |
 | an older validator | unknown top-level keys and entry fields; unknown lesson frontmatter keys | check 28 and catalog checks 1 and 3 **warn** and never reject; lesson frontmatter keys are read by name, so the new ones are not seen at all. Measured on 2026-11-03: nothing this design adds is inside a structure an older validator checks key by key |
 
 An older validator accepts a folder lesson's `material` files for one reason only: its
@@ -451,16 +453,14 @@ Implemented on 2026-11-03. Writing the protocol forced the first six decisions b
 this design left open; the seventh was the project owner's, later the same day. Each is
 stated once, where the tutor reads it.
 
-1. **The runner cannot see `starts_from` before materializing.** Discovery and `resolve`
-   read the catalogue entry, never the bundle, and the learner's new branch has to exist
-   before `tutorial/` is created. So the procedure keys on the entry: `--json resolve`'s
-   `start_from` decides whether to ask at once. With no `start_from` the tutor finds out from
-   the manifest: when `tutorial/` does not exist, from the instance it materializes, which the
-   learner then removes before the start; when `materialize` refuses because `tutorial/`
-   exists, as it does for a learner on their previous module's branch, from one read of the
-   bundle's `tutorial.yaml`, which the host may ask about (`runner-protocol.md` §18.6). A
-   later `resolve` that also printed the bundle's `starts_from` — it is allowed to open the
-   bundle — would remove both, and is the better fix now that this path is an ordinary one.
+1. **`resolve` says whether a bundle starts from a ref, before materializing.** The learner's
+   new branch has to exist before `tutorial/` is created, and `materialize` refuses over the
+   previous module's `tutorial/`, so the tutor has to know first. `belay-catalogs --json
+   resolve` prints the bundle's `starts_from`, which it is allowed to open: the value when
+   declared, `null` when not or when the bundle cannot be read (`runner-protocol.md` §18.6).
+   `discover` does not, because it never opens a bundle. Done on 2026-11-03 (belay#96); the
+   procedure first keyed on the entry's `start_from`, which stopped being able to decide this
+   once item 7 made that key optional. An ordinary course sees no new read and no new prompt.
 2. **Git argument hygiene is the reader's and the protocol's.** The catalogue reader drops
    a `start_from` whose `repo` host or scp user does not begin with a letter or digit,
    whose `repo` holds whitespace or any of `` ` $ ; | & < > ( ) ' " \ ``, or whose `ref`
@@ -496,10 +496,13 @@ stated once, where the tutor reads it.
    Now the tutor asks the participant for a repository and branch, `start_from` is only the
    suggested answer, and a `null` or absent one no longer stops anything. Three things follow.
    A typed value is held to the same rules by `belay-catalogs check-start`, a command that
-   takes the values and no path, so it needs no permission prompt; because that command is
+   takes the values and no path, so it is expected to start without a permission prompt,
+   though that has not been measured on a live host; because that command is
    itself the first shell line a typed value reaches, the protocol requires single quotes and
    `--`, and the command has no help option, so a value typed as `--help` can never exit 0.
-   The start may be any repository, so a ref with no `tutorial/` skips the removal. And since
+   The start may be any repository, so a ref with no `tutorial/` skips the removal. A previous
+   branch is a fact with one name, so one that fails the check is copied under a safe name, or
+   the participant goes on without carrying levels forward. And since
    nobody knows whose code a module starts on when it is written, its validators test
    behaviour only: an authoring obligation (`bundle-format.md` §2, §10) that nothing in the
    validator enforces.

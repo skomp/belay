@@ -3233,6 +3233,109 @@ def test_check_start() -> None:
 PROGRAMME_CATALOG = HERE / "fixtures" / "levelled-programme" / "catalog.yaml"
 
 
+def test_resolve_prints_the_bundles_starts_from() -> None:
+    """belay#96, through a real process: the tutor decides from this before materializing."""
+    print("\nresolve --json carries the bundle's starts_from:")
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        config = root / "catalogs.yaml"
+        odd = root / "odd"
+        broken = root / "broken"
+        for bundle, manifest in (
+            (odd, "id: odd\nstarts_from: branch\n"),
+            (broken, "id: [\n"),
+        ):
+            bundle.mkdir()
+            (bundle / "tutorial.yaml").write_text(manifest, encoding="utf-8")
+            (bundle / "STATE.template.md").write_text("x\n", encoding="utf-8")
+        catalog = root / "catalog.yaml"
+        entries = [
+            yaml_entry(name, name)
+            for name in ("odd", "broken")
+        ]
+        catalog.write_text(
+            "catalog_version: 1\ntutorials:\n" + "".join(entries), encoding="utf-8"
+        )
+        config.write_text(
+            file_config(
+                ("prog", PROGRAMME_CATALOG), ("sf", START_FROM_CATALOG), ("own", catalog)
+            ),
+            encoding="utf-8",
+        )
+
+        def resolve(identifier: str) -> tuple[int, dict]:
+            proc = subprocess.run(
+                [sys.executable, str(SCRIPTS / "catalogs.py"), "--config", str(config),
+                 "--cache-dir", str(root / "cache"), "--json", "resolve", identifier],
+                capture_output=True, text=True, timeout=60,
+                env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+            )
+            return proc.returncode, json.loads(proc.stdout)
+
+        code, entry = resolve("stockroom-forecasting")
+        record(
+            code == 0 and entry["starts_from"] == "ref",
+            "module 2 of the programme: starts_from is 'ref'",
+            f"exit {code}: {entry.get('starts_from', '(absent)')!r}",
+        )
+        code, entry = resolve("stockroom-basics")
+        record(
+            code == 0 and "starts_from" in entry and entry["starts_from"] is None,
+            "module 1 declares none: the key is there, and null",
+            f"exit {code}: {entry.get('starts_from', '(absent)')!r}",
+        )
+        code, entry = resolve("with-start")
+        record(
+            code == 1 and entry["bundle_present"] is False
+            and "starts_from" in entry and entry["starts_from"] is None
+            and entry["start_from"] is not None,
+            "a bundle whose path is missing: null, exit 1, and the entry's own "
+            "start_from is not mistaken for it",
+            f"exit {code}: {entry.get('starts_from', '(absent)')!r}",
+        )
+        code, entry = resolve("broken")
+        record(
+            "starts_from" in entry and entry["starts_from"] is None,
+            "a manifest that does not parse: null, never a crash",
+            f"exit {code}: {entry.get('starts_from', '(absent)')!r}",
+        )
+        code, entry = resolve("odd")
+        record(
+            entry["starts_from"] == "branch",
+            "an undefined value is reported as declared; judging it is check 36's",
+            f"exit {code}: {entry.get('starts_from', '(absent)')!r}",
+        )
+        proc = subprocess.run(
+            [sys.executable, str(SCRIPTS / "catalogs.py"), "--config", str(config),
+             "--cache-dir", str(root / "cache"), "--json", "discover"],
+            capture_output=True, text=True, timeout=60,
+            env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+        )
+        listed = json.loads(proc.stdout)["tutorials"]
+        record(
+            len(listed) >= 2 and not any("starts_from" in e for e in listed),
+            "discover does not carry it: discover never opens a bundle",
+            repr([e["id"] for e in listed if "starts_from" in e]),
+        )
+
+
+def yaml_entry(identifier: str, path: str) -> str:
+    return (
+        f"  - id: {identifier}\n"
+        f"    title: {identifier}\n"
+        f"    description: A course.\n"
+        f"    subjects: [testing]\n"
+        f"    level: beginner\n"
+        f"    workspace_kind: existing-repository\n"
+        f"    covers:\n"
+        f"      a-concept:\n"
+        f"        summary: A concept.\n"
+        f"    source:\n"
+        f"      type: local\n"
+        f"      path: {path}\n"
+    )
+
+
 def test_levelled_programme_end_to_end() -> None:
     """The fixture programme through the real commands, not just the parser.
 
@@ -4628,6 +4731,7 @@ def main() -> int:
         test_start_from_is_normalised_in_json,
         test_read_start_from_value_by_value,
         test_check_start,
+        test_resolve_prints_the_bundles_starts_from,
         test_levelled_programme_end_to_end,
     ):
         try:
