@@ -3912,6 +3912,75 @@ SELF_MATERIALIZING = {
 }
 
 
+# -- checks 40, 41: STATE.md's '## Levels' and '## Modules' ledgers
+
+D = "\u2014"
+LEVEL_ROWS_VALID = (
+    f"- `partition-offsets` {D} A {D} placement 2026-11-03\n"
+    f"- `retained-event-logs` {D} B {D} learner 2026-11-03 (asked to skip)\n"
+    f"- `consumer-groups` {D} C {D} lessons/01-hello.md 2026-11-04\n"
+)
+
+
+def _ledger(section: str, rows: str):
+    def mutate(root: Path) -> None:
+        append(root / "STATE.md", f"\n## {section}\n\n{rows}")
+    return mutate
+
+
+m_levels_valid = _ledger("Levels", LEVEL_ROWS_VALID)
+m_levels_none = _ledger("Levels", "- None\n")
+m_levels_unknown_id = _ledger(
+    "Levels", f"- `not-in-this-bundle` {D} B {D} placement 2026-11-03\n"
+)
+m_levels_generated_source = _ledger(
+    "Levels", f"- `x-y` {D} A {D} lessons.generated/02-extra.md 2026-11-03\n"
+)
+m_levels_wrapped = _ledger(
+    "Levels",
+    f"- `partition-offsets` {D} A {D} placement\n  2026-11-03 (a note that\n"
+    f"  wraps over lines)\n",
+)
+m_levels_level_d = _ledger(
+    "Levels", f"- `partition-offsets` {D} D {D} placement 2026-11-03\n"
+)
+m_levels_no_date = _ledger(
+    "Levels", f"- `partition-offsets` {D} A {D} placement\n"
+)
+m_levels_bad_source = _ledger(
+    "Levels", f"- `partition-offsets` {D} A {D} guess 2026-11-03\n"
+)
+m_levels_duplicate = _ledger(
+    "Levels",
+    f"- `partition-offsets` {D} A {D} placement 2026-11-03\n"
+    f"- `partition-offsets` {D} B {D} learner 2026-11-04\n",
+)
+m_levels_bad_id = _ledger(
+    "Levels", f"- `Partition_Offsets` {D} A {D} placement 2026-11-03\n"
+)
+m_modules_valid_tail = _ledger(
+    "Modules",
+    f"- `intro-module` {D} complete 2026-11-03 {D} branch module/intro; "
+    f"merged\n",
+)
+m_modules_valid_plain = _ledger(
+    "Modules", f"- `intro-module` {D} complete 2026-11-03 {D} branch module/intro\n"
+)
+m_modules_no_branch = _ledger(
+    "Modules", f"- `intro-module` {D} complete 2026-11-03\n"
+)
+m_modules_duplicate = _ledger(
+    "Modules",
+    f"- `intro-module` {D} complete 2026-11-03 {D} branch a\n"
+    f"- `intro-module` {D} complete 2026-11-04 {D} branch b\n",
+)
+m_modules_wrapped = _ledger(
+    "Modules",
+    f"- `intro-module` {D} complete 2026-11-03\n  {D} branch module/intro;\n"
+    f"  merged later\n",
+)
+
+
 @dataclass
 class Case:
     name: str
@@ -4984,6 +5053,42 @@ CASES: list[Case] = [
     Case("32: a scope that reads as a path and names no lesson", 32, "broker",
          "instance", m_assessment_scope_path_missing,
          "'lessons/03-replication.md'"),
+    # ---- checks 40, 41: STATE.md's '## Levels' and '## Modules' ledgers
+    Case("40: an instance with no '## Levels' section is silent", 40, "broker",
+         "instance", m_assesses_valid, kind="silent"),
+    Case("40: a '- None' bullet is skipped", 40, "broker", "instance",
+         m_levels_none, kind="silent"),
+    Case("40: three valid rows, one per source kind, are silent", 40, "broker",
+         "instance", m_levels_valid, kind="silent"),
+    Case("40: a lessons.generated/ source is silent", 40, "broker", "instance",
+         m_levels_generated_source, kind="silent"),
+    Case("40: an id not in covers is NOT a finding", 40, "broker", "instance",
+         m_levels_unknown_id, kind="silent"),
+    Case("40: a row wrapped over several lines is silent", 40, "broker",
+         "instance", m_levels_wrapped, kind="silent"),
+    Case("40: level D", 40, "broker", "instance", m_levels_level_d,
+         "'D', which is not one of A, B, C", where="STATE.md (## Levels)"),
+    Case("40: a row without a date", 40, "broker", "instance",
+         m_levels_no_date, "is not a level row", where="STATE.md (## Levels)"),
+    Case("40: an unknown source", 40, "broker", "instance", m_levels_bad_source,
+         "the source 'guess'", where="STATE.md (## Levels)"),
+    Case("40: a malformed id", 40, "broker", "instance", m_levels_bad_id,
+         "is not a concept id", where="STATE.md (## Levels)"),
+    Case("40: one id recorded twice", 40, "broker", "instance",
+         m_levels_duplicate, "recorded twice", where="STATE.md (## Levels)"),
+    Case("41: an instance with no '## Modules' section is silent", 41,
+         "broker", "instance", m_assesses_valid, kind="silent"),
+    Case("41: a valid row with a ';' tail is silent", 41, "broker", "instance",
+         m_modules_valid_tail, kind="silent"),
+    Case("41: a valid row without a tail is silent", 41, "broker", "instance",
+         m_modules_valid_plain, kind="silent"),
+    Case("41: a wrapped row is silent", 41, "broker", "instance",
+         m_modules_wrapped, kind="silent"),
+    Case("41: a row without a branch", 41, "broker", "instance",
+         m_modules_no_branch, "is not a module row",
+         where="STATE.md (## Modules)"),
+    Case("41: one module recorded twice", 41, "broker", "instance",
+         m_modules_duplicate, "recorded twice", where="STATE.md (## Modules)"),
     # ---- check 33 (warning only: the record is evidence, never progress)
     Case("33 (control): a well-formed learning record is quiet", 33, "cli",
          "instance", m_events_valid, kind="silent"),
@@ -9387,6 +9492,37 @@ def test_lesson_levels_check_status() -> None:
         )
 
 
+def test_ledger_checks_status() -> None:
+    """Checks 40 and 41: n/a without the section, ran with it, instance only."""
+    print("\nchecks 40 and 41: the status line, and bundle mode:")
+    for num, absent, present, label in (
+        (40, m_assesses_valid, m_levels_valid, "levels"),
+        (41, m_assesses_valid, m_modules_valid_plain, "modules"),
+    ):
+        for mutate, want, what in (
+            (absent, vb.NOT_APPLICABLE, "no section: n/a"),
+            (present, vb.RAN, "section present: ran"),
+        ):
+            with tempfile.TemporaryDirectory() as tmpdir:
+                root = fresh("broker", Path(tmpdir))
+                to_instance(root)
+                mutate(root)
+                report = vb.validate(root, "instance")
+            got = report.status.get(num, ("missing", ""))[0]
+            record(got == want, f"check {num} ({label}): {what}",
+                   f"status = {got!r}")
+        record(num in vb.INSTANCE_ONLY and num not in vb.WARNING_ONLY,
+               f"check {num} is instance-only and a finding",
+               f"INSTANCE_ONLY = {vb.INSTANCE_ONLY}")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = fresh("broker", Path(tmpdir))
+        report = vb.validate(root, "bundle")
+    noisy = [f for f in report.findings + report.warnings if f.check in (40, 41)]
+    record(not noisy and 40 not in report.status and 41 not in report.status,
+           "a bundle-mode run never reports check 40 or 41",
+           f"{noisy!r}, status = {report.status.get(40)!r}")
+
+
 def test_learning_record_check_status() -> None:
     """Check 33 is n/a without a record, instance-only, and warning-only."""
     print("\nlearning record check reports n/a where there is no record:")
@@ -9555,6 +9691,7 @@ def main() -> int:
     test_report_check_status()
     test_levels_check_status()
     test_lesson_levels_check_status()
+    test_ledger_checks_status()
     test_the_total_is_reproducible_from_this_commit()
     test_check_coverage()
 

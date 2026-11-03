@@ -55,6 +55,7 @@ accurate, or anything about learner code.
 from __future__ import annotations
 
 import argparse
+import datetime
 import os
 import re
 import sys
@@ -146,10 +147,14 @@ CHECKS: dict[int, str] = {
         "teaches to files that exist in its own folder, by level A, B or C",
     39: "placement, where a lesson declares it, is a boolean on an "
         "assessment, on at most one lesson, and not on an optional lesson",
+    40: "[instance] STATE.md's '## Levels' ledger is well-formed: levels A, "
+        "B or C, a known source, a date, one row per id",
+    41: "[instance] STATE.md's '## Modules' ledger is well-formed: complete, "
+        "a date and a branch, one row per module",
 }
 
 BUNDLE_ONLY = {12, 13, 26}
-INSTANCE_ONLY = {11, 14, 15, 17, 21, 32, 33}
+INSTANCE_ONLY = {11, 14, 15, 17, 21, 32, 33, 40, 41}
 
 # Checks that can only ever WARN, never produce a finding.
 #
@@ -361,6 +366,27 @@ _NOT_DEMONSTRATED_RE = re.compile(r"not demonstrated[ \t]*:", re.IGNORECASE)
 # with the multiplication sign (U+00D7) or, after a space, an ASCII x.
 _NOT_DEMONSTRATED_ITEM_RE = re.compile(
     r"^(?P<id>\S+?)(?:(?:[ \t]*\u00d7|[ \t]+x)[ \t]*(?P<count>\S+))?$"
+)
+
+# STATE.md's `## Levels` and `## Modules` ledgers (checks 40 and 41). Neither
+# depends on `levels: true`: a ledger carried forward from an earlier course
+# may sit in an instance of a bundle that does not use levels, and an id that
+# is not in this bundle's `covers` is therefore not a finding. The dashes are
+# written as escapes, as above.
+LEVELS_SECTION = "Levels"
+MODULES_SECTION = "Modules"
+LEDGER_LEVELS = ("A", "B", "C")
+_LEDGER_ID_RE = re.compile(r"[a-z0-9-]+")
+_DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
+_LEVEL_RECORD_RE = re.compile(
+    r"^[-*+][ \t]+`(?P<id>[^`]+)`[ \t]*\u2014[ \t]*(?P<level>\S+)[ \t]*"
+    r"\u2014[ \t]*(?P<source>\S+)[ \t]+(?P<date>\d{4}-\d{2}-\d{2})"
+    r"(?:[ \t]+\((?P<note>.*)\))?[ \t]*$"
+)
+_MODULE_RECORD_RE = re.compile(
+    r"^[-*+][ \t]+`(?P<id>[^`]+)`[ \t]*\u2014[ \t]*complete[ \t]+"
+    r"(?P<date>\d{4}-\d{2}-\d{2})[ \t]*\u2014[ \t]*branch[ \t]+"
+    r"(?P<branch>[^\s;]+)[ \t]*(?:;(?P<note>.*))?$"
 )
 
 # Progress markers (check 5).
@@ -2737,6 +2763,21 @@ def check_placement(lessons: list[Lesson], manifest: Any, report: Report) -> Non
         )
 
 
+def join_bullets(lines: list[str]) -> list[str]:
+    """The bullets of a STATE.md section, a wrapped bullet joined into one line.
+
+    The conventional `- None` bullet ("nothing to record") is dropped. Shared
+    by the Assessments, Levels and Modules parsers.
+    """
+    entries: list[str] = []
+    for line in lines:
+        if re.match(r"^[-*+][ \t]", line):
+            entries.append(line.strip())
+        elif entries and line.strip():
+            entries[-1] = entries[-1] + " " + line.strip()
+    return [e for e in entries if not re.fullmatch(r"[-*+][ \t]+[Nn]one\.?", e)]
+
+
 def parse_assessment_records(
     lines: list[str],
 ) -> list[tuple[str, dict[str, Any] | None]]:
@@ -2751,16 +2792,8 @@ def parse_assessment_records(
     Check 32 is built on this, and so is the suite's proof that `skipped` and
     `passed` read back as two different states.
     """
-    entries: list[str] = []
-    for line in lines:
-        if re.match(r"^[-*+][ \t]", line):
-            entries.append(line.strip())
-        elif entries and line.strip():
-            entries[-1] = entries[-1] + " " + line.strip()
     out: list[tuple[str, dict[str, Any] | None]] = []
-    for entry in entries:
-        if re.fullmatch(r"[-*+][ \t]+[Nn]one\.?", entry):
-            continue  # the conventional "nothing to record" bullet
+    for entry in join_bullets(lines):
         match = _ASSESSMENT_RECORD_RE.match(entry)
         if match is None:
             out.append((entry, None))
@@ -2783,6 +2816,183 @@ def parse_assessment_records(
             )
         )
     return out
+
+
+def parse_level_records(
+    lines: list[str],
+) -> list[tuple[str, dict[str, Any] | None]]:
+    """Parse the bullets of a '## Levels' section.
+
+    Returns one (entry text, record) pair per bullet, a wrapped bullet joined
+    into one line. `record` is None when the bullet does not have the shape
+    `` `id` - LEVEL - SOURCE YYYY-MM-DD`` with an optional ``(note)``;
+    otherwise it carries `id`, `level`, `source`, `date` and `note` (None when
+    absent). Whether the level, source and id are VALID is check 40's job.
+    """
+    out: list[tuple[str, dict[str, Any] | None]] = []
+    for entry in join_bullets(lines):
+        match = _LEVEL_RECORD_RE.match(entry)
+        out.append((entry, match.groupdict() if match else None))
+    return out
+
+
+def parse_module_records(
+    lines: list[str],
+) -> list[tuple[str, dict[str, Any] | None]]:
+    """Parse the bullets of a '## Modules' section.
+
+    Same pairing as `parse_level_records`. A record carries `id`, `date`,
+    `branch` and `note` (the free text after an optional ';', else None).
+    """
+    out: list[tuple[str, dict[str, Any] | None]] = []
+    for entry in join_bullets(lines):
+        match = _MODULE_RECORD_RE.match(entry)
+        out.append((entry, match.groupdict() if match else None))
+    return out
+
+
+def _ledger_lines(
+    root: Path, section: str, num: int, report: Report
+) -> list[str] | None:
+    """The lines of a STATE.md ledger section, or None after reporting n/a."""
+    if "STATE.md" not in list_dir(root):
+        report.na(num, "there is no STATE.md (see check 7)")
+        return None
+    text = read_text(root / "STATE.md")
+    if text is None:
+        report.na(num, "STATE.md could not be read (see check 11)")
+        return None
+    _, body = split_frontmatter(text)
+    lines = section_lines(body, section)
+    if lines is None:
+        report.na(num, f"STATE.md has no '## {section}' section")
+    return lines
+
+
+def _real_date(value: str) -> bool:
+    try:
+        datetime.date.fromisoformat(value)
+    except ValueError:
+        return False
+    return True
+
+
+def check_levels_ledger(root: Path, report: Report) -> None:
+    """Check 40 - instance mode. Mirrors check 32.
+
+    STATE.md's `## Levels` records one row per concept id, updated in place:
+    the level (A, B or C) the learner works at, where that came from
+    (`placement`, `learner`, or a lesson path) and the date. This proves the
+    SHAPE of the ledger only. An id that is not in this bundle's `covers` is
+    NOT a finding: the ledger may be carried forward from an earlier course,
+    and it does not depend on `levels: true`.
+
+    No section is normal and reports n/a.
+    """
+    where = f"STATE.md (## {LEVELS_SECTION})"
+    lines = _ledger_lines(root, LEVELS_SECTION, 40, report)
+    if lines is None:
+        return
+    seen: dict[str, str] = {}
+    rows = 0
+    for entry, record in parse_level_records(lines):
+        if record is None:
+            report.add(
+                40,
+                where,
+                f"the entry {entry[:70]!r} is not a level row. Each one is the "
+                f"concept id in backticks, a dash, {', '.join(LEDGER_LEVELS)}, "
+                f"a dash, the source (placement, learner or a lesson path) and "
+                f"a YYYY-MM-DD date.",
+            )
+            continue
+        rows += 1
+        cid, level, source = record["id"], record["level"], record["source"]
+        if not _LEDGER_ID_RE.fullmatch(cid):
+            report.add(
+                40, where,
+                f"{cid!r} is not a concept id (lowercase letters, digits and "
+                f"hyphens).",
+            )
+        if cid in seen:
+            report.add(
+                40, where,
+                f"{cid!r} is recorded twice, at {seen[cid]!r} and {level!r}. "
+                f"One concept has one row, updated in place.",
+            )
+        else:
+            seen[cid] = level
+        if level not in LEDGER_LEVELS:
+            report.add(
+                40, where,
+                f"{cid!r} is at level {level!r}, which is not one of "
+                f"{', '.join(LEDGER_LEVELS)}.",
+            )
+        if source not in ("placement", "learner") and not source.startswith(
+            ("lessons/", "lessons.generated/")
+        ):
+            report.add(
+                40, where,
+                f"{cid!r} has the source {source!r}. It is 'placement', "
+                f"'learner', or a path starting 'lessons/' or "
+                f"'lessons.generated/'.",
+            )
+        if not _real_date(record["date"]):
+            report.add(
+                40, where,
+                f"{cid!r} has the date {record['date']!r}, which is not a "
+                f"calendar date.",
+            )
+    report.ran(40, f"{rows} level row(s)")
+
+
+def check_modules_ledger(root: Path, report: Report) -> None:
+    """Check 41 - instance mode. Mirrors check 40.
+
+    STATE.md's `## Modules` records one row per module id, updated in place:
+    complete, the date, and the branch the module was done on, with optional
+    free text after a ';'. SHAPE only; the module id is not looked up.
+
+    No section is normal and reports n/a.
+    """
+    where = f"STATE.md (## {MODULES_SECTION})"
+    lines = _ledger_lines(root, MODULES_SECTION, 41, report)
+    if lines is None:
+        return
+    seen: set[str] = set()
+    rows = 0
+    for entry, record in parse_module_records(lines):
+        if record is None:
+            report.add(
+                41,
+                where,
+                f"the entry {entry[:70]!r} is not a module row. Each one is the "
+                f"module id in backticks, 'complete' and a YYYY-MM-DD date, and "
+                f"'branch' and the branch name, with an optional ';' and text.",
+            )
+            continue
+        rows += 1
+        mid = record["id"]
+        if not _LEDGER_ID_RE.fullmatch(mid):
+            report.add(
+                41, where,
+                f"{mid!r} is not a module id (lowercase letters, digits and "
+                f"hyphens).",
+            )
+        if mid in seen:
+            report.add(
+                41, where,
+                f"{mid!r} is recorded twice. One module has one row, updated "
+                f"in place.",
+            )
+        seen.add(mid)
+        if not _real_date(record["date"]):
+            report.add(
+                41, where,
+                f"{mid!r} has the date {record['date']!r}, which is not a "
+                f"calendar date.",
+            )
+    report.ran(41, f"{rows} module row(s)")
 
 
 def check_assessment_state(
@@ -5486,6 +5696,8 @@ def validate(target: Path, mode: str) -> Report:
         check_assessment_state(
             target, manifest_dict, optional_keys, generated, assessments, report
         )
+        check_levels_ledger(target, report)
+        check_modules_ledger(target, report)
         check_learning_record(target, report)
 
     return report
