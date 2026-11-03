@@ -151,6 +151,15 @@ CHECKS: dict[int, str] = {
         "B or C, a known source, a date, one row per id",
     41: "[instance] STATE.md's '## Modules' ledger is well-formed: complete, "
         "a date and a branch, one row per module",
+    42: "tasks, where a lesson declares it, names a real directory inside the "
+        "lesson's own folder that holds at least one .md file",
+    43: "every task file is well-formed: id, title and priority; ids unique "
+        "and equal to the filename; each listed by the lesson body, and every "
+        "task path the body lists exists",
+    44: "task_states, where a lesson declares it, is a non-empty list of "
+        "distinct [a-z0-9-]+ names, never 'skipped', and needs tasks",
+    45: "own_tasks, where a lesson declares it, is a relative workspace path "
+        "and needs tasks",
 }
 
 BUNDLE_ONLY = {12, 13, 26}
@@ -2774,6 +2783,375 @@ def check_placement(lessons: list[Lesson], manifest: Any, report: Report) -> Non
         report.ran(
             39, f"{declared} declaration(s), {len(marked)} placement lesson(s)"
         )
+
+
+# Lesson frontmatter for task lessons (checks 42-45).
+TASKS_KEY = "tasks"
+TASK_STATES_KEY = "task_states"
+OWN_TASKS_KEY = "own_tasks"
+_TASK_ID_RE = re.compile(r"[a-z0-9-]+")
+
+
+def _tasks_dir_problem(lesson: Lesson, rel: Any) -> tuple[Path | None, str | None]:
+    """The `tasks` directory of a lesson, or why it cannot be used.
+
+    Returns (directory, None) when `rel` names a real directory inside the
+    lesson's own folder, otherwise (None, reason). A trailing '/' is the
+    conventional spelling and is dropped. Every component is matched in exact
+    case, and a symbolic link anywhere on the way is refused, because
+    following one could leave the folder and the runner would hand what is
+    behind it to the learner.
+    """
+    if lesson.folder is None:
+        return None, (
+            "tasks needs a folder lesson: the task files live beside "
+            "LESSON.md, and a single-file lesson has no folder. Move the "
+            "lesson to <slug>/LESSON.md or remove tasks."
+        )
+    if not isinstance(rel, str) or not rel.strip():
+        return None, f"tasks is {rel!r}; it must be a directory path"
+    if rel.startswith("/"):
+        return None, f"tasks {rel!r} is absolute; it must be relative to the lesson folder"
+    trimmed = rel.rstrip("/")
+    if ".." in trimmed.split("/"):
+        return None, f"tasks {rel!r} has a '..' segment; it must stay inside the lesson folder"
+    found, reason = resolve_exact(lesson.folder, trimmed)
+    if found is None:
+        return None, f"tasks {rel!r}: {reason}"
+    current = lesson.folder
+    for part in trimmed.split("/"):
+        current = current / part
+        if current.is_symlink():
+            return None, f"tasks {rel!r} passes through a symbolic link, which is not followed"
+    if not found.is_dir():
+        return None, f"tasks {rel!r} is not a directory"
+    return found, None
+
+
+def _task_file_names(directory: Path) -> list[str]:
+    """The `.md` entries directly inside `directory`, sorted.
+
+    Only the directory's own entries count: a subdirectory is not a task
+    file, and neither is a file of another type, which check 6 still judges.
+    A dotfile is skipped, as check 6 skips it.
+    """
+    return [
+        name
+        for name in list_dir(directory)
+        if name.endswith(".md")
+        and not name.startswith(".")
+        and (directory / name).is_file()
+    ]
+
+
+def task_file_problems(path: Path) -> list[str]:
+    """Why one task file is malformed, as messages; empty when it is sound.
+
+    The rules of spec section 2.1 for a single file: frontmatter present and
+    parsing; `id` matching [a-z0-9-]+ and equal to the filename stem; `title`
+    a non-empty string; `priority` an integer and not a boolean (True is an
+    int in Python, so a bare isinstance would accept `priority: yes`). It
+    does not apply the rules that need the whole directory or the lesson
+    body: uniqueness of ids and the listing rule belong to check 43.
+    """
+    if path.is_symlink():
+        return ["is a symbolic link, which is not followed"]
+    text = read_text(path)
+    if text is None:
+        return ["cannot be read as UTF-8 text"]
+    fm_text, _ = split_frontmatter(text)
+    if fm_text is None:
+        return ["has no YAML frontmatter; a task file needs id, title and priority"]
+    try:
+        fm = load_yaml(fm_text, path.name + " frontmatter")
+    except YamlError as exc:
+        return [f"frontmatter does not parse: {exc}"]
+    if not isinstance(fm, dict):
+        return ["frontmatter is not a mapping of keys to values"]
+    problems: list[str] = []
+    task_id = fm.get("id")
+    if "id" not in fm:
+        problems.append("has no 'id'")
+    elif not isinstance(task_id, str) or not _TASK_ID_RE.fullmatch(task_id):
+        problems.append(f"id is {task_id!r}; it must be a string matching [a-z0-9-]+")
+    elif task_id != path.stem:
+        problems.append(
+            f"id is {task_id!r} but the filename stem is {path.stem!r}; they "
+            f"must be equal"
+        )
+    title = fm.get("title")
+    if "title" not in fm:
+        problems.append("has no 'title'")
+    elif not _is_text(title):
+        problems.append(f"title is {title!r}; it must be a non-empty string")
+    priority = fm.get("priority")
+    if "priority" not in fm:
+        problems.append("has no 'priority'")
+    elif not isinstance(priority, int) or isinstance(priority, bool):
+        problems.append(f"priority is {priority!r}; it must be an integer")
+    return problems
+
+
+def check_tasks(lessons: list[Lesson], report: Report) -> None:
+    """Check 42 - both modes.
+
+    `tasks` turns a lesson into a task lesson: a directory in the lesson's
+    own folder holding the task files. The directory must be relative, stay
+    inside the folder, be reached without a symbolic link, exist, and hold at
+    least one `.md` file directly inside it. Check 43 judges the files.
+
+    A bundle in which no lesson declares `tasks` is silent and n/a.
+    """
+    declared = 0
+    for lesson in lessons:
+        fm = _lesson_frontmatter(lesson)
+        if fm is None or TASKS_KEY not in fm:
+            continue
+        declared += 1
+        directory, problem = _tasks_dir_problem(lesson, fm[TASKS_KEY])
+        if directory is None:
+            report.add(42, lesson.rel, problem or "tasks is unusable")
+            continue
+        if not _task_file_names(directory):
+            report.add(
+                42,
+                lesson.rel,
+                f"tasks {fm[TASKS_KEY]!r} holds no .md file directly inside "
+                f"it. A task lesson needs at least one task file; subfolders "
+                f"are not searched.",
+            )
+    if not declared:
+        report.na(42, "no lesson declares tasks")
+    else:
+        report.ran(42, f"{declared} task lesson(s)")
+
+
+def check_task_files(root: Path, lessons: list[Lesson], report: Report) -> None:
+    """Check 43 - both modes.
+
+    Judges each `.md` file directly inside a lesson's `tasks` directory with
+    `task_file_problems`, then the rules that need more than one file: two
+    files with one `id`, a file the lesson body does not list, and a path the
+    body lists under the directory that does not exist.
+
+    Listing means the exact relative path (`stories/a.md`) appears in the body
+    as a delimited token, the rule `names_file` uses for check 6, so
+    `stories/a.md` is not satisfied by `stories/aa.md` or `stories/a.md.bak`.
+    The frontmatter does not count: the body is what an older runner teaches
+    from. Check 6's basename shortcut does not apply here either.
+
+    A `tasks` directory check 42 rejects is skipped; 42 reports it. Files of
+    other types in the directory are not task files and check 6 still judges
+    them. A bundle with no `tasks` key is silent and n/a.
+    """
+    declared = 0
+    files = 0
+    for lesson in lessons:
+        fm = _lesson_frontmatter(lesson)
+        if fm is None or TASKS_KEY not in fm:
+            continue
+        declared += 1
+        directory, _ = _tasks_dir_problem(lesson, fm[TASKS_KEY])
+        if directory is None or lesson.folder is None:
+            continue
+        text = read_text(lesson.path)
+        _, body = split_frontmatter(text) if text is not None else (None, "")
+        rel_dir = directory.relative_to(lesson.folder).as_posix()
+        folder_rel = lesson.folder.relative_to(root).as_posix()
+        by_id: dict[str, list[str]] = {}
+        names = _task_file_names(directory)
+        for name in names:
+            files += 1
+            where = f"{folder_rel}/{rel_dir}/{name}"
+            for problem in task_file_problems(directory / name):
+                report.add(43, where, f"{name} {problem}.")
+            task_id = _task_file_id(directory / name)
+            if task_id is not None:
+                by_id.setdefault(task_id, []).append(where)
+            listed = f"{rel_dir}/{name}"
+            if not _lists_path(body, listed):
+                report.add(
+                    43,
+                    where,
+                    f"{lesson.rel} does not list {listed!r} in its body. The "
+                    f"body lists every task file by path, one line each with "
+                    f"its title: an older runner teaches from that list, and "
+                    f"an older validator's check 6 accepts the file only "
+                    f"because of it.",
+                )
+        for task_id, wheres in by_id.items():
+            if len(wheres) > 1:
+                report.add(
+                    43,
+                    ", ".join(wheres),
+                    f"{len(wheres)} task files have the id {task_id!r}. An id "
+                    f"is unique in the directory, because a '## Tasks' row "
+                    f"names a task by it.",
+                )
+        listed_paths = re.finditer(
+            r"(?<![A-Za-z0-9_./\\-])"
+            + re.escape(rel_dir)
+            + r"/[A-Za-z0-9_./-]*?\.md(?![A-Za-z0-9_-])(?!\.[A-Za-z0-9])",
+            body,
+        )
+        reported: set[str] = set()
+        for match in listed_paths:
+            listed = match.group(0)
+            if listed in reported:
+                continue
+            reported.add(listed)
+            found, _ = resolve_exact(lesson.folder, listed)
+            if found is None or not found.is_file():
+                report.add(
+                    43,
+                    lesson.rel,
+                    f"the body lists {listed!r}, which does not exist in the "
+                    f"lesson's folder. Remove the line or add the file.",
+                )
+    if not declared:
+        report.na(43, "no lesson declares tasks")
+    else:
+        report.ran(43, f"{files} task file(s) in {declared} task lesson(s)")
+
+
+def _task_file_id(path: Path) -> str | None:
+    """The `id` of a task file, when it is a string; None when unreadable."""
+    text = read_text(path)
+    if text is None or path.is_symlink():
+        return None
+    fm_text, _ = split_frontmatter(text)
+    if fm_text is None:
+        return None
+    try:
+        fm = load_yaml(fm_text, path.name + " frontmatter")
+    except YamlError:
+        return None
+    value = fm.get("id") if isinstance(fm, dict) else None
+    return value if isinstance(value, str) else None
+
+
+def _lists_path(body: str, rel: str) -> bool:
+    """True if `rel` appears in `body` as a delimited token, whole path only."""
+    pattern = (
+        r"(?<![A-Za-z0-9_./\\-])"
+        + re.escape(rel)
+        + r"(?![A-Za-z0-9_-])(?!\.[A-Za-z0-9])"
+    )
+    return re.search(pattern, body) is not None
+
+
+def check_task_states(lessons: list[Lesson], report: Report) -> None:
+    """Check 44 - both modes.
+
+    `task_states` names the states a task passes through, in order; the last
+    one means done. It needs `tasks`, must be a non-empty list of distinct
+    names matching [a-z0-9-]+, and must not list `skipped`, which is reserved
+    and always available. A bundle with no `task_states` is silent and n/a.
+    """
+    declared = 0
+    for lesson in lessons:
+        fm = _lesson_frontmatter(lesson)
+        if fm is None or TASK_STATES_KEY not in fm:
+            continue
+        declared += 1
+        value = fm[TASK_STATES_KEY]
+        if TASKS_KEY not in fm:
+            report.add(
+                44,
+                lesson.rel,
+                "task_states without 'tasks'. The states are those of the "
+                "lesson's tasks, so a lesson with no tasks has nothing to "
+                "declare them for.",
+            )
+        if not isinstance(value, list) or not value:
+            shown = "nothing" if value is None else repr(value)
+            report.add(
+                44,
+                lesson.rel,
+                f"task_states is {shown}; it must be a non-empty list of "
+                f"state names, in order. Omit it to get [in-progress, done].",
+            )
+            continue
+        seen: set[str] = set()
+        for entry in value:
+            if not isinstance(entry, str) or not _TASK_ID_RE.fullmatch(entry):
+                report.add(
+                    44,
+                    lesson.rel,
+                    f"task_states names {entry!r}, which is not a state name. "
+                    f"A state is a string matching [a-z0-9-]+.",
+                )
+                continue
+            if entry == "skipped":
+                report.add(
+                    44,
+                    lesson.rel,
+                    "task_states lists 'skipped'. It is reserved and always "
+                    "available, so it is not declared.",
+                )
+            if entry in seen:
+                report.add(
+                    44,
+                    lesson.rel,
+                    f"task_states lists {entry!r} more than once; each state "
+                    f"appears once.",
+                )
+            seen.add(entry)
+    if not declared:
+        report.na(44, "no lesson declares task_states")
+    else:
+        report.ran(44, f"{declared} declaration(s)")
+
+
+def check_own_tasks(lessons: list[Lesson], report: Report) -> None:
+    """Check 45 - both modes.
+
+    `own_tasks` is a directory in the learner's workspace where they write
+    task files of their own. It needs `tasks`, must be a string, and must be
+    relative with no `..` segment. It is not resolved against the bundle,
+    because it names a place in a workspace that does not exist yet.
+    A bundle with no `own_tasks` is silent and n/a.
+    """
+    declared = 0
+    for lesson in lessons:
+        fm = _lesson_frontmatter(lesson)
+        if fm is None or OWN_TASKS_KEY not in fm:
+            continue
+        declared += 1
+        value = fm[OWN_TASKS_KEY]
+        if TASKS_KEY not in fm:
+            report.add(
+                45,
+                lesson.rel,
+                "own_tasks without 'tasks'. A learner's own tasks follow the "
+                "lesson's task format and states, so the lesson must declare "
+                "'tasks'.",
+            )
+        if not isinstance(value, str) or not value.strip():
+            report.add(
+                45,
+                lesson.rel,
+                f"own_tasks is {value!r}; it must be a directory path in the "
+                f"workspace.",
+            )
+        elif value.startswith("/"):
+            report.add(
+                45,
+                lesson.rel,
+                f"own_tasks {value!r} is absolute; it must be relative to the "
+                f"workspace root.",
+            )
+        elif ".." in value.split("/"):
+            report.add(
+                45,
+                lesson.rel,
+                f"own_tasks {value!r} has a '..' segment; it must stay inside "
+                f"the workspace.",
+            )
+    if not declared:
+        report.na(45, "no lesson declares own_tasks")
+    else:
+        report.ran(45, f"{declared} declaration(s)")
 
 
 def join_bullets(lines: list[str]) -> list[str]:
@@ -5661,6 +6039,11 @@ def validate(target: Path, mode: str) -> Report:
     # (Check 38 ran above, ahead of check 6, which consumes its result.)
     check_teaches(all_lessons, manifest_dict, report)
     check_placement(all_lessons, manifest_dict, report)
+    # Checks 42-45, both modes, over all_lessons for check 31's reason.
+    check_tasks(all_lessons, report)
+    check_task_files(target, all_lessons, report)
+    check_task_states(all_lessons, report)
+    check_own_tasks(all_lessons, report)
     # Disclosure, and NOT a check: no finding, no warning, no number, no
     # effect on the exit code. It is derived here rather than by the tutor so
     # that the banner's content is testable, and it is given the RAW manifest

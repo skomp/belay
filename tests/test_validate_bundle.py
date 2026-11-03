@@ -4022,6 +4022,240 @@ m_levels_subsection = _ledger(
 )
 
 
+# -- checks 42-45: task lessons (a folder of task files)
+
+LESSON_DIR_STORIES = "lessons/01-subcommands/stories/"
+
+TASK_LESSON_DIR = "lessons/01-subcommands"
+
+
+def _task_file(root: Path, name: str, *, id_: str | None = None,
+               title: str = "A task", priority: str = "1",
+               fm: str | None = None, sub: str = "stories") -> None:
+    folder = root / TASK_LESSON_DIR / sub
+    folder.mkdir(parents=True, exist_ok=True)
+    stem = name[:-3] if name.endswith(".md") else name
+    head = fm if fm is not None else (
+        f"id: {id_ or stem}\ntitle: {title}\npriority: {priority}\n"
+    )
+    (folder / name).write_text(f"---\n{head}---\nAs a user I want X.\n")
+
+
+def _task_lesson(root: Path, names=("a.md", "b.md"), *, list_body=True,
+                 extra_fm: str = "") -> None:
+    """A valid task lesson on the cli folder lesson: files, listing, key."""
+    for name in names:
+        _task_file(root, name)
+    if list_body:
+        append(root / CLI_LESSON_01,
+               "\n" + "".join(f"- stories/{n} - A task\n" for n in names))
+    _add_fm(root, CLI_LESSON_01, "tasks: stories/\n" + extra_fm)
+
+
+def m_tasks_absent(root: Path) -> None:
+    for rel in (CLI_LESSON_00, CLI_LESSON_01, CLI_LESSON_02, CLI_OPTIONAL):
+        text = (root / rel).read_text()
+        for key in ("tasks:", "task_states:", "own_tasks:"):
+            assert key not in text
+
+
+def m_tasks_valid(root: Path) -> None:
+    _task_lesson(root, extra_fm="task_states: [specifying, done]\n"
+                                "own_tasks: my-stories/\n")
+
+
+def m_tasks_single_file(root: Path) -> None:
+    _add_fm(root, CLI_LESSON_00, "tasks: stories/\n")
+
+
+def _tasks_value(root: Path, value: str) -> None:
+    _task_lesson(root)
+    path = root / CLI_LESSON_01
+    edit(path, "tasks: stories/\n", f"tasks: {value}\n")
+
+
+def m_tasks_not_string(root: Path) -> None:
+    _tasks_value(root, "[stories/]")
+
+
+def m_tasks_absolute(root: Path) -> None:
+    _tasks_value(root, "/stories/")
+
+
+def m_tasks_dotdot(root: Path) -> None:
+    _tasks_value(root, "../stories/")
+
+
+def m_tasks_symlink(root: Path) -> None:
+    _task_lesson(root)
+    folder = root / TASK_LESSON_DIR
+    (folder / "linked").symlink_to(folder / "stories")
+    edit(root / CLI_LESSON_01, "tasks: stories/\n", "tasks: linked/\n")
+
+
+def m_tasks_missing_dir(root: Path) -> None:
+    _tasks_value(root, "nowhere/")
+
+
+def m_tasks_no_md(root: Path) -> None:
+    _task_lesson(root)
+    for f in (root / TASK_LESSON_DIR / "stories").glob("*.md"):
+        f.unlink()
+    (root / TASK_LESSON_DIR / "stories" / "diagram.txt").write_text("x\n")
+    # a task file in a subdirectory is not directly inside
+    _task_file(root, "deep.md", sub="stories/sub")
+
+
+def m_files_not_listed(root: Path) -> None:
+    _task_lesson(root, names=("a.md", "b.md"))
+    _task_file(root, "c.md")
+
+
+def m_files_prefix_listed(root: Path) -> None:
+    """Review Focus 2: stories/aa.md is listed, stories/a.md is not."""
+    _task_file(root, "a.md")
+    _task_file(root, "aa.md")
+    append(root / CLI_LESSON_01, "\n- stories/aa.md - A task\n")
+    _add_fm(root, CLI_LESSON_01, "tasks: stories/\n")
+
+
+def m_files_suffix_listed(root: Path) -> None:
+    """stories/a.md.bak does not list stories/a.md either."""
+    _task_file(root, "a.md")
+    append(root / CLI_LESSON_01, "\n- stories/a.md.bak\n")
+    _add_fm(root, CLI_LESSON_01, "tasks: stories/\n")
+
+
+def m_files_listed_missing(root: Path) -> None:
+    _task_lesson(root, names=("a.md",))
+    append(root / CLI_LESSON_01, "- stories/ghost.md - Not there\n")
+
+
+def m_files_non_md(root: Path) -> None:
+    """Review Focus 3: a non-.md file is no task file, and check 6 judges it."""
+    _task_lesson(root, names=("a.md",))
+    (root / TASK_LESSON_DIR / "stories" / "flow.svg").write_text("<svg/>\n")
+
+
+def m_files_non_md_named(root: Path) -> None:
+    """The same file, named in the body as check 6 requires: all silent."""
+    m_files_non_md(root)
+    append(root / CLI_LESSON_01, "- stories/flow.svg is the flow diagram\n")
+
+
+def m_files_subdir_md(root: Path) -> None:
+    """A subdirectory's .md file is not a task file: no frontmatter needed."""
+    _task_lesson(root, names=("a.md",))
+    sub = root / TASK_LESSON_DIR / "stories" / "notes"
+    sub.mkdir()
+    (sub / "plain.md").write_text("no frontmatter\n")
+    append(root / CLI_LESSON_01, "- stories/notes/plain.md\n")
+
+
+def _one_file(root: Path, **kw) -> None:
+    _task_file(root, "a.md", **kw)
+    append(root / CLI_LESSON_01, "\n- stories/a.md - A task\n")
+    _add_fm(root, CLI_LESSON_01, "tasks: stories/\n")
+
+
+def m_files_no_frontmatter(root: Path) -> None:
+    folder = root / TASK_LESSON_DIR / "stories"
+    folder.mkdir()
+    (folder / "a.md").write_text("just a body\n")
+    append(root / CLI_LESSON_01, "\n- stories/a.md\n")
+    _add_fm(root, CLI_LESSON_01, "tasks: stories/\n")
+
+
+def m_files_no_title(root: Path) -> None:
+    _one_file(root, fm="id: a\npriority: 1\n")
+
+
+def m_files_empty_title(root: Path) -> None:
+    _one_file(root, fm='id: a\ntitle: ""\npriority: 1\n')
+
+
+def m_files_no_priority(root: Path) -> None:
+    _one_file(root, fm="id: a\ntitle: T\n")
+
+
+def m_files_priority_string(root: Path) -> None:
+    _one_file(root, priority='"1"')
+
+
+def m_files_priority_bool(root: Path) -> None:
+    _one_file(root, priority="true")
+
+
+def m_files_bad_id(root: Path) -> None:
+    _one_file(root, fm="id: A_B\ntitle: T\npriority: 1\n")
+
+
+def m_files_id_not_stem(root: Path) -> None:
+    _one_file(root, fm="id: other\ntitle: T\npriority: 1\n")
+
+
+def m_files_duplicate_id(root: Path) -> None:
+    """Two files, one id: both also differ from their stem, but the
+    duplicate finding is its own."""
+    _task_lesson(root, names=("a.md", "b.md"))
+    _task_file(root, "b.md", fm="id: a\ntitle: T\npriority: 2\n")
+
+
+def m_files_symlink(root: Path) -> None:
+    _task_lesson(root, names=("a.md",))
+    (root / TASK_LESSON_DIR / "stories" / "b.md").symlink_to(
+        root / CLI_LESSON_00)
+    append(root / CLI_LESSON_01, "- stories/b.md\n")
+
+
+def m_states_without_tasks(root: Path) -> None:
+    _add_fm(root, CLI_LESSON_01, "task_states: [a, done]\n")
+
+
+def _states(root: Path, value: str) -> None:
+    _task_lesson(root, extra_fm=f"task_states: {value}\n")
+
+
+def m_states_string(root: Path) -> None:
+    _states(root, "done")
+
+
+def m_states_empty(root: Path) -> None:
+    _states(root, "[]")
+
+
+def m_states_bad_entry(root: Path) -> None:
+    _states(root, "[Hand_Off, done]")
+
+
+def m_states_duplicate(root: Path) -> None:
+    _states(root, "[review, done, review]")
+
+
+def m_states_skipped(root: Path) -> None:
+    _states(root, "[review, skipped, done]")
+
+
+def m_own_without_tasks(root: Path) -> None:
+    _add_fm(root, CLI_LESSON_01, "own_tasks: mine/\n")
+
+
+def _own(root: Path, value: str) -> None:
+    _task_lesson(root, extra_fm=f"own_tasks: {value}\n")
+
+
+def m_own_not_string(root: Path) -> None:
+    _own(root, "[mine/]")
+
+
+def m_own_absolute(root: Path) -> None:
+    _own(root, "/home/me/stories")
+
+
+def m_own_dotdot(root: Path) -> None:
+    _own(root, "../elsewhere")
+
+
 @dataclass
 class Case:
     name: str
@@ -4988,6 +5222,121 @@ CASES: list[Case] = [
          m_placement_optional, "optional lesson", where=CLI_OPTIONAL),
     Case('39: placement: "yes" fires', 39, "cli", "bundle", m_placement_string,
          "must be true or false", where=CLI_LESSON_00),
+    # ---- checks 42-45: task lessons. Silent rows are the positive control.
+    Case("42: a bundle with no task keys is silent", 42, "cli", "bundle",
+         m_tasks_absent, kind="silent"),
+    Case("42: and so is an INSTANCE with none", 42, "cli", "instance",
+         m_tasks_absent, kind="silent"),
+    Case("43: no task keys, silent", 43, "cli", "bundle", m_tasks_absent,
+         kind="silent"),
+    Case("43: no task keys, silent in an INSTANCE", 43, "cli", "instance",
+         m_tasks_absent, kind="silent"),
+    Case("44: no task keys, silent", 44, "cli", "bundle", m_tasks_absent,
+         kind="silent"),
+    Case("44: no task keys, silent in an INSTANCE", 44, "cli", "instance",
+         m_tasks_absent, kind="silent"),
+    Case("45: no task keys, silent", 45, "cli", "bundle", m_tasks_absent,
+         kind="silent"),
+    Case("45: no task keys, silent in an INSTANCE", 45, "cli", "instance",
+         m_tasks_absent, kind="silent"),
+    Case("42: a valid task lesson is silent", 42, "cli", "bundle",
+         m_tasks_valid, kind="silent"),
+    Case("42: and in an INSTANCE", 42, "cli", "instance", m_tasks_valid,
+         kind="silent"),
+    Case("43: a valid task lesson is silent", 43, "cli", "bundle",
+         m_tasks_valid, kind="silent"),
+    Case("43: and in an INSTANCE", 43, "cli", "instance", m_tasks_valid,
+         kind="silent"),
+    Case("44: a valid task lesson is silent", 44, "cli", "bundle",
+         m_tasks_valid, kind="silent"),
+    Case("45: a valid task lesson is silent", 45, "cli", "bundle",
+         m_tasks_valid, kind="silent"),
+    Case("6: a listed task file does not fire check 6", 6, "cli", "bundle",
+         m_tasks_valid, kind="silent"),
+    Case("42: tasks on a single-file lesson fires", 42, "cli", "bundle",
+         m_tasks_single_file, "needs a folder lesson", where=CLI_LESSON_00),
+    Case("42: tasks that is not a string fires", 42, "cli", "bundle",
+         m_tasks_not_string, "must be a directory path", where=CLI_LESSON_01),
+    Case("42: an absolute tasks path fires", 42, "cli", "bundle",
+         m_tasks_absolute, "is absolute", where=CLI_LESSON_01),
+    Case("42: a tasks path with '..' fires (Review Focus 4)", 42, "cli",
+         "bundle", m_tasks_dotdot, "has a '..' segment", where=CLI_LESSON_01),
+    Case("42: a symlinked tasks directory fires, never followed (Review "
+         "Focus 4)", 42, "cli", "bundle", m_tasks_symlink,
+         "symbolic link", where=CLI_LESSON_01),
+    Case("42: a directory that does not exist fires", 42, "cli", "bundle",
+         m_tasks_missing_dir, "no such file", where=CLI_LESSON_01),
+    Case("42: a directory with no .md directly inside fires", 42, "cli",
+         "bundle", m_tasks_no_md, "holds no .md file", where=CLI_LESSON_01),
+    Case("43: a task file the body does not list fires", 43, "cli", "bundle",
+         m_files_not_listed, "does not list 'stories/c.md'",
+         where=LESSON_DIR_STORIES + "c.md"),
+    Case("43: stories/aa.md listed does not list stories/a.md (Review "
+         "Focus 2)", 43, "cli", "bundle", m_files_prefix_listed,
+         "does not list 'stories/a.md'", where=LESSON_DIR_STORIES + "a.md"),
+    Case("43: stories/a.md.bak listed does not list stories/a.md", 43, "cli",
+         "bundle", m_files_suffix_listed, "does not list 'stories/a.md'",
+         where=LESSON_DIR_STORIES + "a.md"),
+    Case("43: a listed path that does not exist fires", 43, "cli", "bundle",
+         m_files_listed_missing, "'stories/ghost.md', which does not exist",
+         where=CLI_LESSON_01),
+    Case("43: a non-.md file in the directory is not a task file (Review "
+         "Focus 3)", 43, "cli", "bundle", m_files_non_md_named, kind="silent"),
+    Case("6: ... and check 6 still judges it (Review Focus 3)", 6, "cli",
+         "bundle", m_files_non_md, "'stories/flow.svg' is never named",
+         where="lessons/01-subcommands/LESSON.md -> stories/flow.svg"),
+    Case("43: a subdirectory's .md file is not a task file", 43, "cli",
+         "bundle", m_files_subdir_md, kind="silent"),
+    Case("43: a task file without frontmatter fires", 43, "cli", "bundle",
+         m_files_no_frontmatter, "has no YAML frontmatter",
+         where=LESSON_DIR_STORIES + "a.md"),
+    Case("43: a task file without a title fires", 43, "cli", "bundle",
+         m_files_no_title, "has no 'title'", where=LESSON_DIR_STORIES + "a.md"),
+    Case("43: an empty title fires", 43, "cli", "bundle", m_files_empty_title,
+         "title is ''", where=LESSON_DIR_STORIES + "a.md"),
+    Case("43: a task file without a priority fires", 43, "cli", "bundle",
+         m_files_no_priority, "has no 'priority'",
+         where=LESSON_DIR_STORIES + "a.md"),
+    Case("43: a string priority fires", 43, "cli", "bundle",
+         m_files_priority_string, "priority is '1'; it must be an integer",
+         where=LESSON_DIR_STORIES + "a.md"),
+    Case("43: a boolean priority fires", 43, "cli", "bundle",
+         m_files_priority_bool, "priority is True; it must be an integer",
+         where=LESSON_DIR_STORIES + "a.md"),
+    Case("43: an id outside [a-z0-9-]+ fires", 43, "cli", "bundle",
+         m_files_bad_id, "must be a string matching [a-z0-9-]+",
+         where=LESSON_DIR_STORIES + "a.md"),
+    Case("43: an id that is not the filename stem fires", 43, "cli",
+         "bundle", m_files_id_not_stem, "the filename stem is 'a'",
+         where=LESSON_DIR_STORIES + "a.md"),
+    Case("43: two files with one id fire", 43, "cli", "bundle",
+         m_files_duplicate_id, "have the id 'a'",
+         where=LESSON_DIR_STORIES + "a.md, " + LESSON_DIR_STORIES + "b.md"),
+    Case("43: a symlinked task file fires, never followed", 43, "cli",
+         "bundle", m_files_symlink, "symbolic link",
+         where=LESSON_DIR_STORIES + "b.md"),
+    Case("44: task_states without tasks fires", 44, "cli", "bundle",
+         m_states_without_tasks, "task_states without 'tasks'",
+         where=CLI_LESSON_01),
+    Case("44: task_states as a string fires", 44, "cli", "bundle",
+         m_states_string, "must be a non-empty list", where=CLI_LESSON_01),
+    Case("44: an empty task_states fires", 44, "cli", "bundle",
+         m_states_empty, "must be a non-empty list", where=CLI_LESSON_01),
+    Case("44: a state that does not match the pattern fires", 44, "cli",
+         "bundle", m_states_bad_entry, "'Hand_Off', which is not a state name",
+         where=CLI_LESSON_01),
+    Case("44: a duplicate state fires", 44, "cli", "bundle",
+         m_states_duplicate, "'review' more than once", where=CLI_LESSON_01),
+    Case("44: skipped listed fires", 44, "cli", "bundle", m_states_skipped,
+         "lists 'skipped'", where=CLI_LESSON_01),
+    Case("45: own_tasks without tasks fires", 45, "cli", "bundle",
+         m_own_without_tasks, "own_tasks without 'tasks'", where=CLI_LESSON_01),
+    Case("45: own_tasks that is not a string fires", 45, "cli", "bundle",
+         m_own_not_string, "must be a directory path", where=CLI_LESSON_01),
+    Case("45: an absolute own_tasks fires", 45, "cli", "bundle",
+         m_own_absolute, "is absolute", where=CLI_LESSON_01),
+    Case("45: own_tasks with '..' fires", 45, "cli", "bundle", m_own_dotdot,
+         "has a '..' segment", where=CLI_LESSON_01),
     # ---- checks 35 and 36: levels and starts_from. Silent rows are the
     # positive control for the firing ones.
     Case("35: a bundle with no levels is silent", 35, "cli", "bundle",
