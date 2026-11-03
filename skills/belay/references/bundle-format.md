@@ -401,8 +401,8 @@ how large the change feels:
 
 | Bump | Meaning | Examples |
 |---|---|---|
-| MINOR | A live instance can take the change as one set. The learner still asks for the update, and accepts it with one answer. | A correction to lesson prose. A fix to a check script. A new optional lesson. A new `supplies` entry. A new lesson added after the last lesson. |
-| MAJOR | A live instance cannot take the change as one set. The learner reviews the update file by file. | The `lessons` list changes order. A lesson is removed. A lesson `id` changes. The completion conditions of a lesson change. |
+| MINOR | A live instance can take the change as one set. The learner still asks for the update, and accepts it with one answer. | A correction to lesson prose. A fix to a check script. A new optional lesson. A new `supplies` entry. A new lesson added after the last lesson. A changed task file. |
+| MAJOR | A live instance cannot take the change as one set. The learner reviews the update file by file. | The `lessons` list changes order. A lesson is removed. A lesson `id` changes. The completion conditions of a lesson change. A task file is removed or renamed, because an instance's `## Tasks` row may name it. |
 
 A MAJOR bump resets MINOR to `0`: `"2.4"` becomes `"3.0"`. Two authors who apply the table
 to the same change reach the same answer, because the test is what happens to an instance
@@ -1587,6 +1587,9 @@ An assessment only, and optional there: questions to ask verbatim.
 | `teaches` | MAY | The learning objectives this lesson teaches, as `covers` concept ids. A non-empty list; every id MUST be a key in `covers` (check 37). Under `levels: true` it is what makes the learner's levels apply to this lesson; a lesson without it is guided as though levels were off. Unlike `assesses`, it changes nothing about how the lesson is judged. |
 | `material` | MAY | Folder lessons only. For each objective in this lesson's `teaches`, a mapping of level — `A`, `B` or `C` — to a file in the lesson's own folder (check 38). See **Writing levelled material** below. |
 | `placement` | MAY | `true` on the one assessment that places a learner on the levels. It needs `assesses`, a bundle has at most one, and it is never an optional lesson (check 39). `false` says nothing. See **Writing a placement lesson** below. |
+| `tasks` | MAY | Folder lessons only. A directory inside this lesson's folder holding its task files; relative, no `..` segment (check 42). Declaring it is what makes the lesson a **task lesson**. See **Writing a task lesson** below. |
+| `task_states` | MAY | The states a task passes through, in order; default `[in-progress, done]`. **The last state means done.** At least one state, each matching `[a-z0-9-]+` and listed once. `skipped` is reserved and always available, so it is not listed (check 44). Needs `tasks`. |
+| `own_tasks` | MAY | A directory in the learner's **workspace** where the learner writes task files of their own; relative to the workspace root, no `..` segment (check 45). Needs `tasks`. |
 
 `design_refs` is how a lesson stays cheap. A lesson about splitting a file into a
 library declares only the anchors it truly needs. It does not pull in storage,
@@ -1778,6 +1781,122 @@ placement: true
 - **Its Theory says what the result is for** — that the answers set how closely the tutor
   guides each objective, and decide nothing else — and, like any assessment's, never the
   answers.
+
+### Writing a task lesson
+
+A **task lesson** takes its tasks from a directory of task files instead of from its body:
+a list of exercises, problems, labs or user stories, worked one at a time in priority order,
+with progress per learner. Three frontmatter keys make it one, and `tasks` is what turns it
+on:
+
+```yaml
+---
+id: 04-build-the-scorer
+title: Build the lead scorer
+teaches: [spec-writing, code-review]
+tasks: stories/
+task_states: [specifying, handed-off, implemented, reviewed]
+own_tasks: stories/
+---
+```
+
+The runner knows the state names, their order and the task files' frontmatter, and nothing
+else. What a task is, what each state asks and what happens between states are yours,
+written into the lesson. What the tutor does with them is `runner-protocol.md` section 19.
+
+**A task file** is a Markdown file directly inside the `tasks` directory:
+
+```markdown
+---
+id: 012-lead-scoring
+title: Score incoming leads
+priority: 1
+---
+As a member of the sales team I want incoming leads scored so that I call the best ones first.
+
+## Acceptance criteria
+
+- A lead with no company size scores 0, and the reason is shown.
+```
+
+| Field | Required | Meaning |
+|---|---|---|
+| `id` | MUST | `[a-z0-9-]+`, equal to the filename stem, unique in the directory, stable once published |
+| `title` | MUST | a non-empty string |
+| `priority` | MUST | an integer; lower is earlier; ties are broken by `id` |
+
+Check 43 reports each of these. **The body is yours**: a user story carries acceptance
+criteria, an exercise a statement and a check, and the format requires nothing of it. A
+subfolder of the `tasks` directory holds no task files. A file directly inside it that is not
+`.md` is ordinary lesson material, which this section's naming rule still covers.
+
+**Keep ids distinct across the bundle's task lessons**, not only in one directory. A
+learner's `## Tasks` row names a task by its id alone and belongs to the whole module, and
+check 46 reports two rows for one id. No check compares the directories, so this one is
+yours to hold.
+
+**Task files live in the lesson's own folder**, which is why `tasks` needs a folder lesson.
+Measured on 2026-11-03: materialization copies only `tutorial.yaml`, `COURSE.md`, `DESIGN.md`
+and `lessons/`, so a directory at the bundle root would never reach the instance; and a
+directory directly under `lessons/` without a `LESSON.md` is a check 4 finding. Inside the
+lesson's folder the files are copied by every materializer, arrive read-only at
+`tutorial/lessons/<lesson>/<tasks>/`, and reach a running instance through the ordinary
+update (section 2, **Content version**).
+
+**The body lists every task file by path**, relative to the lesson's folder, one line each
+with its title:
+
+```markdown
+- stories/012-lead-scoring.md — Score incoming leads
+```
+
+The list is what an older runner teaches from (section 13), and it is what makes an older
+validator accept the files: its check 6 requires every file in a lesson folder to be named
+by `LESSON.md`. Check 43 reports a file the body does not list and a listed path that does
+not exist.
+
+**The body says what happens in each state**: what the state asks of the learner, what has
+to be true for the task to move on, and anything that sends it back. Give each state its own
+section. Under `levels: true`, name the learning objective the state exercises, from this
+lesson's `teaches`. Where you want the tutor to review the work, give the state a checklist;
+the tutor reviews against it and names what is not met, and its review never stops the
+learner moving on. To make something stop them, declare it as a validator or a completion
+condition. A task lesson keeps both, and adds one condition of its own: every task closed
+(`runner-protocol.md` section 19.2).
+
+**`own_tasks` is how a course says the learner now writes tasks.** Declare it only on a
+lesson that comes after the teaching: a learner first meets good tasks, and writes them once
+a lesson has shown how. Its path is in the **workspace**, relative to the workspace root, so
+`own_tasks: stories/` means `<workspace>/stories/` and has nothing to do with `tasks:
+stories/` in the lesson's folder. Nothing checks that the directory exists, because it is
+the learner's to create, and it belongs under a `learner_owned` glob. Give the body a
+checklist for writing a task if you want the tutor to review against one.
+
+#### Worked example: a user-story lesson
+
+A cohort programme hands each participant a prioritised list of user stories, worked through
+a fixed process. None of this is runner behaviour; the stories, the specification, the
+hand-off and the review are what the programme writes into its lessons.
+
+- **The keys:** `tasks: stories/`, `task_states: [specifying, handed-off, implemented,
+  reviewed]`.
+- **The body's *Specifying* section:** the participant writes `specs/<story-id>.md`. A `## Spec
+  criteria` checklist asks for testable acceptance criteria, non-functional requirements
+  named, and a split into tasks. The objective for this state is `spec-writing`.
+- **The body's *Handed-off* section:** what the participant does in the implementation
+  session. The programme varies this by lesson: the first two story lessons use Claude Code's
+  plan mode; a later lesson has the participant install Superpowers, ask it to rate the
+  specification, and improve it with its help before implementing. The implementation works
+  on a story branch and opens a pull request into the participant's module branch.
+- **The body's *Implemented* section:** the participant returns with the pull request; the
+  tutor runs the module's validators and asks about any change the session made to the
+  specification.
+- **The body's *Reviewed* section:** the participant walks through the diff against the
+  acceptance criteria. The objective is `code-review`, and failing validators send the story
+  back to *handed-off*.
+- **A later lesson that has taught story writing** declares `own_tasks: stories/` and gives a
+  `## Writing a story` checklist; from then on participants cut a use case, listed in the
+  body, into stories of their own.
 
 ### A lesson is not a script
 
@@ -2082,6 +2201,17 @@ Confirm each of these by looking, not by remembering:
       lesson's own folder
 - [ ] at most one lesson declares `placement: true`; it declares `assesses`, is listed in
       `lessons` rather than `optional_lessons`, and promises no practice or retake
+- [ ] every `tasks` sits on a folder lesson, and names a directory inside that lesson's folder
+      holding at least one `.md` file
+- [ ] every task file has an `id` equal to its filename stem, a `title` and an integer
+      `priority`; no id repeats, in the directory or across the bundle's task lessons
+- [ ] every task lesson's body lists each of its task files by path, and lists no path that
+      does not exist
+- [ ] `task_states` and `own_tasks` appear only beside `tasks`; `task_states` is a non-empty
+      list of distinct `[a-z0-9-]+` names without `skipped`; `own_tasks` is a relative
+      workspace path with no `..` segment
+- [ ] every task lesson's body says what each state asks and when the task moves on, and makes
+      sense to a runner that has never heard of `tasks` (section 13)
 - [ ] every recommendation names a `bundle` id spelled as that bundle spells its own `id`,
       and a `because` written for the learner
 - [ ] no recommendation names this bundle, and no bundle id appears twice in one list
@@ -2326,7 +2456,8 @@ genuinely cannot be finished with the failure in place.
 `bundle_format` stays `1`. `optional_lessons`, `failure_modes`, `supplies`, `covers`,
 `assumes`, `recommended_follow_ups`, `recommended_previous_bundles`,
 `teaching_method`, `setup_validators`, `version`, `report`, `levels`, `starts_from` and the
-lesson fields `assesses`, `teaches`, `material` and `placement` are all additive: a bundle
+lesson fields `assesses`, `teaches`, `material`, `placement`, `tasks`, `task_states` and
+`own_tasks` are all additive: a bundle
 written before this section existed is valid exactly as it stands, nothing in this document
 changes what it means, and no edit is implied. Run the validator over it and see.
 
@@ -2391,6 +2522,13 @@ keys, and ignores them. The effect on a learner is precise, and worth stating pl
   programme that uses `starts_from: ref` needs a runner that knows it.** An older validator
   warns about the key as an unrecognised top-level field and accepts the bundle, so nothing
   at authoring time will tell you which runner your learners have;
+- **a task lesson is taught as an ordinary lesson, from its body.** An older runner reads no
+  `tasks`, `task_states` or `own_tasks`. It teaches from the body, which lists every task and
+  says what each state asks, so the course stays usable; it records no `## Tasks` rows, offers
+  nothing in priority order, and knows nothing of a learner's own tasks. An older validator
+  does not see the keys, because lesson frontmatter fields are read by name, and accepts the
+  task files because the body names each one. An older materializer copies them, because they
+  are inside `lessons/`;
 - **nothing is taught wrongly.** The main path is untouched by `optional_lessons`, because
   an optional lesson is never in it. An unplaced supply is not the same case — a
   manifest-scope entry IS on the main path — but it costs the learner the toil the key
@@ -2409,7 +2547,7 @@ on the lesson, so a current runner clears it by coaching the repair inline and a
 runner never applies it at all. Both finish the course. The two runners differ only in
 whether the learner is told the gate exists — never in whether they can reach the end.
 
-Two things follow:
+Three things follow:
 
 - **never put a concept the main path depends on into an optional lesson alone.** If a
   later main-path lesson cannot be completed without it, it belongs on the main path.
@@ -2417,5 +2555,8 @@ Two things follow:
 - **an older copy of `validate_bundle.py` reports every optional lesson as unlisted.**
   That is a stale validator, not a defect in the bundle: the check it runs was written
   before `optional_lessons` existed. Update the validator rather than the bundle, and do
-  not "fix" the finding by moving the lesson into `lessons`.
+  not "fix" the finding by moving the lesson into `lessons`;
+- **a task lesson's body MUST make sense without the task machinery.** Read it as a runner
+  that has never heard of `tasks` would: the list of task files and what each state asks
+  have to be enough to teach from, because for that runner they are the whole lesson.
 

@@ -4,8 +4,11 @@
 Two callers, one script. An author runs it over a bundle or a catalogue
 before shipping. A runner runs it over the instance it has just materialized,
 before the first task, and at the five further moments
-references/runner-protocol.md section 13.1 names. It is never run on a
-teaching turn, and a learner never invokes it by hand.
+references/runner-protocol.md section 13.1 names. Over a bundle or an
+instance it is never run on a teaching turn, and a learner never invokes it
+by hand. `--tasks` is the one mode that differs: it reads a directory of task
+files a learner wrote, on the turn the tutor reviews one (section 19.6 there),
+and the learner may run it too.
 
 It is safe on a learner's machine because it is stdlib-only (below) and reads
 without writing: no file in the bundle, the instance or the workspace is
@@ -18,6 +21,7 @@ Usage:
     validate_bundle.py --catalog <path> --portable
                                            also check that the catalogue can
                                            be served from a repository
+    validate_bundle.py --tasks <dir>       check a directory of task files
     validate_bundle.py --help
 
 The mode is always explicit. It is never inferred from which state file is
@@ -831,7 +835,25 @@ LIMITATIONS = """What a pass does and does not mean
     a `_scope:_` value is checked against the instance's lessons only when
       it reads as a path (it holds a '/' or ends in '.md'). A scope written
       in words - "the course so far", a topic - is free text and is not
-      checked."""
+      checked.
+
+  Task lessons (`tasks`, `task_states`, `own_tasks`, and `## Tasks`):
+    a bundle in which no lesson declares these keys is silent and checks 42
+      to 45 report "n/a". An instance with no `## Tasks` section is silent
+      too: a learner who has taken no task has nothing to record.
+    check 43's listing rule finds a path in the lesson body as a delimited
+      token. It does not require a list line or a title beside the path.
+    check 43 compares ids inside one `tasks` directory only. Two task lessons
+      using one id pass here, and then collide in a learner's `## Tasks`.
+    check 45 checks the SHAPE of `own_tasks` and never the directory: it is in
+      the learner's workspace, which this validator does not read.
+    check 46 validates the SHAPE of a row, not its truth. It does not look an
+      id up in the task files, because a row may name a task the learner
+      wrote, or a state up in `task_states`, because a row may outlive the
+      lesson that declared them.
+    nothing checks that a lesson body says what each state asks, or that its
+      checklists are any good. Those are the course's, and the conversation
+      that follows them is not something this validator can see."""
 
 
 @dataclass(frozen=True)
@@ -7163,9 +7185,9 @@ def render(report: Report, stream=sys.stdout) -> None:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="validate_bundle.py",
-        description="Structurally validate a Belay bundle or instance.",
+        description="Structurally validate a Belay bundle, instance, catalogue or task-file directory.",
     )
-    parser.add_argument("path", help="the bundle, instance or catalogue path")
+    parser.add_argument("path", help="the bundle, instance, catalogue or task-file directory path")
     group = parser.add_mutually_exclusive_group()
     group.add_argument(
         "--instance",

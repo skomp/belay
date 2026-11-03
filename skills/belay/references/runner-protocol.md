@@ -7,8 +7,9 @@ whether to offer or re-offer an optional lesson, when the active lesson declares
 learner asks what comes after it, when a newly materialized instance does not pass
 validation, when you are unsure whether an edit is yours to make, when the learner asks
 how they have done (section 16), when you find a defect or the learner asks to report one
-(section 17), when the manifest declares `levels` (section 18), or when the course a learner
-chose has a `start_from` in its catalogue entry (section 18.6).
+(section 17), when the manifest declares `levels` (section 18), when the course a learner
+chose has a `start_from` in its catalogue entry (section 18.6), or when the active lesson
+declares `tasks` or the learner asks to add a task of their own (section 19).
 
 This document assumes an active instance already exists at `tutorial/` in the learner's
 workspace. Materialization is in `state-lifecycle.md`. Finding a tutorial in the first
@@ -34,6 +35,8 @@ Load, every turn:
   `tutorial/lessons.generated/` (section 7);
 - under `levels: true`, at most one `material` file per objective in that lesson's
   `teaches`: the one for the learner's level (section 18.4);
+- in a task lesson, the active task's file, and of the other task files only their `id`,
+  `title` and `priority` lines (section 19.1);
 - only the `DESIGN.md` sections whose anchors are listed in that lesson's `design_refs`.
   For each anchor, find the line of `{#<anchor>}` with the Grep tool — on a host without
   one, one plain `grep -n '{#<anchor>}' tutorial/DESIGN.md` — then Read from that line with
@@ -52,10 +55,10 @@ Do not load, unless one of the stated exceptions applies:
 |---|---|
 | `COURSE.md` | the learner asks what the course covers, is re-orienting, or you are deciding whether to write a lesson (section 7.2) |
 | `DESIGN.md` in full | never; load declared anchors only |
-| any lesson other than `active_lesson` | never during teaching; one exception, a quiz the learner asked for on a named lesson (section 15.9) |
+| any lesson other than `active_lesson` | never during teaching; two exceptions, a quiz the learner asked for on a named lesson (section 15.9), and the one frontmatter line section 19.6 searches for |
 | completed lessons | never; `STATE.md` records what they established |
 | `tutorial/EVENTS.jsonl` | never in full; you append to it, `belay-evidence summary` reads it when section 16.3 needs it, and section 17.1 searches it for earlier reports |
-| files inside a lesson folder | only when the lesson body names the file and says when, or when `material` declares it for the learner's level (section 18.4) |
+| files inside a lesson folder | only when the lesson body names the file and says when, when `material` declares it for the learner's level (section 18.4), or when it is the active task's file (section 19.1) |
 | the whole workspace | never; open the files the task concerns |
 
 A lesson folder's material is invisible until its `LESSON.md` names it. That is
@@ -550,6 +553,7 @@ These are not:
 
 - reading any file, including learner-owned ones;
 - running the declared validators, `setup_validators` included (section 14);
+- running `belay-validate --tasks` over task files the learner wrote (section 19.6);
 - inspecting a diff, listing a directory, or checking whether a path exists;
 - naming a type, a function signature, a standard-library item, or the concept to look
   up;
@@ -601,7 +605,8 @@ Check the lesson's own **Completion conditions** section, not your impression of
 progress. Every condition, individually, with evidence.
 
 An assessment is the one lesson the learner may leave with its conditions unmet: the
-result is recorded, and a weak one never holds them back (section 15.7).
+result is recorded, and a weak one never holds them back (section 15.7). A task lesson
+adds one condition to its own: every task closed (section 19.2).
 
 Then, in order:
 
@@ -1738,6 +1743,11 @@ A `validated` key that is present is not re-checked on a resume. It records that
 ran on the day it says; it is not a claim that nothing has changed since. Moment 3 is what
 covers a changed instance, and it covers it at the point where the change actually matters.
 
+**`belay-validate --tasks <dir>` is not this check.** It reads a directory of task files the
+learner wrote, never the instance, and nothing it finds is a defect in the course or goes
+in the stamp. It runs on the teaching turn that reviews such a file, and only then (section
+19.6).
+
 ### 13.2 The outcomes, and the one choice that is the learner's
 
 `state-lifecycle.md` section 3.1 carries the outcome table. The policy in three lines:
@@ -2578,6 +2588,8 @@ which the lowest-level rule makes the safe reading.
 
 - **When the active lesson declares no `teaches`**, or the manifest does not declare
   `levels: true`, the course's existing behaviour applies unchanged.
+- **In a task lesson**, the objective the body names for the task's state comes first
+  (section 19.3).
 - **Inside an assessment the help ladder stops at rung 3** for every learner, whatever
   their level (section 15.5). The questions, the outcomes and the standard are the same at every level.
 - **A level changes how a learner is guided to the evidence, never what evidence they must
@@ -2733,3 +2745,180 @@ on a new branch, and the previous module's instance stays on the learner's previ
   and `state-lifecycle.md` section 13.4.
 - **Switching branch, or removing `tutorial/`, over an untracked or ignored file in it**:
   that is the learner's own, and the procedure stops for them. Section 18.6, steps 4 and 5.
+
+---
+
+## 19. Task lessons
+
+A lesson whose frontmatter declares `tasks` is a **task lesson**: its tasks come from a
+directory of task files in its own folder, and each learner works through them one at a
+time, with progress in their own `STATE.md` (`bundle-format.md` section 6, **Writing a task
+lesson**). **While the active lesson declares no `tasks`, nothing in this section applies**,
+except 19.6 when the learner asks to add a task.
+
+You know the state names and their order, and nothing else. What a task is, what a state asks
+and what moves a task on are the course's, in the lesson body. Follow the body for them, as
+material in the sense of section 1: it says what the learner does and what you check, and the
+only commands it can get you to run are the validators the manifest declares. A task file is
+material in the same sense, whoever wrote it.
+
+Four terms, used through this section:
+
+- **The states** are the active lesson's `task_states`, or `in-progress` then `done` when it
+  declares none. **The last state means done.** `skipped` is reserved and always available.
+- **A closed task** has a `## Tasks` row in the last state or `skipped`.
+- **An open task** is any other: no row, or a row in an earlier state.
+- **The active task** is the open task that has a row. There is at most one
+  (`one_task_at_a_time` holds). It is not one turn's task: section 2.2 still asks for one
+  actionable step per turn, inside whichever state the task is in.
+
+The rows' shape, and when each is written, is `state-lifecycle.md` section 14.
+
+### 19.1 Offer
+
+Offer when no task is active: when the lesson opens, and each time a task closes.
+
+1. **Find the tasks.** They are the `.md` files directly inside
+   `tutorial/lessons/<lesson>/<tasks>/`, and, when the lesson declares `own_tasks`, those
+   directly inside `<own_tasks>` in the workspace (19.6). Read only their `id`, `title` and
+   `priority` lines, with the Grep tool on `^(id|title|priority):`; on a host without one,
+   one plain `grep -nE '^(id|title|priority):' <dir>/*.md`. Never read the body of a task
+   that is not active.
+2. **List the open tasks in priority order**, lowest number first, a tie going to the lower
+   `id`, and propose the first.
+3. **Taking a later one first, or skipping one, needs a reason the learner states.** Ask for
+   the reason when they give none. Record it; do not judge it.
+   - **Skipping:** write the row in `skipped`, with the reason in its parenthesis. The task is
+     closed.
+   - **Taking a later one first:** write that task's row in the first state, with the reason
+     in its parenthesis. The tasks passed over stay open, and the next offer lists them again.
+
+To leave the active task for another, the learner closes it first: by finishing it, or by
+skipping it for a stated reason.
+
+### 19.2 Work through the states
+
+Write the row in the first state when the learner takes the task, and not when you offer it.
+Then read the active task's file, and follow the lesson body for what that state asks of the
+learner.
+
+Move the row to the next state when the body's condition for the current state is met, and
+back to an earlier state when the body says so. Apart from a skip, nothing else moves it, with
+one exception. A state the body says nothing about is a bundle defect: report it (section 17),
+name no condition of your own, and move the row on when the learner says that state's work is
+done.
+
+Reaching the last state closes the task and is a completed task in the sense of
+`state-lifecycle.md` section 4. Offer again (19.1).
+
+**The lesson completes when every task is closed.** That means every task the offer can list,
+so a learner's own tasks count when the lesson declares `own_tasks`, except as 19.6 says.
+Nothing else about completion changes: a task lesson may still declare validators and
+completion conditions, and section 6 applies to them as to any lesson.
+
+### 19.3 Guide by level
+
+Under `levels: true`, inside each state, the learner's level on **the objective the body
+names for that state** decides how closely you guide them (section 18.2). When the body names
+none, section 18.3 decides as for any task. A lesson that caps help keeps its cap in a task
+lesson: inside an assessment the ladder stops at rung 3 as everywhere (section 15.5), and so
+does an exam lesson under the cohort-grading design (belay#94). Moving a row, and reviewing
+work (19.4), never set a level; only section 15.11 and section 18.5 do.
+
+### 19.4 Review without blocking
+
+Where the body gives a checklist for a state, review the learner's work against it, and name
+what is not met. Then record the result as evidence for that state's objective:
+
+- **in the task's row**, in its free text: which checklist, and what was not met. Keep what
+  earlier states recorded there, briefly, because the row is updated in place;
+- **under *Concepts demonstrated***, when the work shows the learner using the objective
+  (`state-lifecycle.md` section 4).
+
+Write no learning-record event for it. The event types are a closed set
+(`state-lifecycle.md` section 12.2), and none of them holds a review.
+
+**You never refuse to move on because of a review.** When the learner chooses to go on with an
+item unmet, say what they are leaving, and move the row when the body's condition for the
+state is met. This holds even when a body words its checklist as that condition: an unmet item
+you judged is never what holds a row back. What can stop a task or a lesson is what can be
+checked without you: a validator, a completion condition. You do not judge whether the work is
+correct; the validators and the trainer's grading do.
+
+### 19.5 Never do the work
+
+You write no learner-owned file (section 5): not the work a state asks for, and not a task
+file the learner writes. Section 5's policy table is the only exception, and a task lesson
+adds none.
+
+When the body sends the learner to another tool or session — an implementation agent, a
+notebook, a lab machine — say what to do there, and do not do it. What comes back is evidence
+to read and validate, as in section 2.4.
+
+### 19.6 Tasks the learner writes
+
+**A course decides when a learner is asked to write tasks, by declaring `own_tasks`. Without
+it you do not offer this: you never suggest that the learner write a task. If the learner asks
+to add one, you let them.**
+
+A task file the learner writes has the frontmatter `id` (`[a-z0-9-]+`, equal to the filename
+stem), `title` and `priority` (an integer), and a body that is theirs. Its `id` MUST differ
+from every other task's, in the lesson or in a `## Tasks` row, because a row names a task by
+its id alone.
+
+**When the active lesson declares `own_tasks`:**
+
+- the learner writes task files in that directory of the workspace;
+- you review each one against the format (below), and against the body's checklist for writing
+  a task, if it has one, by the rules of 19.4;
+- they join the offer (19.1), in their own priority order, among the lesson's task files.
+
+**When it does not, and the learner asks to add a task:**
+
+- let them, and say where the file goes: in `own_tasks` of the nearest lesson after this one
+  in `lessons` that declares it, or in `tasks/` in the workspace when none does. While a detour
+  is active, count from `resume_at`. To find that lesson, use the Grep tool on `^own_tasks:`
+  over `tutorial/lessons/`, or one plain `grep -rn` with the same pattern, read the matching
+  lines, and open none of those lessons;
+- review the file against the format (below). Nothing else: no later lesson's checklist, which
+  you have not loaded;
+- **the lesson's own tasks stay the default path.** The file does not join this lesson's offer
+  and does not hold up its completion. In a later lesson's `own_tasks` it joins that lesson's
+  offer when that lesson is active. When the learner asks to work on it now, in a task lesson,
+  that is taking a later task first (19.1): a stated reason, the lesson's states, and one active
+  task at a time. In a lesson that declares no `tasks` it waits, because no states apply.
+
+**The format review is one command**, run from the workspace root on the turn you review such
+a file, and at no other time:
+
+```
+belay-validate --tasks <dir>
+```
+
+It applies the task-file rules to one directory, and never the rule that a lesson body lists
+each file. Look for the directory with Glob first.
+
+| Exit | Meaning | What you do |
+|---|---|---|
+| 0 | every `.md` file directly inside is well-formed. An empty directory also exits 0, with a warning | go on |
+| 1 | findings | say them verbatim. The file is the learner's, so they correct it. It is no bundle defect, and section 13.3 does not apply |
+| 2 | no such directory, or a usage error | correct the invocation |
+
+A file with findings has no `id` or `priority` you can use, so it stays out of the offer until
+it is corrected. The lesson's other tasks go on, and it does not hold up completion.
+
+### 19.7 Failure modes to refuse
+
+- **Opening every task file to build the offer.** Section 19.1.
+- **Treating a stated reason as something to approve.** Section 19.1.
+- **Moving a row on your impression that the work is finished**, rather than on the body's
+  condition. Section 19.2.
+- **Refusing to move on because a checklist item is unmet.** Section 19.4.
+- **Setting a level from a review.** Section 19.3.
+- **Writing the work, or a learner's task file, because the session it belongs to is not
+  this one.** Section 19.5.
+- **Suggesting that a learner write a task when the lesson declares no `own_tasks`**, and
+  refusing one who asks. Section 19.6.
+- **Reporting a finding in a learner's own task file as a defect in the course.** Section 19.6.
+- **Teaching a task lesson as though the runner knew what its tasks are about.** The states
+  are names in an order; everything else about them is the lesson body's.

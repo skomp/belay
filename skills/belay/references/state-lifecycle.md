@@ -6,8 +6,9 @@ lesson completes, when an offer of an optional lesson is accepted or deferred, w
 learner acknowledges the assumed-concept review, when you need to advance
 `active_lesson`, when an assessment ends or is interrupted (section 11), when the
 learner asks to update the course to a newer version (section 3.2), when the learning
-record is missing, broken or asked about (section 12), or when a level changes or a module
-that starts from a ref is materialized (section 13).
+record is missing, broken or asked about (section 12), when a level changes or a module
+that starts from a ref is materialized (section 13), or when a task lesson's task is taken,
+skipped or changes state (section 14).
 
 `STATE.md` is the only place a learner's progress is recorded. Nothing in the bundle
 records progress; nothing outside `STATE.md` in the instance records it either. If you
@@ -90,11 +91,12 @@ work.
 
 ### Body sections
 
-All seven headings are always present, even when a section says "None". Five further
+All seven headings are always present, even when a section says "None". Six further
 sections appear only once the instance needs them: *Generated lessons*, once a lesson has
 been written into this instance (section 8.5), *Optional lessons*, once one has been
-offered (section 9.1), *Assessments*, once one has been taken (section 11.1), and *Levels*
-and *Modules*, once a level is set or carried forward (section 13).
+offered (section 9.1), *Assessments*, once one has been taken (section 11.1), *Levels*
+and *Modules*, once a level is set or carried forward (section 13), and *Tasks*, once a
+task lesson's task has been taken or skipped (section 14).
 
 | Section | Holds | Does not hold |
 |---|---|---|
@@ -860,6 +862,7 @@ started lets the tutor assume it exists.
   than concept ids under "not demonstrated";
 - a *Levels* or *Modules* row that does not parse, a level other than `A`, `B` or `C`, or
   one objective or one module recorded twice (section 13.5);
+- a *Tasks* row that does not parse, or the other cases section 14.4 lists;
 - `tutorial_id` does not match the manifest's `id`;
 - `STATE.template.md` is present in the instance;
 - the manifest names a lesson file that does not exist.
@@ -1740,7 +1743,8 @@ It runs **once**, when a module that declares `starts_from: ref` is materialized
    fill the gap, the winner's included. A level is a statement about one person.
 
 Both sections are written in step 2 to 4 even when there is nothing to copy, so the new
-`STATE.md` shows that the carry-forward ran.
+`STATE.md` shows that the carry-forward ran. It copies those two sections and no other:
+`## Tasks` belongs to the module that wrote it (section 14.3).
 
 **The carry-forward needs the previous `STATE.md` committed, and pushed** when the learner
 continues on another machine. So a `starts_from: ref` module, when the learner is asked
@@ -1764,3 +1768,87 @@ Report, and let the learner decide, as section 7 says for every structural defec
 Do not guess which of two rows was meant, and do not repair a level from the learning
 record: it is evidence, never progress (section 12.1). A level that looks wrong but parses
 is not a defect; the learner may ask for a different one.
+
+---
+
+## 14. Task rows
+
+A task lesson's tasks come from a directory of task files (`bundle-format.md` section 6,
+**Writing a task lesson**), and the learner's progress through them is one section of
+`STATE.md`. What the tutor does with them is `runner-protocol.md` section 19; this section is
+what `STATE.md` records. A shared tracker such as a GitHub issue cannot hold it: every learner
+of a cohort works on the same task, and an issue has one state for all of them.
+
+### 14.1 `## Tasks`
+
+```markdown
+## Tasks
+
+- `012-lead-scoring` — reviewed — PR #14; 2027-03-04
+- `013-dedupe` — handed-off — 2027-03-05
+- `014-export` — skipped — 2027-03-05 (depends on 013, which is not merged)
+```
+
+**One row per task, updated in place**, in the shape and with the wrapping rules of
+*Levels* (13.1): `` - `<id>` — <state> — ``, then free text that ends in a date, and an optional
+parenthesis. The separators are read as for *Levels*.
+
+- **The id** is the task file's `id`.
+- **The state** is one of the active lesson's `task_states`, or `skipped`. When the lesson
+  declares none, its states are `in-progress` and `done`.
+- **The free text** may be empty, and holds what the course or the tutor needs to name: a pull
+  request, the result of a review (`runner-protocol.md` section 19.4). Nothing here calls a
+  service to find out about it.
+- **The date** is the day of the last change to the row, `YYYY-MM-DD`.
+- **The parenthesis** holds the reason for a skip, or for taking a task out of order.
+
+> **A task with no row has not been started.**
+
+So a fresh instance has no *Tasks* section, `STATE.template.md` never has one, and nobody
+writes a row to say a task is waiting.
+
+### 14.2 When a row is written
+
+Only while a task lesson is active, and at exactly three moments, each of which sets `updated`:
+
+1. **the learner takes a task** — the row, in the first state. It records that they took the
+   task, which has happened, and claims nothing about the work (section 1). A task taken out of
+   order carries the reason in its parenthesis;
+2. **the learner skips a task** — the row, in `skipped`, with the reason in its parenthesis;
+3. **the state changes**, forwards or back, by `runner-protocol.md` section 19.2 — the row is
+   rewritten in place, and *Next task* with it.
+
+A row reaching the last state is also a completed task: section 4 applies. A row moved to an
+earlier state is not a failure and is not recorded as one; the row simply says where the task
+is now.
+
+No learning-record event is written for a row. The record's event types are a closed set
+(section 12.2).
+
+### 14.3 The section belongs to the module
+
+- **Completing a lesson leaves the rows alone.** Section 5 resets nothing here, so one module's
+  rows accumulate across its task lessons, and a row may outlive the lesson that declared its
+  state.
+- **A new module starts with no rows.** The carry-forward (13.4) does not copy them, because
+  they are about that module's tasks and not about the learner.
+- **An update leaves the rows alone** (section 3.2), including a row naming a task file the new
+  version removed. The offer lists only files that exist, so such a row is simply kept.
+- **The trainer's grading reads them** from each learner's branch.
+
+Validator check 46 checks the shape in an instance: a row that does not parse, an id or a state
+that is not `[a-z0-9-]+`, a date that is not a date, two rows for one id. It never compares a
+row with the bundle's task files, because a row may name a task the learner wrote, and never
+with `task_states`, because a row may outlive the lesson that declared them.
+
+### 14.4 Inconsistencies to report rather than repair
+
+Report, and let the learner decide, as section 7 says for every structural defect:
+
+- a *Tasks* row that does not parse, or one id with two rows;
+- two open tasks of the active lesson with rows, when one task is active at a time;
+- a row for a task of the active lesson whose state is neither one of that lesson's states nor
+  `skipped`.
+
+Do not guess which was meant. A row for a task of no lesson you can see is not one of these: it
+may be one the learner wrote, or one an earlier lesson's states describe.

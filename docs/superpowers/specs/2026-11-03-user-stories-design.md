@@ -2,7 +2,9 @@
 
 **Date:** 2026-11-03
 **Last amended:** 2026-11-03
-**Status:** designed, not implemented
+**Status:** implemented — see §10 for the decisions the implementation added;
+`bundle-format.md` §2, §6, §10, §13, `runner-protocol.md` §19, `state-lifecycle.md` §14,
+validator checks 42-46 and `--tasks`, `tests/test_validate_bundle.py`
 **Issues:** belay#93, belay#92
 **Builds on:** the levels and modules-as-bundles design (2026-11-03), PR: belay#91
 **Related:** belay#94 (cohort grading, PR: belay#102), belay#100 (who runs an action, by level)
@@ -264,3 +266,35 @@ belongs in `bundle-format.md` as the worked example.
 - **The tutor does not judge whether a participant's work is correct.** Validators and the
   trainer's grading do.
 - **No change to who runs a Git command** (belay#100).
+
+---
+
+## 10. Implementation notes
+
+Implemented on 2026-11-03. Writing the validator and the protocol forced these decisions, which
+this design left open; each is stated once, where its reader reads it.
+
+1. **`--tasks` has its own check table**, numbered like a catalogue's: at least one `.md` file,
+   which only warns; each file well-formed; no id twice. A missing directory exits 2, like
+   `--instance` and `--catalog`.
+2. **A malformed id in a `## Tasks` row is a finding** (check 46), and so is a malformed state or
+   date. An id is still never looked up.
+3. **"Records the result as evidence" (section 3, item 4) has no event to use.** The learning
+   record's event types are a closed set, and none holds a review. So the result goes in the
+   row's free text, and in *Concepts demonstrated* when the work shows the objective used. A
+   review sets no level (`runner-protocol.md` §19.3, §19.4).
+4. **The offer reads three frontmatter lines per task, and the active task's file whole**, so a
+   task lesson still costs one lesson plus one file (§19.1).
+5. **Taking a later task first passes over nothing for good.** The reason goes in the taken task's
+   parenthesis, and the tasks passed over stay open. Only skipping writes `skipped` (§19.1).
+6. **A task written on request does not join the offer of the lesson it was written in, and does
+   not hold up that lesson's completion**, which is what "stay the default path" comes to. Taking
+   it there and then is taking a later task first. In a lesson with no `tasks` it waits (§19.6).
+7. **Finding the nearest later `own_tasks` searches for one frontmatter line** over the instance's
+   lessons and opens none of them, the one thing §1's "never another lesson" gives way to (§19.6).
+8. **A file with `--tasks` findings stays out of the offer until corrected**, having no usable id
+   or priority, and holds up nothing else (§19.6).
+9. **Ids should be distinct across a bundle's task lessons**, because rows belong to the module and
+   check 46 reports two rows for one id. No check compares directories (`bundle-format.md` §6).
+10. **Moving a row keeps its earlier review results in the free text**, because the row is updated
+    in place and the trainer reads it (§19.4).
