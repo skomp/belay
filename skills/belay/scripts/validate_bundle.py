@@ -5724,6 +5724,10 @@ CATALOG_CHECKS: dict[int, str] = {
     6: "every bundle path resolves to a directory holding tutorial.yaml and "
     "STATE.template.md",
     7: "[--portable] no bundle path leaves the catalogue's own directory",
+    8: "goals, when declared, is a mapping of well-formed goals whose "
+    "objectives are each a 'covers' key of some entry, under one goal only",
+    9: "start_from, when an entry declares it, is a mapping of a Git repo "
+    "URL and a ref",
 }
 
 CATALOG_REQUIRED_FIELDS = (
@@ -5766,8 +5770,10 @@ CATALOG_COUNT_FIELDS = ("optional_lesson_count",)
 # text - see the docstring on unknown_entry_fields().
 CATALOG_KNOWN_TOP_LEVEL_FIELDS = (
     "catalog_version",
+    "goals",
     "tutorials",
 )
+CATALOG_GOAL_KEYS = ("title", "summary", "objectives")
 CATALOG_KNOWN_ENTRY_FIELDS = (
     "aliases",
     "assumes",
@@ -5781,6 +5787,7 @@ CATALOG_KNOWN_ENTRY_FIELDS = (
     "report",
     "scope",
     "source",
+    "start_from",
     "style",
     "subjects",
     "title",
@@ -6111,7 +6118,7 @@ def validate_catalog(target: Path, portable: bool) -> Report:
             "nothing and is almost certainly an accident",
         )
     if listed is None:
-        for number in (2, 3, 4, 5, 6, 7):
+        for number in (2, 3, 4, 5, 6, 7, 8, 9):
             if number == 2:
                 report.ran(2)
             else:
@@ -6336,6 +6343,108 @@ def validate_catalog(target: Path, portable: bool) -> Report:
                     + ". A catalogue entry must name a bundle",
                 )
     report.ran(6, f"{len(resolvable)} bundle path(s)")
+
+    # -- check 8: goals
+    #
+    # A goal LISTS its objectives here; nothing is added to a `covers`
+    # concept. An objective must be a `covers` key of some entry in THIS
+    # catalogue, so a goal cannot promise what no course teaches. A `covers`
+    # key under no goal is fine: a goal groups some concepts, not all.
+    if "goals" not in document:
+        report.na(8, "the catalogue declares no 'goals'")
+    else:
+        covered: set[str] = set()
+        for _where, item in entries:
+            covers = item.get("covers")
+            if isinstance(covers, dict):
+                covered.update(str(key) for key in covers)
+        goals = document["goals"]
+        goal_count = 0
+        if not isinstance(goals, dict):
+            report.add(
+                8,
+                target.name,
+                f"'goals' must be a mapping of goal id to goal, not "
+                f"{type(goals).__name__}",
+            )
+        else:
+            owner: dict[str, str] = {}
+            for goal_id, goal in goals.items():
+                goal_count += 1
+                gwhere = f"goals.{goal_id}"
+                if not isinstance(goal_id, str) or not re.fullmatch(
+                    r"[a-z0-9-]+", goal_id
+                ):
+                    report.add(
+                        8,
+                        gwhere,
+                        f"the goal id {goal_id!r} must match [a-z0-9-]+",
+                    )
+                if not isinstance(goal, dict):
+                    report.add(
+                        8,
+                        gwhere,
+                        f"a goal must be a mapping with 'title' and "
+                        f"'objectives', not {type(goal).__name__}",
+                    )
+                    continue
+                if not _is_text(goal.get("title")):
+                    report.add(
+                        8,
+                        gwhere,
+                        f"a goal needs a non-empty string 'title'; it is "
+                        f"{goal.get('title')!r}",
+                    )
+                for key in sorted(
+                    (k for k in goal if k not in CATALOG_GOAL_KEYS), key=str
+                ):
+                    report.add(
+                        8,
+                        gwhere,
+                        f"unknown key {str(key)!r} in a goal; a goal "
+                        f"defines {', '.join(CATALOG_GOAL_KEYS)}",
+                    )
+                objectives = goal.get("objectives")
+                if not _is_text_list(objectives):
+                    report.add(
+                        8,
+                        gwhere,
+                        f"'objectives' must be a non-empty list of strings; "
+                        f"it is {objectives!r}",
+                    )
+                    continue
+                for objective in objectives:
+                    if objective not in covered:
+                        report.add(
+                            8,
+                            gwhere,
+                            f"the objective {objective!r} is not a 'covers' "
+                            f"key of any entry in this catalogue, so no "
+                            f"course here teaches it",
+                        )
+                    if objective in owner:
+                        report.add(
+                            8,
+                            gwhere,
+                            f"the objective {objective!r} is already under "
+                            f"goal {owner[objective]!r}; one objective "
+                            f"belongs to one goal",
+                        )
+                    else:
+                        owner[objective] = str(goal_id)
+        report.ran(8, f"{goal_count} goal(s)")
+
+    # -- check 9: start_from
+    from catalogs import start_from_problems  # one rule for both readers
+
+    declared = [(w, i) for w, i in entries if "start_from" in i]
+    if not declared:
+        report.na(9, "no entry declares 'start_from'")
+    else:
+        for where, item in declared:
+            for problem in start_from_problems(item["start_from"]):
+                report.add(9, where, problem)
+        report.ran(9, f"{len(declared)} start_from declaration(s)")
 
     # -- check 7: portability
     if not portable:

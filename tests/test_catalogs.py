@@ -253,6 +253,25 @@ def with_optional_count(document: str, value: str) -> str:
     )
 
 
+def with_goals(goals_body: str) -> str:
+    """A one-entry catalogue that covers `c1`, with a `goals:` block.
+
+    `goals_body` is the indented body of the mapping, goal by goal.
+    """
+    doc = catalog_doc(("a", "bundle")).replace(
+        "    level: beginner\n",
+        "    level: beginner\n    covers:\n      c1:\n        summary: One.\n",
+    )
+    return doc.replace("tutorials:", f"goals:\n{goals_body}tutorials:", 1)
+
+
+def with_start_from(block: str) -> str:
+    """Put a `start_from:` block (already indented to a key) on the entry."""
+    return catalog_doc(("a", "bundle")).replace(
+        "    level: beginner\n", f"    level: beginner\n    {block}"
+    )
+
+
 def file_config(*pairs: tuple[str, Path]) -> str:
     lines = ["catalogs_version: 1", "catalogs:"]
     for identifier, path in pairs:
@@ -1484,6 +1503,124 @@ CATALOG_CASES: list[tuple[str, int, str, str, bool]] = [
         False,
     ),
     (
+        "8: goals is not a mapping",
+        8,
+        catalog_doc(("a", "bundle")).replace(
+            "tutorials:", "goals: [one]\ntutorials:", 1
+        ),
+        "'goals' must be a mapping",
+        False,
+    ),
+    (
+        "8: a goal id that is not [a-z0-9-]+",
+        8,
+        with_goals(
+            "  Bad_Goal:\n    title: T\n    objectives: [c1]\n"
+        ),
+        "must match [a-z0-9-]+",
+        False,
+    ),
+    (
+        "8: a goal without a title",
+        8,
+        with_goals("  g:\n    objectives: [c1]\n"),
+        "non-empty string 'title'",
+        False,
+    ),
+    (
+        "8: a goal whose objectives is a bare string",
+        8,
+        with_goals("  g:\n    title: T\n    objectives: c1\n"),
+        "'objectives' must be a non-empty list of strings",
+        False,
+    ),
+    (
+        "8: a goal with an empty objectives list",
+        8,
+        with_goals("  g:\n    title: T\n    objectives: []\n"),
+        "'objectives' must be a non-empty list of strings",
+        False,
+    ),
+    (
+        "8: an unknown key inside a goal",
+        8,
+        with_goals(
+            "  g:\n    title: T\n    objectives: [c1]\n    colour: red\n"
+        ),
+        "unknown key 'colour'",
+        False,
+    ),
+    (
+        "8: an objective that no entry covers",
+        8,
+        with_goals("  g:\n    title: T\n    objectives: [c1, nobody-covers]\n"),
+        "'nobody-covers' is not a 'covers' key",
+        False,
+    ),
+    (
+        "8: an objective listed under two goals",
+        8,
+        with_goals(
+            "  g:\n    title: T\n    objectives: [c1]\n"
+            "  h:\n    title: U\n    objectives: [c1]\n"
+        ),
+        "already under goal 'g'",
+        False,
+    ),
+    (
+        "9: start_from is not a mapping",
+        9,
+        with_start_from("start_from: just-a-string\n"),
+        "'start_from' must be a mapping",
+        False,
+    ),
+    (
+        "9: start_from has no ref",
+        9,
+        with_start_from(
+            "start_from:\n      repo: https://github.com/o/r.git\n"
+        ),
+        "'ref' is missing",
+        False,
+    ),
+    (
+        "9: start_from has no repo",
+        9,
+        with_start_from("start_from:\n      ref: main\n"),
+        "'repo' is missing",
+        False,
+    ),
+    (
+        "9: start_from has an empty ref",
+        9,
+        with_start_from(
+            "start_from:\n      repo: https://github.com/o/r.git\n"
+            "      ref: ''\n"
+        ),
+        "'start_from.ref' must be a non-empty string",
+        False,
+    ),
+    (
+        "9: start_from has an unknown key",
+        9,
+        with_start_from(
+            "start_from:\n      repo: https://github.com/o/r.git\n"
+            "      ref: main\n      branch: x\n"
+        ),
+        "unknown key 'branch'",
+        False,
+    ),
+    (
+        "9: start_from repo is not a Git URL",
+        9,
+        with_start_from(
+            "start_from:\n      repo: http://github.com/o/r.git\n"
+            "      ref: main\n"
+        ),
+        "is not a Git URL",
+        False,
+    ),
+    (
         "4: two entries share an id",
         4,
         catalog_doc(("a", "bundle"), ("a", "bundle")),
@@ -1647,6 +1784,53 @@ def test_validator_catalog_mode() -> None:
                 f"optional_lesson_count: {label}",
                 "; ".join(str(f) for f in report.findings),
             )
+        # goals and start_from: the rejections above mean nothing unless a
+        # well-formed declaration passes, silently, and unless a catalogue
+        # that declares neither reports checks 8 and 9 as n/a.
+        report = vb.validate_catalog(target, portable=False)
+        record(
+            report.status.get(8, ("", ""))[0] == vb.NOT_APPLICABLE
+            and report.status.get(9, ("", ""))[0] == vb.NOT_APPLICABLE,
+            "a catalogue declaring neither goals nor start_from reports "
+            "checks 8 and 9 n/a",
+            repr((report.status.get(8), report.status.get(9))),
+        )
+        target.write_text(
+            with_goals(
+                "  g:\n    title: T\n    summary: S\n    objectives: [c1]\n"
+            ).replace(
+                "    level: beginner\n",
+                "    level: beginner\n    start_from:\n"
+                "      repo: git@github.com:o/r.git\n      ref: v1\n",
+            ),
+            encoding="utf-8",
+        )
+        report = vb.validate_catalog(target, portable=False)
+        record(
+            report.exit_code() == 0
+            and not report.warnings
+            and report.status.get(8, ("", ""))[0] == vb.RAN
+            and report.status.get(9, ("", ""))[0] == vb.RAN,
+            "a valid goals block and a valid start_from pass with no "
+            "warning, and checks 8 and 9 RAN",
+            "; ".join(str(f) for f in [*report.findings, *report.warnings])
+            or repr((report.status.get(8), report.status.get(9))),
+        )
+        for repo in ("https://h/o/r", "ssh://git@h/o/r.git", "u@h.example:o/r"):
+            target.write_text(
+                with_start_from(
+                    f"start_from:\n      repo: {repo}\n      ref: main\n"
+                ),
+                encoding="utf-8",
+            )
+            report = vb.validate_catalog(target, portable=False)
+            record(
+                report.exit_code() == 0,
+                f"start_from repo {repo!r} is accepted",
+                "; ".join(str(f) for f in report.findings),
+            )
+        target.write_text(catalog_doc(("a", "bundle")), encoding="utf-8")
+
         target.write_text(catalog_doc(("a", "bundle")), encoding="utf-8")
 
     shipped = REPO / "skills" / "belay" / "catalog" / "builtin.yaml"
@@ -2816,6 +3000,86 @@ def test_the_tolerant_reader_accepts_only_a_whole_count() -> None:
         "omitting it is the normal way to write a course with none",
         f"count={count!r} notes={notes}",
     )
+
+
+START_FROM_CATALOG = HERE / "fixtures" / "catalog-start-from" / "catalog.yaml"
+
+
+def test_start_from_is_normalised_in_json() -> None:
+    print("\nstart_from is normalised like optional_lesson_count:")
+    with temp_env() as env:
+        env.write_config(file_config(("sf", START_FROM_CATALOG)))
+        by_id = {}
+        for identifier in ("with-start", "broken-start", "without-start"):
+            code, payload = env.run_json("resolve", identifier)
+            entry = payload.get("entry", payload)
+            by_id[identifier] = (code, entry)
+        record(
+            by_id["with-start"][1].get("start_from")
+            == {"repo": "https://github.com/example/starter.git", "ref": "main"}
+            and by_id["with-start"][1].get("metadata_notes") == [],
+            "resolve --json shows the valid start_from mapping, with no note",
+            repr(by_id["with-start"][1].get("start_from")),
+        )
+        broken = by_id["broken-start"][1]
+        notes = " ".join(broken.get("metadata_notes", []))
+        record(
+            "start_from" in broken and broken["start_from"] is None
+            and "start_from" in notes and "ref" in notes,
+            "a start_from missing its ref is null with a note naming the "
+            "field and the key, never a half-usable mapping",
+            f"{broken.get('start_from', '(absent)')!r} {notes}",
+        )
+        plain = by_id["without-start"][1]
+        record(
+            "start_from" in plain and plain["start_from"] is None
+            and plain.get("metadata_notes") == [],
+            "an entry without start_from has the key, null, and no note",
+            f"{plain.get('start_from', '(absent)')!r} {plain.get('metadata_notes')}",
+        )
+        code, payload = env.run_json("discover")
+        record(
+            all("start_from" in e for e in payload["tutorials"])
+            and len(payload["tutorials"]) == 3,
+            "discover --json carries the key on every entry, and the course "
+            "with the broken start_from is still offered",
+            repr([e.get("start_from", "(absent)") for e in payload["tutorials"]]),
+        )
+
+
+def test_read_start_from_value_by_value() -> None:
+    print("\nread_start_from, value by value:")
+    good = {"repo": "https://github.com/o/r.git", "ref": "main"}
+    value, notes = cat.read_start_from({"start_from": good}, "e")
+    record(value == good and notes == [], "a valid mapping is returned", repr((value, notes)))
+    for repo in ("ssh://git@h/o/r.git", "git@github.com:o/r.git", "https://h/o/r"):
+        value, notes = cat.read_start_from(
+            {"start_from": {"repo": repo, "ref": "v1"}}, "e"
+        )
+        record(value is not None and notes == [], f"repo {repo!r} is usable", repr((value, notes)))
+    value, notes = cat.read_start_from({}, "e")
+    record(value is None and notes == [], "absent is (None, no note)", repr((value, notes)))
+    bad: list[Any] = [
+        "main",
+        ["a"],
+        {"repo": "https://h/o/r"},
+        {"ref": "main"},
+        {"repo": "", "ref": "main"},
+        {"repo": "https://h/o/r", "ref": ""},
+        {"repo": "https://h/o/r", "ref": 3},
+        {"repo": "http://h/o/r", "ref": "main"},
+        {"repo": "/local/path", "ref": "main"},
+        {"repo": "file:///x", "ref": "main"},
+        {"repo": "https://h/o/r", "ref": "main", "extra": 1},
+        None,
+    ]
+    for item in bad:
+        value, notes = cat.read_start_from({"start_from": item}, "e")
+        record(
+            value is None and len(notes) == 1 and "start_from" in notes[0],
+            f"{item!r} is dropped with one note",
+            repr((value, notes)),
+        )
 
 
 def test_an_optional_lesson_count_of_zero_says_nothing_extra() -> None:
@@ -4093,6 +4357,8 @@ def main() -> int:
         test_repository_issue_page,
         test_the_reader_keeps_report_on_an_entry,
         test_find_instance,
+        test_start_from_is_normalised_in_json,
+        test_read_start_from_value_by_value,
     ):
         try:
             test()

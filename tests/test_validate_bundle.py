@@ -7335,8 +7335,8 @@ def test_top_level_near_miss_distance() -> None:
         got = vb.near_misses(name, known)
         record(got == want, f"{name!r} -> {want}", f"got {got}")
     record(
-        set(known) == {"catalog_version", "tutorials"},
-        "the known top-level keys are exactly the two section 5 defines",
+        set(known) == {"catalog_version", "goals", "tutorials"},
+        "the known top-level keys are exactly the three section 5 defines",
         f"got {known}",
     )
     record(
@@ -7376,7 +7376,7 @@ def test_catalog_unknown_top_level_field_warns_and_never_rejects() -> None:
             warned[0].message,
         )
         record(
-            "catalog_version, tutorials" in warned[0].message,
+            "catalog_version, goals, tutorials" in warned[0].message,
             "it lists the top-level fields this document defines, so an "
             "author can check the name against them",
             warned[0].message,

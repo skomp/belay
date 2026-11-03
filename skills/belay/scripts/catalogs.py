@@ -168,6 +168,8 @@ ENTRY_REQUIRED_FIELDS = (
 # where it is a mapping of lesson path to offer metadata. One name for two
 # shapes in two files is the confusion this project keeps paying for.
 OPTIONAL_LESSON_COUNT = "optional_lesson_count"
+START_FROM = "start_from"
+START_FROM_KEYS = ("repo", "ref")
 
 _SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 
@@ -420,7 +422,12 @@ class MergedEntry:
         # a different fact from zero.
         count, notes = read_optional_lesson_count(self.entry, self.id)
         out[OPTIONAL_LESSON_COUNT] = count
-        out["metadata_notes"] = notes
+        # start_from gets the same treatment, for the same reason: a
+        # malformed one is null with a note, never a half-usable mapping the
+        # tutor might build a clone command from.
+        start_from, start_notes = read_start_from(self.entry, self.id)
+        out[START_FROM] = start_from
+        out["metadata_notes"] = notes + start_notes
         out["catalog"] = self.catalog_id
         out["freshness"] = self.freshness
         out["resolved_path"] = self.resolved_path
@@ -963,6 +970,81 @@ def read_optional_lesson_count(
             f"whoever can fix it"
         ]
     return int(value), []
+
+
+_GIT_URL = re.compile(
+    r"(?:https://[^\s/]\S*|ssh://[^\s/]\S*|[A-Za-z0-9._-]+@[A-Za-z0-9._-]+:\S+)"
+)
+
+
+def is_git_url(value: Any) -> bool:
+    """True for `https://...`, `ssh://...` or scp-style `user@host:path`.
+
+    Plain `http://`, a local path and `file://` are refused: the tutor would
+    clone this, and a repository named by an unauthenticated or local
+    address is not one a catalogue should hand over.
+    """
+    return isinstance(value, str) and _GIT_URL.fullmatch(value) is not None
+
+
+def start_from_problems(value: Any) -> list[str]:
+    """Every reason a `start_from` value is unusable; empty when it is fine.
+
+    One list for both readers, so the validator (which reports each reason as
+    a finding) and `read_start_from` (which drops the value and keeps the
+    reasons as notes) can never disagree about what is usable.
+    """
+    if not isinstance(value, dict):
+        return [
+            f"'start_from' must be a mapping with 'repo' and 'ref', not "
+            f"{type(value).__name__}"
+        ]
+    problems: list[str] = []
+    for key in START_FROM_KEYS:
+        if key not in value:
+            problems.append(f"{key!r} is missing from 'start_from'")
+        elif not isinstance(value[key], str) or not value[key].strip():
+            problems.append(
+                f"'start_from.{key}' must be a non-empty string; it is "
+                f"{value[key]!r}"
+            )
+    for key in sorted((k for k in value if k not in START_FROM_KEYS), key=str):
+        problems.append(
+            f"'start_from' has an unknown key {str(key)!r}; it defines "
+            f"{', '.join(START_FROM_KEYS)}"
+        )
+    repo = value.get("repo")
+    if isinstance(repo, str) and repo.strip() and not is_git_url(repo):
+        problems.append(
+            f"'start_from.repo' {repo!r} is not a Git URL; use https://..., "
+            f"ssh://... or user@host:path"
+        )
+    return problems
+
+
+def read_start_from(
+    entry: dict, where: str
+) -> tuple[dict | None, list[str]]:
+    """The repository an entry says its course starts from, or None.
+
+    In the shape of `read_optional_lesson_count`: None when the entry does
+    not say (no note), and None WITH notes when it says something unusable.
+    The course is still offered; what is refused is handing the tutor a
+    `start_from` it might act on - a missing `ref` or a `repo` that is not a
+    Git URL is never returned half-formed. `validate_bundle.py --catalog`
+    rejects the same values, because an author is asking to be told.
+    """
+    if START_FROM not in entry:
+        return None, []
+    value = entry[START_FROM]
+    problems = start_from_problems(value)
+    if problems:
+        return None, [
+            f"{where}: {problem}. The course is still offered, without a "
+            f"starting repository"
+            for problem in problems
+        ]
+    return {"repo": value["repo"], "ref": value["ref"]}, []
 
 
 # --------------------------------------------------------------------------
