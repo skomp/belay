@@ -167,6 +167,17 @@ CHECKS: dict[int, str] = {
     46: "[instance] STATE.md's '## Tasks' rows are well-formed: an id, a "
         "state, text ending in a date, one row per task; states and ids are "
         "not looked up",
+    47: "grading, where a manifest declares it, is a mapping of known keys: "
+    "image a non-empty string, network a boolean, env a list of variable "
+    "names, timeout_minutes a positive integer",
+    48: "grading.validators, where declared, names declared validators of kind "
+    "command, file-exists or file-contains (never manual or git-diff), each "
+    "with positive integer points and an optional boolean gate",
+    49: "grading.rubric, where declared, holds criteria with a unique id, "
+    "positive integer points, a non-empty standard and optional paths that "
+    "are non-empty relative workspace globs",
+    50: "grading: validator points are at least 60% of the total points",
+    51: "exam, where a lesson declares it, is a boolean",
 }
 
 BUNDLE_ONLY = {12, 13, 26}
@@ -283,6 +294,7 @@ KNOWN_MANIFEST_FIELDS = (
     "covers",
     "description",
     "failure_modes",
+    "grading",
     "id",
     "instance",
     "learner_owned",
@@ -5961,6 +5973,271 @@ def check_starts_from(manifest: Any, report: Report) -> None:
     report.ran(36, "declared")
 
 
+# Cohort grading (checks 47-51): the `grading` manifest key and the `exam`
+# lesson key (docs/superpowers/specs/2026-11-03-cohort-grading-design.md,
+# sections 2 and 6). Every check is n/a when its key is absent, and a bundle
+# with neither key gets no new finding and no new warning.
+GRADING_KEY = "grading"
+GRADING_KEYS = ("image", "network", "env", "timeout_minutes", "validators", "rubric")
+GRADING_VALIDATOR_KEYS = ("points", "gate")
+GRADING_RUBRIC_KEYS = ("id", "points", "standard", "paths")
+# Kinds that cannot earn points: `manual` needs a learner, `git-diff` needs
+# uncommitted changes that a fresh checkout does not have.
+GRADING_BARRED_KINDS = ("manual", "git-diff")
+GRADING_MIN_DETERMINISTIC_PERCENT = 60
+EXAM_KEY = "exam"
+ENV_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
+
+
+def _positive_int(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value > 0
+
+
+def _grading_mapping(manifest: Any) -> dict | None:
+    """The `grading` mapping, or None when absent or not a mapping."""
+    if not isinstance(manifest, dict):
+        return None
+    value = manifest.get(GRADING_KEY)
+    return value if isinstance(value, dict) else None
+
+
+def workspace_glob_problem(value: Any) -> str | None:
+    """Why a workspace glob is unusable, or None.
+
+    The ownership dialect (bundle-format.md section 2): globs are relative to
+    the learner's workspace. This repository has no glob parser to reuse -
+    check 10 only tests that `learner_owned` is non-empty - so this applies
+    the path rules check 45 applies to `own_tasks` (relative, '/' separated,
+    no empty, '.' or '..' component; one trailing '/' tolerated) and leaves
+    the wildcard syntax alone, because the document defines none.
+    """
+    if not isinstance(value, str) or not value.strip():
+        return f"{value!r} is not a non-empty glob string"
+    if value.startswith("/"):
+        return f"{value!r} is absolute; it must be relative to the workspace"
+    if "\\" in value:
+        return f"{value!r} uses a backslash; use '/' in the glob"
+    parts = (value[:-1] if value.endswith("/") else value).split("/")
+    if ".." in parts:
+        return f"{value!r} has a '..' segment; it must stay inside the workspace"
+    bad = [part for part in parts if part in ("", ".")]
+    if bad:
+        return f"{value!r} has the path component {bad[0]!r}, which is not allowed"
+    return None
+
+
+def check_grading_shape(manifest: Any, report: Report) -> None:
+    """Check 47 - both modes (the grader reads the instance's copy too)."""
+    if not isinstance(manifest, dict) or GRADING_KEY not in manifest:
+        report.na(47, "the bundle declares no grading")
+        return
+    grading = manifest[GRADING_KEY]
+    if not isinstance(grading, dict):
+        report.add(
+            47, "tutorial.yaml",
+            f"'grading' must be a mapping, not {grading!r}",
+        )
+        report.ran(47, "declared, malformed")
+        return
+    where = "tutorial.yaml"
+    before = len(report.findings)
+    for key in grading:
+        if key not in GRADING_KEYS:
+            report.add(
+                47, where,
+                f"grading has the unknown key {key!r}; the keys are "
+                f"{', '.join(GRADING_KEYS)}",
+            )
+    if "image" in grading:
+        image = grading["image"]
+        if not isinstance(image, str) or not image.strip():
+            report.add(47, where, f"grading.image is {image!r}; it must be a non-empty string")
+    if "network" in grading and not isinstance(grading["network"], bool):
+        report.add(
+            47, where,
+            f"grading.network is {grading['network']!r}; it must be true or false",
+        )
+    if "env" in grading:
+        env = grading["env"]
+        if not isinstance(env, list):
+            report.add(47, where, f"grading.env is {env!r}; it must be a list of variable names")
+        else:
+            for name in env:
+                if not isinstance(name, str) or not ENV_NAME_RE.match(name):
+                    report.add(
+                        47, where,
+                        f"grading.env has {name!r}, which is not a valid "
+                        f"environment variable name",
+                    )
+    if "timeout_minutes" in grading and not _positive_int(grading["timeout_minutes"]):
+        report.add(
+            47, where,
+            f"grading.timeout_minutes is {grading['timeout_minutes']!r}; it "
+            f"must be a positive integer",
+        )
+    report.ran(47, "declared, malformed" if len(report.findings) > before else "declared")
+
+
+def check_grading_validators(manifest: Any, report: Report) -> None:
+    """Check 48 - both modes."""
+    grading = _grading_mapping(manifest)
+    if grading is None or "validators" not in grading:
+        report.na(48, "the bundle declares no grading validators")
+        return
+    entries = grading["validators"]
+    before = len(report.findings)
+    if not isinstance(entries, dict):
+        report.add(
+            48, "tutorial.yaml",
+            f"grading.validators must be a mapping of validator name to "
+            f"points, not {entries!r}",
+        )
+        report.ran(48, "declared, malformed")
+        return
+    declared = manifest.get("validators")
+    declared = declared if isinstance(declared, dict) else {}
+    for name, entry in entries.items():
+        where = f"tutorial.yaml (grading.validators.{name})"
+        definition = declared.get(name)
+        if not isinstance(definition, dict):
+            report.add(
+                48, where,
+                f"{name!r} is not a declared validator; grading.validators "
+                f"names validators from the manifest's 'validators'",
+            )
+        elif definition.get("kind") in GRADING_BARRED_KINDS:
+            report.add(
+                48, where,
+                f"{name!r} has kind {definition.get('kind')!r}, which cannot "
+                f"earn points: manual needs a learner and git-diff needs "
+                f"uncommitted changes, and grading has neither",
+            )
+        if not isinstance(entry, dict):
+            report.add(48, where, f"the entry must be a mapping with 'points', not {entry!r}")
+            continue
+        for key in entry:
+            if key not in GRADING_VALIDATOR_KEYS:
+                report.add(
+                    48, where,
+                    f"unknown key {key!r}; the keys are "
+                    f"{', '.join(GRADING_VALIDATOR_KEYS)}",
+                )
+        if not _positive_int(entry.get("points")):
+            report.add(
+                48, where,
+                f"points is {entry.get('points')!r}; it must be a positive integer",
+            )
+        if "gate" in entry and not isinstance(entry["gate"], bool):
+            report.add(48, where, f"gate is {entry['gate']!r}; it must be true or false")
+    report.ran(48, "declared, malformed" if len(report.findings) > before else "declared")
+
+
+def check_grading_rubric(manifest: Any, report: Report) -> None:
+    """Check 49 - both modes."""
+    grading = _grading_mapping(manifest)
+    if grading is None or "rubric" not in grading:
+        report.na(49, "the bundle declares no grading rubric")
+        return
+    rubric = grading["rubric"]
+    before = len(report.findings)
+    if not isinstance(rubric, list):
+        report.add(49, "tutorial.yaml", f"grading.rubric must be a list of criteria, not {rubric!r}")
+        report.ran(49, "declared, malformed")
+        return
+    seen: set[str] = set()
+    for index, entry in enumerate(rubric):
+        label = f"[{index}]"
+        if isinstance(entry, dict) and isinstance(entry.get("id"), str) and entry["id"].strip():
+            label = f"[{entry['id']}]"
+        where = f"tutorial.yaml (grading.rubric{label})"
+        if not isinstance(entry, dict):
+            report.add(49, where, f"a criterion must be a mapping, not {entry!r}")
+            continue
+        for key in entry:
+            if key not in GRADING_RUBRIC_KEYS:
+                report.add(
+                    49, where,
+                    f"unknown key {key!r}; the keys are {', '.join(GRADING_RUBRIC_KEYS)}",
+                )
+        cid = entry.get("id")
+        if not isinstance(cid, str) or not cid.strip():
+            report.add(49, where, f"the criterion has no 'id' (got {cid!r}); it must be a non-empty string")
+        elif cid in seen:
+            report.add(49, where, f"duplicate criterion id {cid!r}")
+        else:
+            seen.add(cid)
+        if not _positive_int(entry.get("points")):
+            report.add(49, where, f"points is {entry.get('points')!r}; it must be a positive integer")
+        standard = entry.get("standard")
+        if not isinstance(standard, str) or not standard.strip():
+            report.add(49, where, f"standard is {standard!r}; it must be a non-empty string")
+        if "paths" in entry:
+            paths = entry["paths"]
+            if not isinstance(paths, list) or not paths:
+                report.add(49, where, f"paths is {paths!r}; it must be a non-empty list of globs")
+            else:
+                for glob in paths:
+                    problem = workspace_glob_problem(glob)
+                    if problem is not None:
+                        report.add(49, where, f"paths entry {problem}")
+    report.ran(49, "declared, malformed" if len(report.findings) > before else "declared")
+
+
+def check_grading_share(manifest: Any, report: Report) -> None:
+    """Check 50 - both modes.
+
+    The deterministic share is at least 60% of the total points. Computed
+    from well-formed points only: a malformed entry is checks 48 and 49's
+    finding, and a share computed over a guess would only add noise. When
+    any points value is malformed the share is not computed.
+    """
+    grading = _grading_mapping(manifest)
+    if grading is None or not ({"validators", "rubric"} & set(grading)):
+        report.na(50, "the bundle declares no grading points")
+        return
+    validators = grading.get("validators")
+    rubric = grading.get("rubric")
+    det_entries = list(validators.values()) if isinstance(validators, dict) else []
+    rub_entries = list(rubric) if isinstance(rubric, list) else []
+    if (
+        ("validators" in grading and not isinstance(validators, dict))
+        or ("rubric" in grading and not isinstance(rubric, list))
+        or any(not isinstance(e, dict) or not _positive_int(e.get("points"))
+               for e in det_entries + rub_entries)
+    ):
+        report.na(50, "some points are malformed; checks 48 and 49 report them")
+        return
+    det = sum(e["points"] for e in det_entries)
+    total = det + sum(e["points"] for e in rub_entries)
+    if total and det * 100 < GRADING_MIN_DETERMINISTIC_PERCENT * total:
+        report.add(
+            50, "tutorial.yaml",
+            f"the validators earn {det} of {total} points "
+            f"({det * 100 / total:.1f}%); the deterministic share must be "
+            f"at least {GRADING_MIN_DETERMINISTIC_PERCENT}%",
+        )
+    report.ran(50, f"{det} of {total} points are deterministic")
+
+
+def check_exam(lessons: list[Lesson], report: Report) -> None:
+    """Check 51 - both modes, over all_lessons for check 31's reason."""
+    declared = 0
+    for lesson in lessons:
+        fm = _lesson_frontmatter(lesson)
+        if fm is None or EXAM_KEY not in fm:
+            continue
+        declared += 1
+        if not isinstance(fm[EXAM_KEY], bool):
+            report.add(
+                51, lesson.rel,
+                f"exam is {fm[EXAM_KEY]!r}; it must be true or false",
+            )
+    if not declared:
+        report.na(51, "no lesson declares exam")
+    else:
+        report.ran(51, f"{declared} declaration(s)")
+
+
 def unknown_manifest_fields(manifest: dict) -> list[str]:
     """The top-level keys of a parsed tutorial.yaml the format does not define.
 
@@ -6189,6 +6466,8 @@ def validate(target: Path, mode: str) -> Report:
     check_task_files(target, all_lessons, report)
     check_task_states(all_lessons, report)
     check_own_tasks(all_lessons, report)
+    # Check 51, both modes, over all_lessons for check 31's reason.
+    check_exam(all_lessons, report)
     # Disclosure, and NOT a check: no finding, no warning, no number, no
     # effect on the exit code. It is derived here rather than by the tutor so
     # that the banner's content is testable, and it is given the RAW manifest
@@ -6224,6 +6503,12 @@ def validate(target: Path, mode: str) -> Report:
     # read from the instance's copy of tutorial.yaml too.
     check_levels_key(manifest_dict, report)
     check_starts_from(manifest_dict, report)
+    # Checks 47-50, both modes, for check 34's reason: the grader reads the
+    # instance's copy of tutorial.yaml.
+    check_grading_shape(manifest_dict, report)
+    check_grading_validators(manifest_dict, report)
+    check_grading_rubric(manifest_dict, report)
+    check_grading_share(manifest_dict, report)
     if mode == "bundle":
         check_no_generated_dir(target, report)
         template_fm = check_state_template(target, manifest_dict, report)

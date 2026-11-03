@@ -4346,6 +4346,200 @@ def m_own_tutorial_lookalikes(root: Path) -> None:
     _own(root, "tutorials/tutorial")
 
 
+# -- checks 47-51: grading and exam
+def _grading(root: Path, body: str) -> None:
+    """Append a `grading:` block and prove the reader saw a mapping or the key."""
+    manifest = root / "tutorial.yaml"
+    assert "grading:" not in manifest.read_text(), "baseline already has grading"
+    append(manifest, "\ngrading:" + body)
+    parsed = vb.load_yaml(manifest.read_text(), "tutorial.yaml")
+    assert isinstance(parsed, dict) and "grading" in parsed, "grading did not survive the reader"
+
+
+def _grading_valid_with(validators: str = "", rubric: str = "", head: str = "") -> str:
+    return (
+        head
+        + "\n  validators:\n"
+        + (validators or "    cargo-test: { points: 60, gate: true }\n    has-test: { points: 20 }\n")
+        + "  rubric:\n"
+        + (rubric or "    - id: failure-handling\n      points: 15\n"
+           "      standard: Every external call has a timeout.\n      paths: [src/**]\n"
+           "    - id: design\n      points: 5\n      standard: The design is justified.\n")
+    )
+
+
+def m_grading_valid(root: Path) -> None:
+    _grading(root, _grading_valid_with(head=(
+        "\n  image: python:3.12-slim\n  network: true\n"
+        "  env: [ANTHROPIC_API_KEY]\n  timeout_minutes: 15")))
+
+
+def m_grading_absent(root: Path) -> None:
+    assert "grading" not in vb.load_yaml((root / "tutorial.yaml").read_text(), "t")
+
+
+def m_grading_string(root: Path) -> None:
+    _grading(root, " nope\n")
+
+
+def m_grading_unknown_key(root: Path) -> None:
+    _grading(root, _grading_valid_with(head="\n  timeout: 5"))
+
+
+def m_grading_image_empty(root: Path) -> None:
+    _grading(root, _grading_valid_with(head='\n  image: ""'))
+
+
+def m_grading_network_string(root: Path) -> None:
+    _grading(root, _grading_valid_with(head='\n  network: "yes"'))
+
+
+def m_grading_env_bad_name(root: Path) -> None:
+    _grading(root, _grading_valid_with(head="\n  env: [GOOD_ONE, bad-name]"))
+
+
+def m_grading_env_string(root: Path) -> None:
+    _grading(root, _grading_valid_with(head="\n  env: ANTHROPIC_API_KEY"))
+
+
+def m_grading_timeout_zero(root: Path) -> None:
+    _grading(root, _grading_valid_with(head="\n  timeout_minutes: 0"))
+
+
+def m_grading_timeout_bool(root: Path) -> None:
+    _grading(root, _grading_valid_with(head="\n  timeout_minutes: true"))
+
+
+def m_grading_validator_undeclared(root: Path) -> None:
+    _grading(root, _grading_valid_with(
+        validators="    cargo-test: { points: 60 }\n    nonesuch: { points: 20 }\n"))
+
+
+def m_grading_validator_manual(root: Path) -> None:
+    _grading(root, _grading_valid_with(
+        validators="    cargo-test: { points: 60 }\n    explains-choice: { points: 20 }\n"))
+
+
+def m_grading_validator_git_diff(root: Path) -> None:
+    append(root / "tutorial.yaml", "")
+    manifest = root / "tutorial.yaml"
+    text = manifest.read_text().replace(
+        "  explains-choice: { kind: manual }\n",
+        "  explains-choice: { kind: manual }\n  tree-clean: { kind: git-diff }\n", 1)
+    assert "tree-clean" in text
+    manifest.write_text(text)
+    _grading(root, _grading_valid_with(
+        validators="    cargo-test: { points: 60 }\n    tree-clean: { points: 20 }\n"))
+
+
+def m_grading_validator_points_zero(root: Path) -> None:
+    _grading(root, _grading_valid_with(
+        validators="    cargo-test: { points: 0 }\n    has-test: { points: 80 }\n"))
+
+
+def m_grading_validator_points_missing(root: Path) -> None:
+    _grading(root, _grading_valid_with(
+        validators="    cargo-test: { gate: true }\n    has-test: { points: 80 }\n"))
+
+
+def m_grading_validator_gate_string(root: Path) -> None:
+    _grading(root, _grading_valid_with(
+        validators='    cargo-test: { points: 60, gate: "yes" }\n    has-test: { points: 20 }\n'))
+
+
+def m_grading_validator_unknown_key(root: Path) -> None:
+    _grading(root, _grading_valid_with(
+        validators="    cargo-test: { points: 60, weight: 2 }\n    has-test: { points: 20 }\n"))
+
+
+def m_grading_rubric_no_id(root: Path) -> None:
+    _grading(root, _grading_valid_with(
+        rubric="    - points: 20\n      standard: A standard.\n"))
+
+
+def m_grading_rubric_points_string(root: Path) -> None:
+    _grading(root, _grading_valid_with(
+        rubric='    - id: a\n      points: "20"\n      standard: A standard.\n'))
+
+
+def m_grading_rubric_no_standard(root: Path) -> None:
+    _grading(root, _grading_valid_with(rubric="    - id: a\n      points: 20\n"))
+
+
+def m_grading_rubric_duplicate(root: Path) -> None:
+    _grading(root, _grading_valid_with(rubric=(
+        "    - id: a\n      points: 10\n      standard: One.\n"
+        "    - id: a\n      points: 10\n      standard: Two.\n")))
+
+
+def m_grading_rubric_unknown_key(root: Path) -> None:
+    _grading(root, _grading_valid_with(rubric=(
+        "    - id: a\n      points: 10\n      standard: One.\n      weight: 3\n")))
+
+
+def m_grading_rubric_paths_empty(root: Path) -> None:
+    _grading(root, _grading_valid_with(rubric=(
+        "    - id: a\n      points: 10\n      standard: One.\n      paths: []\n")))
+
+
+def m_grading_rubric_paths_string(root: Path) -> None:
+    _grading(root, _grading_valid_with(rubric=(
+        "    - id: a\n      points: 10\n      standard: One.\n      paths: src/**\n")))
+
+
+def m_grading_rubric_paths_absolute(root: Path) -> None:
+    _grading(root, _grading_valid_with(rubric=(
+        "    - id: a\n      points: 10\n      standard: One.\n      paths: [/etc/**]\n")))
+
+
+def m_grading_rubric_paths_dotdot(root: Path) -> None:
+    _grading(root, _grading_valid_with(rubric=(
+        "    - id: a\n      points: 10\n      standard: One.\n      paths: [../x/**]\n")))
+
+
+def m_grading_rubric_paths_backslash(root: Path) -> None:
+    _grading(root, _grading_valid_with(rubric=(
+        "    - id: a\n      points: 10\n      standard: One.\n      paths: ['src\\\\x']\n")))
+
+
+def _grading_split(root: Path, det: int, rubric: int) -> None:
+    _grading(root, _grading_valid_with(
+        validators=f"    cargo-test: {{ points: {det} }}\n",
+        rubric=f"    - id: a\n      points: {rubric}\n      standard: One.\n"))
+
+
+def m_grading_share_exact(root: Path) -> None:
+    _grading_split(root, 60, 40)
+
+
+def m_grading_share_under(root: Path) -> None:
+    _grading_split(root, 59, 41)
+
+
+def m_grading_share_rubric_only(root: Path) -> None:
+    _grading(root, "\n  rubric:\n    - id: a\n      points: 10\n      standard: One.\n")
+
+
+def _exam(root: Path, value: str) -> None:
+    _add_fm(root, CLI_LESSON_01, f"exam: {value}\n")
+
+
+def m_exam_true(root: Path) -> None:
+    _exam(root, "true")
+
+
+def m_exam_false(root: Path) -> None:
+    _exam(root, "false")
+
+
+def m_exam_string(root: Path) -> None:
+    _exam(root, '"yes"')
+
+
+def m_exam_list(root: Path) -> None:
+    _exam(root, "[true]")
+
+
 @dataclass
 class Case:
     name: str
@@ -5481,6 +5675,89 @@ CASES: list[Case] = [
          m_task_rows_bad_id, "is not a task id", where="STATE.md (## Tasks)"),
     Case("46: one task with two rows", 46, "broker", "instance",
          m_task_rows_duplicate, "recorded twice", where="STATE.md (## Tasks)"),
+    # ---- checks 47-51: grading and exam. Silent rows are the positive control.
+    Case("47: no grading is silent", 47, "cli", "bundle", m_grading_absent, kind="silent"),
+    Case("47: no grading in an INSTANCE is silent", 47, "cli", "instance", m_grading_absent, kind="silent"),
+    Case("47: a valid grading block is silent", 47, "cli", "bundle", m_grading_valid, kind="silent"),
+    Case("47: a valid grading block in an INSTANCE is silent", 47, "cli", "instance", m_grading_valid, kind="silent"),
+    Case("48: no grading is silent", 48, "cli", "bundle", m_grading_absent, kind="silent"),
+    Case("48: no grading in an INSTANCE is silent", 48, "cli", "instance", m_grading_absent, kind="silent"),
+    Case("48: a valid grading block is silent", 48, "cli", "bundle", m_grading_valid, kind="silent"),
+    Case("48: a valid grading block in an INSTANCE is silent", 48, "cli", "instance", m_grading_valid, kind="silent"),
+    Case("49: no grading is silent", 49, "cli", "bundle", m_grading_absent, kind="silent"),
+    Case("49: no grading in an INSTANCE is silent", 49, "cli", "instance", m_grading_absent, kind="silent"),
+    Case("49: a valid grading block is silent", 49, "cli", "bundle", m_grading_valid, kind="silent"),
+    Case("49: a valid grading block in an INSTANCE is silent", 49, "cli", "instance", m_grading_valid, kind="silent"),
+    Case("50: no grading is silent", 50, "cli", "bundle", m_grading_absent, kind="silent"),
+    Case("50: no grading in an INSTANCE is silent", 50, "cli", "instance", m_grading_absent, kind="silent"),
+    Case("50: a valid grading block is silent", 50, "cli", "bundle", m_grading_valid, kind="silent"),
+    Case("50: a valid grading block in an INSTANCE is silent", 50, "cli", "instance", m_grading_valid, kind="silent"),
+    Case("51: no exam key is silent", 51, "cli", "bundle", m_grading_absent, kind="silent"),
+    Case("51: no exam key in an INSTANCE is silent", 51, "cli", "instance", m_grading_absent, kind="silent"),
+    Case("47: grading as a string", 47, "cli", "bundle", m_grading_string,
+         "'grading' must be a mapping", where='tutorial.yaml'),
+    Case("47: an unknown key", 47, "cli", "bundle", m_grading_unknown_key,
+         "unknown key 'timeout'", where='tutorial.yaml'),
+    Case("47: an empty image", 47, "cli", "bundle", m_grading_image_empty,
+         'grading.image', where='tutorial.yaml'),
+    Case("47: network not a boolean", 47, "cli", "bundle", m_grading_network_string,
+         'grading.network', where='tutorial.yaml'),
+    Case("47: an env name with a hyphen", 47, "cli", "bundle", m_grading_env_bad_name,
+         "'bad-name'", where='tutorial.yaml'),
+    Case("47: env as a string", 47, "cli", "bundle", m_grading_env_string,
+         'grading.env', where='tutorial.yaml'),
+    Case("47: timeout_minutes 0", 47, "cli", "bundle", m_grading_timeout_zero,
+         'grading.timeout_minutes', where='tutorial.yaml'),
+    Case("47: timeout_minutes true", 47, "cli", "bundle", m_grading_timeout_bool,
+         'grading.timeout_minutes', where='tutorial.yaml'),
+    Case("47: an INSTANCE with an unknown key too", 47, "cli", "instance", m_grading_unknown_key,
+         "unknown key 'timeout'", where='tutorial.yaml'),
+    Case("48: an undeclared validator", 48, "cli", "bundle", m_grading_validator_undeclared,
+         "'nonesuch' is not a declared validator", where='tutorial.yaml (grading.validators.nonesuch)'),
+    Case("48: a manual validator", 48, "cli", "bundle", m_grading_validator_manual,
+         "kind 'manual'", where='tutorial.yaml (grading.validators.explains-choice)'),
+    Case("48: a git-diff validator", 48, "cli", "bundle", m_grading_validator_git_diff,
+         "kind 'git-diff'", where='tutorial.yaml (grading.validators.tree-clean)'),
+    Case("48: points 0", 48, "cli", "bundle", m_grading_validator_points_zero,
+         'points', where='tutorial.yaml (grading.validators.cargo-test)'),
+    Case("48: points missing", 48, "cli", "bundle", m_grading_validator_points_missing,
+         'points', where='tutorial.yaml (grading.validators.cargo-test)'),
+    Case("48: gate not a boolean", 48, "cli", "bundle", m_grading_validator_gate_string,
+         'gate', where='tutorial.yaml (grading.validators.cargo-test)'),
+    Case("48: an unknown key in an entry", 48, "cli", "bundle", m_grading_validator_unknown_key,
+         "unknown key 'weight'", where='tutorial.yaml (grading.validators.cargo-test)'),
+    Case("49: a criterion without id", 49, "cli", "bundle", m_grading_rubric_no_id,
+         "'id'", where='tutorial.yaml (grading.rubric[0])'),
+    Case("49: points as a string", 49, "cli", "bundle", m_grading_rubric_points_string,
+         'points', where='tutorial.yaml (grading.rubric[a])'),
+    Case("49: a criterion without standard", 49, "cli", "bundle", m_grading_rubric_no_standard,
+         'standard', where='tutorial.yaml (grading.rubric[a])'),
+    Case("49: a duplicate id", 49, "cli", "bundle", m_grading_rubric_duplicate,
+         'duplicate', where='tutorial.yaml (grading.rubric[a])'),
+    Case("49: an unknown key in a criterion", 49, "cli", "bundle", m_grading_rubric_unknown_key,
+         "unknown key 'weight'", where='tutorial.yaml (grading.rubric[a])'),
+    Case("49: paths: []", 49, "cli", "bundle", m_grading_rubric_paths_empty,
+         'paths', where='tutorial.yaml (grading.rubric[a])'),
+    Case("49: paths as a string", 49, "cli", "bundle", m_grading_rubric_paths_string,
+         'paths', where='tutorial.yaml (grading.rubric[a])'),
+    Case("49: an absolute glob", 49, "cli", "bundle", m_grading_rubric_paths_absolute,
+         'absolute', where='tutorial.yaml (grading.rubric[a])'),
+    Case("49: a '..' glob", 49, "cli", "bundle", m_grading_rubric_paths_dotdot,
+         "'..'", where='tutorial.yaml (grading.rubric[a])'),
+    Case("49: a backslash glob", 49, "cli", "bundle", m_grading_rubric_paths_backslash,
+         'backslash', where='tutorial.yaml (grading.rubric[a])'),
+    Case("50: exactly 60% is silent", 50, "cli", "bundle", m_grading_share_exact, kind="silent"),
+    Case("50: 59 of 100 fires", 50, "cli", "bundle", m_grading_share_under,
+         '60%', where='tutorial.yaml'),
+    Case("50: rubric points only fires", 50, "cli", "bundle", m_grading_share_rubric_only,
+         '60%', where='tutorial.yaml'),
+    Case("51: exam: true is silent", 51, "cli", "bundle", m_exam_true, kind="silent"),
+    Case("51: exam: false is silent", 51, "cli", "bundle", m_exam_false, kind="silent"),
+    Case("51: exam: true in an INSTANCE is silent", 51, "cli", "instance", m_exam_true, kind="silent"),
+    Case("51: exam as a string", 51, "cli", "bundle", m_exam_string,
+         'exam', where='lessons/01-subcommands/LESSON.md'),
+    Case("51: exam as a list", 51, "cli", "bundle", m_exam_list,
+         'exam', where='lessons/01-subcommands/LESSON.md'),
     # ---- checks 35 and 36: levels and starts_from. Silent rows are the
     # positive control for the firing ones.
     Case("35: a bundle with no levels is silent", 35, "cli", "bundle",
