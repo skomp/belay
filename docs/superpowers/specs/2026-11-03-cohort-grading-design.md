@@ -5,7 +5,7 @@
 **Status:** designed, not implemented
 **Issue:** belay#94
 **Builds on:** the levels and modules-as-bundles design (2026-11-03, PR: belay#91); the
-user-stories design (PR: belay#101), whose `self-cut` stories and specifications are graded here
+task-lessons design (PR: belay#101), whose participant-written files can be graded here
 **Related:** belay#95 (final project and certificate), which reads the grades this stores
 
 ---
@@ -60,7 +60,7 @@ grading:
     - id: failure-handling
       points: 15
       standard: Every external call has a timeout and a handled failure path.
-      evidence: code               # code | specs | stories; default code
+      paths: [src/**]              # where the grader looks; default: the whole branch
     - id: exam-design
       points: 10
       standard: The design choice is justified against the stated non-functional requirement.
@@ -68,7 +68,7 @@ grading:
     - id: spec-quality
       points: 10
       standard: Each acceptance criterion is testable and traced to a task.
-      evidence: specs
+      paths: [specs/**]
 ```
 
 - **A validator earns its points when it passes and none when it does not.** There is no partial
@@ -77,10 +77,10 @@ grading:
   proportion so that every module and every cohort means the same thing by "hybrid".
 - **A rubric criterion's `standard` is one checkable sentence**, in the spirit of a `covers`
   summary. The grader judges a branch against it and quotes the evidence.
-- **`evidence` says where the grader looks**: the code, the participant's specifications
-  (user-stories design, section 2.4), or the participant's own story files at `self-cut`
-  (user-stories design, section 2.3). `stories` is allowed only in a bundle that has a
-  `self-cut` story lesson.
+- **`paths` says where the grader looks**: a list of workspace globs, in the dialect of
+  `learner_owned` (`bundle-format.md` section 2). A course that grades specifications or
+  participant-written task files points a criterion at them — for example `specs/**` or the
+  `own_tasks` directory of a task lesson. Without `paths` the grader looks at the whole branch.
 - **`lesson`** limits a criterion to the work of one lesson — typically an exam lesson.
 - `grading:` is in `tutorial.yaml`, so **participants can read the criteria from the start.**
   They never see anyone's grades.
@@ -208,7 +208,7 @@ New checks take the next free numbers. All are silent when the key is absent.
 |---|---|---|
 | grading shape | both | `grading` not a mapping; an unknown key; `image` not a non-empty string; `network` not a boolean; `env` not a list of valid variable names; `timeout_minutes` not a positive integer |
 | grading validators | both | a name that is not a declared validator; `points` not a positive integer; `gate` not a boolean |
-| grading rubric | both | a criterion without `id`, positive integer `points`, or a non-empty `standard`; a duplicate `id`; `evidence` other than `code`, `specs`, `stories`; `stories` without a `self-cut` story lesson in the bundle; `lesson` that is not a lesson of the bundle |
+| grading rubric | both | a criterion without `id`, positive integer `points`, or a non-empty `standard`; a duplicate `id`; `paths` not a non-empty list of globs the ownership dialect accepts; `lesson` that is not a lesson of the bundle |
 | grading share | both | the validator points less than 60% of the total |
 | exam | both | `exam` not a boolean |
 
