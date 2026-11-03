@@ -10378,6 +10378,77 @@ def test_levelled_programme_is_clean_end_to_end() -> None:
         "",
     )
 
+    # Task lessons (spec 2026-11-03-user-stories-design.md section 8 item 3).
+    # Checks 42-46 are shown RUNNING, and the ids and the priority order are
+    # read from the task files, so a fixture that quietly lost its stories
+    # fails here instead of passing by emptiness.
+    for name, own in (("module1", False), ("module2", True)):
+        report = vb.validate(BASELINES[name], "bundle")
+        ran = {n: report.status.get(n, ("missing", ""))[0] for n in (42, 43, 44, 45)}
+        want = {42: vb.RAN, 43: vb.RAN, 44: vb.RAN, 45: vb.RAN if own else vb.NOT_APPLICABLE}
+        record(
+            ran == want,
+            f"{name}: checks 42-44 RAN and check 45 "
+            f"{'RAN' if own else 'is n/a, it declares no own_tasks'}",
+            f"states = {ran}",
+        )
+    report = vb.validate(instance, "instance")
+    record(
+        report.status.get(46, ("", ""))[0] == vb.RAN
+        and report.status.get(45, ("", ""))[0] == vb.RAN,
+        "the instance's task rows (check 46) and own_tasks (check 45) RAN",
+        f"46 = {report.status.get(46)!r}, 45 = {report.status.get(45)!r}",
+    )
+
+    def task_order(lesson_dir: Path) -> list[str]:
+        rows = []
+        for f in (lesson_dir / "stories").glob("*.md"):
+            front = frontmatter(f)
+            rows.append((front["priority"], front["id"]))
+        return [i for _, i in sorted(rows)]
+
+    first = BASELINES["module1"] / "lessons" / "03-shelf-stories"
+    second = BASELINES["module2"] / "lessons" / "03-order-stories"
+    record(
+        task_order(first)
+        == ["010-label-the-shelves", "020-count-by-label", "030-set-reorder-points"],
+        "module 1's task lesson holds three stories, in this priority order",
+        repr(task_order(first)),
+    )
+    f1, f2 = frontmatter(first / "LESSON.md"), frontmatter(second / "LESSON.md")
+    record(
+        f1["tasks"] == "stories/"
+        and f1["task_states"] == ["specifying", "handed-off", "implemented", "reviewed"]
+        and "own_tasks" not in f1,
+        "module 1's task lesson has tasks: stories/ and the four story states",
+        repr(f1),
+    )
+    record(
+        f2["tasks"] == "stories/" and f2["own_tasks"] == "stories/",
+        "module 2's task lesson declares own_tasks",
+        repr(f2),
+    )
+    ids = task_order(first) + task_order(second)
+    record(len(ids) == len(set(ids)) == 6, "the six task ids are distinct", repr(ids))
+    rows = [
+        line for line in state.split("## Tasks", 1)[1].splitlines()
+        if line.startswith("- `")
+    ]
+    record(
+        {r.split("`")[2].split("\u2014")[1].strip() for r in rows}
+        >= {"reviewed", "handed-off", "skipped", "specifying"}
+        and {r.split("`")[1] for r in rows} & set(task_order(second)),
+        "the instance has ## Tasks rows in several states, naming module 2's tasks",
+        repr(rows),
+    )
+    same = all(
+        (instance / "lessons" / rel.relative_to(BASELINES["module2"] / "lessons")).read_bytes()
+        == rel.read_bytes()
+        for rel in (BASELINES["module2"] / "lessons").rglob("*")
+        if rel.is_file()
+    )
+    record(same, "the instance's lesson files are byte-identical to module 2's", "")
+
 
 def test_check_coverage() -> None:
     """Every check must be demonstrated REPORTING, not merely passing.

@@ -27,6 +27,7 @@ lessons:
   - lessons/00-setup.md
   - lessons/01-placement.md
   - lessons/02-counting/LESSON.md
+  - lessons/03-shelf-stories/LESSON.md
 
 workspace_kind: new-repository
 tutor_owned:   [tutorial/STATE.md, tutorial/DESIGN.md]

@@ -41,3 +41,10 @@ None.
 ## Modules
 
 - `stockroom-basics` — complete 2026-10-20 — branch module-1-complete; the sheet was left with 12 items
+
+## Tasks
+
+- `110-forecast-one-item` — reviewed — pull request merged 2026-11-03
+- `120-order-date-from-lead-time` — handed-off — in the implementation session 2026-11-03 (branch story-120)
+- `130-flag-late-orders` — skipped — learner chose to leave it 2026-11-03
+- `140-flag-slow-movers` — specifying — own story, written after the lesson 2026-11-03

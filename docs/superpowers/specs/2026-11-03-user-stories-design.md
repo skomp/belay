@@ -4,7 +4,8 @@
 **Last amended:** 2026-11-03
 **Status:** implemented — see §10 for the decisions the implementation added;
 `bundle-format.md` §2, §6, §10, §13, `runner-protocol.md` §19, `state-lifecycle.md` §14,
-validator checks 42-46 and `--tasks`, `tests/test_validate_bundle.py`
+validator checks 42-46 and `--tasks`, `tests/test_validate_bundle.py`, fixture
+`tests/fixtures/levelled-programme/` (two task lessons and an instance with `## Tasks` rows)
 **Issues:** belay#93, belay#92
 **Builds on:** the levels and modules-as-bundles design (2026-11-03), PR: belay#91
 **Related:** belay#94 (cohort grading, PR: belay#102), belay#100 (who runs an action, by level)
