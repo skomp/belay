@@ -149,7 +149,7 @@ A tutor holds one lesson, not a course.
 | this file | `COURSE.md` |
 | the instance `tutorial.yaml` | `DESIGN.md` in full — only the declared anchors |
 | `STATE.md` | any lesson other than `active_lesson` |
-| the one lesson body, and its `material` file per objective at the learner's level | any completed lesson |
+| the one lesson body, and under `levels: true` its `material` file per objective at the learner's level | any completed lesson |
 | learner files the task concerns | other lesson-folder material the lesson body does not name |
 
 `COURSE.md` is for a learner choosing or re-orienting, not for teaching. Open it only

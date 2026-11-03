@@ -438,13 +438,22 @@ each is stated once, where the tutor reads it.
    bundle — would remove the second case.
 2. **Git argument hygiene is the protocol's.** The URL check accepts a dash-led ssh host or
    scp user, so the tutor refuses a `repo` or `ref` beginning with `-`, puts `--` before
-   them in `git fetch`, and never runs the commands itself (§18.6).
+   them in `git fetch`, and never runs the commands itself (`runner-protocol.md` §18.6).
+   The same rules cover the fetch of the learner's own previous branch when it is not in
+   the checkout, which the carry-forward then reads as `<remote>/<branch>`
+   (`state-lifecycle.md` §13.4).
 3. **A quiz the learner asked for sets no level.** It has no lesson path to record as a
    source, which check 40 requires, and the learner already has a direct route: asking
-   for a different level (§15.11, §18.5).
-4. **An objective's outcome in an attempt** is *demonstrated* when any answer showed it,
-   otherwise its last classified answer's; an objective a stop left unasked is unchanged
-   (§15.11).
+   for a different level (`runner-protocol.md` §15.11, §18.5).
+4. **An objective's outcome in an attempt** is *demonstrated* when any answer showed it;
+   otherwise the last answer classified *partial* or *misconception*; and *not enough
+   evidence* only when no answer was classified as anything else — so a terse reply after a
+   misconception does not leave the level unchanged. An objective a stop left unasked is
+   unchanged (`runner-protocol.md` §15.11). *Unchanged* means only that last table row and
+   writes nothing; every other outcome writes a row, so a misconception on an objective with
+   no row writes `A` and the next placement does not ask it again, and an outcome that
+   confirms the existing level rewrites the source and date with no `(was …)`
+   (`state-lifecycle.md` §13.2).
 5. **No `## Modules` row for an unfinished module.** Check 41 requires `complete` and a
    date, so the carry-forward appends nothing for a previous module whose `status` is not
    `complete`, and says so (`state-lifecycle.md` §13.4).

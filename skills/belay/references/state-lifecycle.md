@@ -126,7 +126,8 @@ Preconditions:
 - the chosen entry's `start_from` has been read, with `belay-catalogs resolve <id> --json`.
   When it is a mapping, the module starts from a ref, and `runner-protocol.md` section 18.6
   comes first: the learner's new branch, and the removal of the `tutorial/` that came with
-  it, are what make the last precondition below true. When it is `null`, that section's
+  it, are what make the last precondition below true. Once that section's steps 1 to 5 are
+  done, this precondition is met and you go on from step 1 below. When it is `null`, that section's
   step 1 says what to check once step 6 below has verified the instance;
 - the workspace root is known, and satisfies the bundle's `workspace_kind`;
 - there is no existing `tutorial/` in that workspace. If there is, stop — `tutorial/` is
@@ -1670,8 +1671,14 @@ checks the shape of this section in an instance, and never reports such a row.
 Only under `levels: true`, and at exactly three moments:
 
 1. **an authored assessment ends** — when its *Assessments* row is written (section 11),
-   one level row for each objective `runner-protocol.md` section 15.11 says to set. An
-   objective whose level is unchanged keeps its row exactly as it was;
+   one level row for each objective it assessed, by the table in `runner-protocol.md`
+   section 15.11. *Unchanged* there means only its last row — not enough evidence, or not
+   reached because the attempt stopped — and only then is nothing written: an existing row
+   stays exactly as it was, and an objective with no row stays without one. Every other
+   outcome writes a row, so a misconception on an objective with no row writes an `A` row,
+   and the next placement does not ask about it again. An outcome that confirms the level
+   the row already has — C demonstrated at C — rewrites the row's source and date, keeps
+   the level, and carries no `(was …)`;
 2. **the learner asks for a different level** — `runner-protocol.md` section 18.5;
 3. **the carry-forward** copies the section into a new module (13.4).
 
@@ -1715,10 +1722,12 @@ It runs **once**, when a module that declares `starts_from: ref` is materialized
 (section 3) has created `STATE.md`, and before the first task:
 
 1. **Read the learner's own previous `STATE.md`, through Git.** The branch is the one they
-   named at section 18.6 step 3; read it with
+   named at `runner-protocol.md` section 18.6 step 3; read it with
    `git show <their-previous-branch>:tutorial/STATE.md`, which changes nothing in their
-   repository. **Never read the winner's** — not from the winner's branch, and not from the
-   `tutorial/` that came with the winner's code, which section 18.6 removed unread.
+   repository. When the branch is not in this checkout, that step had the learner fetch it,
+   and the name to read is `<remote>/<their-previous-branch>`. **Never read the
+   winner's** — not from the winner's branch, and not from the `tutorial/` that came with
+   the winner's code, which section 18.6 removed unread.
 2. **Copy its `## Levels` into the new `STATE.md` unchanged** — every row, including rows
    for objectives this module does not cover.
 3. **Copy its `## Modules`, and append one row** for the module just finished (13.3). When

@@ -577,8 +577,9 @@ coaching is the answer — the ladder above is the right response to difficulty 
 wrong response to a concept nobody taught.
 
 **Inside an assessment the ladder stops at step 3** (section 15.5): steps 4 and 5 hand
-over the thing being assessed. Under `levels: true`, the learner's level on the task's
-objective also decides where the ladder starts and where it stops (section 18.2).
+over the thing being assessed. Outside an assessment, under `levels: true`, the learner's
+level on the task's objective also decides where the ladder starts and where it stops
+(section 18.2).
 
 Each rung you give is a `hint` event in the learning record, with its number (section 16).
 
@@ -2142,8 +2143,8 @@ the lesson's `assesses` every objective that already has a row: a level set in a
 module, carried forward, or chosen by the learner, is not asked about again. Module 1
 places everything it lists; a later module places only what is new to this learner. Say in
 the opening sentence of 15.2 which objectives you will ask about, and that the answers set
-how closely you will guide each one — they decide nothing else, and nothing is passed or
-failed.
+how closely you will guide each one. Its *Assessments* row is still written, as for any
+assessment, but no practice or retake follows from it, whatever it records.
 
 **When every objective it lists already has a row, there is nothing to place.** Ask
 nothing: record its *Assessments* row `skipped` with the reason, say in one sentence that
@@ -2180,16 +2181,22 @@ different things.
 | misconception | A |
 | not enough evidence after asking again, or not reached because the attempt stopped | unchanged — A when it has no row |
 
-**An objective's outcome in an attempt** is *demonstrated* when any answer showed it, after
-a narrower question included (15.4); otherwise it is the outcome of the last answer you
-classified for it. An answer revealed under 15.5 leaves the outcome its last answer had
-before the reveal.
+**An objective's outcome in an attempt** is, in this order:
+
+1. *demonstrated*, when any answer showed it — after a narrower question included (15.4);
+2. otherwise, the last answer about it you classified *partial* or *misconception*;
+3. *not enough evidence* only when no answer about it was classified as anything else.
+
+A terse reply after a misconception therefore leaves the outcome a misconception: the
+reply says nothing new about the learner's knowledge (15.4). An answer revealed under 15.5
+counts for nothing, so the outcome is what the answers before the reveal showed.
 
 **The latest assessment wins**, so a level moves down as well as up, and the row records
 the level it replaced. **Not enough evidence never lowers a level**: it describes the
 answer's legibility, not the learner's knowledge (15.4). Write each row as
-`state-lifecycle.md` section 13.1 shapes it, with the assessment's lesson path as its
-source.
+`state-lifecycle.md` section 13.1 shapes it — its source is `placement` for the placement
+lesson and the lesson path for any other assessment — and section 13.2 says what an
+unchanged level and a confirmed one write.
 
 A quiz the learner asked for (15.9) sets no level. It has no lesson path to record as a
 source, and its scope is the learner's own; a learner who wants a level changed says so, and
@@ -2571,8 +2578,8 @@ which the lowest-level rule makes the safe reading.
 
 - **When the active lesson declares no `teaches`**, or the manifest does not declare
   `levels: true`, the course's existing behaviour applies unchanged.
-- **Inside an assessment every learner is at rung 3**, whatever their level (section
-  15.5). The questions, the outcomes and the standard are the same at every level.
+- **Inside an assessment the help ladder stops at rung 3** for every learner, whatever
+  their level (section 15.5). The questions, the outcomes and the standard are the same at every level.
 - **A level changes how a learner is guided to the evidence, never what evidence they must
   produce.** Lesson order, validators, `advance_on` and completion conditions are the same
   at every level, and no level skips a lesson, a task or a check.
@@ -2644,7 +2651,17 @@ This runs **after the learner has chosen the course and before materialization**
    branch, for example `<their-name>/<module-id>`. Remind them that the previous branch's
    work, `tutorial/STATE.md` included, has to be committed before they leave it, and pushed
    if they will continue on another machine. A new branch name that begins with `-` is
-   refused the same way: ask for another.
+   refused the same way: ask for another. When the previous branch is not in this
+   checkout — they worked on it on another machine — propose that they fetch it, and let
+   them run it:
+
+   ```
+   git fetch -- <remote> <their-previous-branch>
+   ```
+
+   which leaves it readable as `<remote>/<their-previous-branch>` (`git remote` lists the
+   names; `origin` is the usual one). A remote or branch name that begins with `-` is
+   refused as in step 2: propose nothing, and ask for another.
 4. **Propose the commands, and let the learner run them**:
 
    ```
@@ -2663,7 +2680,8 @@ This runs **after the learner has chosen the course and before materialization**
    is another learner's instance. **The winner's code carries over; the winner's progress
    never does.** The deletion shows in the learner's `git status`, and committing it is
    theirs.
-6. **Materialize as for any course** — `state-lifecycle.md` section 3, from its first step —
+6. **Materialize as for any course** — `state-lifecycle.md` section 3, from its first step,
+   where the `start_from` precondition is now met by steps 1 to 5 above —
    and then run the carry-forward of `state-lifecycle.md` section 13.4 before the first
    task. If, once that section's step 6 has verified the instance, its manifest declares no
    `starts_from: ref`, the catalogue entry and the module disagree: say so — the bundle is
