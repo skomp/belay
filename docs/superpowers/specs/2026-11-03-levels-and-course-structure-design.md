@@ -405,7 +405,7 @@ frontmatter has no list of known keys today — `assesses` is read by name — s
 
 The tutor's behaviour under levels and the carry-forward are protocol text, not code, and no
 suite here can execute them. A dry run of the fixture programme in `skomp/belay-authoring`'s
-harness is the check for them, and is filed there as an issue rather than built here.
+harness is the check for them, and is filed there as an issue rather than built here: belay-authoring#43.
 
 ---
 
