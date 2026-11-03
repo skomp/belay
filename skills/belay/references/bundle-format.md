@@ -183,6 +183,8 @@ advance_on: validated-evidence-only
 | `validators` | MUST (may be `{}`) | Named validators lessons may reference. |
 | `setup_validators` | MAY | Checks the runner performs itself, unprompted, rather than assigning them: a list of `name` + `describe` entries naming validators from `validators`. See **Setup validators** below. |
 | `report` | MAY | Where a learner's defect report goes: a `url` that starts `https://` or `mailto:`, and an optional `prefill` of `github`, `gitlab` or `none`. See **Defect reports** below. |
+| `levels` | MAY | `true` or `false`: whether the course is organised into levels. Any other value is check 35's finding. |
+| `starts_from` | MAY | Where a level starts. Only the string `ref` is defined; any other value is check 36's finding. |
 | `one_task_at_a_time` | SHOULD | Default `true`. |
 | `solution_code` | SHOULD | `on-request-only` or `freely`. |
 | `advance_on` | SHOULD | `validated-evidence-only` or `learner-assertion`. |

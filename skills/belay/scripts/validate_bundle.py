@@ -138,6 +138,8 @@ CHECKS: dict[int, str] = {
         "declared events in seq order; a malformed one WARNS",
     34: "report, when declared, is a mapping with an https: or mailto: url and "
         "a known prefill",
+    35: "levels, when declared, is true or false",
+    36: "starts_from, when declared, is 'ref'",
 }
 
 BUNDLE_ONLY = {12, 13, 26}
@@ -259,6 +261,7 @@ KNOWN_MANIFEST_FIELDS = (
     "learner_owned",
     "lessons",
     "level",
+    "levels",
     "one_task_at_a_time",
     "optional_lessons",
     "ownership_policy",
@@ -267,6 +270,7 @@ KNOWN_MANIFEST_FIELDS = (
     "report",
     "setup_validators",
     "solution_code",
+    "starts_from",
     "style",
     "subjects",
     "supplies",
@@ -4865,6 +4869,66 @@ def check_report(manifest: Any, report: Report) -> None:
     report.ran(34, "declared, malformed" if problems else "declared")
 
 
+# Whether a course is split into levels, and where a level starts (checks 35, 36).
+LEVELS_KEY = "levels"
+STARTS_FROM_KEY = "starts_from"
+STARTS_FROM_VALUE = "ref"
+
+
+def check_levels_key(manifest: Any, report: Report) -> None:
+    """Check 35 - both modes.
+
+    `levels` is a MAY: a boolean saying the course is organised into levels.
+    A bundle that omits it is complete, and nothing warns. So this check
+    speaks only about a bundle that declares the key with something that is
+    not a boolean, which check 28 cannot see: it knows the key's NAME and
+    nothing about its value.
+
+    The test is `isinstance(value, bool)`, so the string "true" and the
+    integer 1 both fire. yamlite reads `yes` as the string "yes", not as
+    PyYAML's True, so `levels: yes` fires too; write `true`.
+
+    BOTH modes, for check 27's reason: the runner reads the INSTANCE's copy
+    of tutorial.yaml.
+    """
+    if not isinstance(manifest, dict) or LEVELS_KEY not in manifest:
+        report.na(35, "the bundle declares no levels")
+        return
+    value = manifest[LEVELS_KEY]
+    if not isinstance(value, bool):
+        report.add(
+            35, "tutorial.yaml",
+            f"'levels' must be true or false, not {value!r}",
+        )
+        report.ran(35, "declared, malformed")
+        return
+    report.ran(35, "declared")
+
+
+def check_starts_from(manifest: Any, report: Report) -> None:
+    """Check 36 - both modes.
+
+    `starts_from` is a MAY: where a level's starting point comes from. The
+    only value the format defines is the string `ref`; anything else, a
+    mapping or a list included, is a finding. Absent means n/a and nothing
+    warns.
+
+    BOTH modes, for check 35's reason.
+    """
+    if not isinstance(manifest, dict) or STARTS_FROM_KEY not in manifest:
+        report.na(36, "the bundle declares no starts_from")
+        return
+    value = manifest[STARTS_FROM_KEY]
+    if value != STARTS_FROM_VALUE or not isinstance(value, str):
+        report.add(
+            36, "tutorial.yaml",
+            f"'starts_from' must be '{STARTS_FROM_VALUE}', not {value!r}",
+        )
+        report.ran(36, "declared, malformed")
+        return
+    report.ran(36, "declared")
+
+
 def unknown_manifest_fields(manifest: dict) -> list[str]:
     """The top-level keys of a parsed tutorial.yaml the format does not define.
 
@@ -5109,6 +5173,10 @@ def validate(target: Path, mode: str) -> Report:
     # Check 34, both modes, for check 27's reason: the report command reads
     # the instance's copy of tutorial.yaml.
     check_report(manifest_dict, report)
+    # Checks 35 and 36, both modes, for check 34's reason: the levels keys are
+    # read from the instance's copy of tutorial.yaml too.
+    check_levels_key(manifest_dict, report)
+    check_starts_from(manifest_dict, report)
     if mode == "bundle":
         check_no_generated_dir(target, report)
         template_fm = check_state_template(target, manifest_dict, report)

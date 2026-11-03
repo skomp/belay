@@ -3162,6 +3162,50 @@ def m_report_prefill_misspelled(root: Path) -> None:
     )
 
 
+# -- checks 35 and 36: levels and starts_from
+
+
+def _declare_key(root: Path, literal: str, name: str, expected: object) -> None:
+    _append_top_level(root, literal, {name: expected})
+
+
+def m_levels_true(root: Path) -> None:
+    _declare_key(root, "levels: true", "levels", True)
+
+
+def m_levels_false(root: Path) -> None:
+    _declare_key(root, "levels: false", "levels", False)
+
+
+def m_levels_string(root: Path) -> None:
+    _declare_key(root, 'levels: "true"', "levels", "true")
+
+
+def m_levels_one(root: Path) -> None:
+    _declare_key(root, "levels: 1", "levels", 1)
+
+
+def m_starts_from_ref(root: Path) -> None:
+    _declare_key(root, "starts_from: ref", "starts_from", "ref")
+
+
+def m_starts_from_branch(root: Path) -> None:
+    _declare_key(root, "starts_from: branch", "starts_from", "branch")
+
+
+def m_starts_from_mapping(root: Path) -> None:
+    _declare_key(root, "starts_from:\n  ref: main", "starts_from", {"ref": "main"})
+
+
+def m_no_levels_keys(root: Path) -> None:
+    """The backward-compatibility control: both keys are MAYs."""
+    declared = vb.load_yaml((root / "tutorial.yaml").read_text(), "tutorial.yaml")
+    assert "levels" not in declared and "starts_from" not in declared, (
+        "this baseline declares levels or starts_from, so it cannot show a "
+        "bundle without them"
+    )
+
+
 def m_no_report(root: Path) -> None:
     """The backward-compatibility control: the key is a MAY."""
     assert "report" not in vb.load_yaml(
@@ -4566,6 +4610,46 @@ CASES: list[Case] = [
          where="tutorial.yaml"),
     Case("28: 'report' spelled correctly is silent", 28, "cli", "bundle",
          m_report_https_github, kind="silent"),
+    # ---- checks 35 and 36: levels and starts_from. Silent rows are the
+    # positive control for the firing ones.
+    Case("35: a bundle with no levels is silent", 35, "cli", "bundle",
+         m_no_levels_keys, kind="silent"),
+    Case("35: and so is an INSTANCE with no levels", 35, "cli", "instance",
+         m_no_levels_keys, kind="silent"),
+    Case("35: levels: true is silent", 35, "cli", "bundle", m_levels_true,
+         kind="silent"),
+    Case("35: levels: false is silent", 35, "cli", "bundle", m_levels_false,
+         kind="silent"),
+    Case("35: an INSTANCE with levels: true is silent", 35, "cli", "instance",
+         m_levels_true, kind="silent"),
+    Case('35: levels: "true" (a string) fires', 35, "cli", "bundle",
+         m_levels_string, "'levels' must be true or false",
+         where="tutorial.yaml"),
+    Case("35: levels: 1 fires", 35, "cli", "bundle", m_levels_one,
+         "'levels' must be true or false", where="tutorial.yaml"),
+    Case("35: an INSTANCE with levels: 1 fires too", 35, "cli", "instance",
+         m_levels_one, "'levels' must be true or false", where="tutorial.yaml"),
+    Case("36: a bundle with no starts_from is silent", 36, "cli", "bundle",
+         m_no_levels_keys, kind="silent"),
+    Case("36: and so is an INSTANCE with none", 36, "cli", "instance",
+         m_no_levels_keys, kind="silent"),
+    Case("36: starts_from: ref is silent", 36, "cli", "bundle",
+         m_starts_from_ref, kind="silent"),
+    Case("36: an INSTANCE with starts_from: ref is silent", 36, "cli",
+         "instance", m_starts_from_ref, kind="silent"),
+    Case("36: starts_from: branch fires", 36, "cli", "bundle",
+         m_starts_from_branch, "'starts_from' must be 'ref'",
+         where="tutorial.yaml"),
+    Case("36: starts_from as a mapping fires", 36, "cli", "bundle",
+         m_starts_from_mapping, "'starts_from' must be 'ref'",
+         where="tutorial.yaml"),
+    Case("36: an INSTANCE with starts_from: branch fires too", 36, "cli",
+         "instance", m_starts_from_branch, "'starts_from' must be 'ref'",
+         where="tutorial.yaml"),
+    Case("28: levels is a DEFINED field, so it is silent", 28, "cli",
+         "bundle", m_levels_true, kind="silent"),
+    Case("28: and so is starts_from", 28, "cli", "bundle",
+         m_starts_from_ref, kind="silent"),
     # ---- check 31: `assesses` (belay#33)
     Case("31: assesses names a misspelled concept id", 31, "broker", "bundle",
          m_assesses_misspelled, "'partition-ofsets'", where=BROKER_LESSON),
@@ -7884,11 +7968,24 @@ def test_manifest_near_miss_distance() -> None:
             f"near_misses({name!r}) -> {expected}",
             f"got {got}",
         )
+    # `level` and `levels` are one edit apart and both defined: the spec fixed
+    # both names, so the pair is the one named exemption. A typo near them
+    # (`levl`) is suggested both, which is honest - the evidence does not pick.
+    # Any OTHER colliding pair still fails.
+    exempt = {"level", "levels"}
     collisions = {
         a: vb.near_misses(a, tuple(b for b in known if b != a))
         for a in known
-        if vb.near_misses(a, tuple(b for b in known if b != a))
+        if a not in exempt
+        and vb.near_misses(a, tuple(b for b in known if b != a))
     }
+    collisions.update({
+        a: [b for b in vb.near_misses(a, tuple(k for k in known if k != a))
+            if b not in exempt]
+        for a in exempt
+        if [b for b in vb.near_misses(a, tuple(k for k in known if k != a))
+            if b not in exempt]
+    })
     record(
         not collisions,
         "no field this format defines is a near miss for another, so a "
@@ -8962,6 +9059,36 @@ def test_report_check_status() -> None:
     )
 
 
+def test_levels_check_status() -> None:
+    """Checks 35 and 36: n/a with the key absent, ran with it declared."""
+    print("\nchecks 35 and 36: the status line, both modes:")
+    for mode in ("bundle", "instance"):
+        for num, mutate, want, label in (
+            (35, m_no_levels_keys, vb.NOT_APPLICABLE, "no levels: n/a"),
+            (35, m_levels_true, vb.RAN, "levels: true: ran"),
+            (35, m_levels_one, vb.RAN, "levels: 1: ran"),
+            (36, m_no_levels_keys, vb.NOT_APPLICABLE, "no starts_from: n/a"),
+            (36, m_starts_from_ref, vb.RAN, "starts_from: ref: ran"),
+            (36, m_starts_from_branch, vb.RAN, "starts_from: branch: ran"),
+        ):
+            with tempfile.TemporaryDirectory() as tmpdir:
+                root = fresh("cli", Path(tmpdir))
+                if mode == "instance":
+                    to_instance(root)
+                mutate(root)
+                report = vb.validate(root, mode)
+            got = report.status.get(num, ("missing", ""))[0]
+            record(got == want, f"check {num}, {mode}: {label}",
+                   f"status = {got!r}")
+    for num in (35, 36):
+        record(
+            num not in vb.BUNDLE_ONLY and num not in vb.INSTANCE_ONLY
+            and num not in vb.WARNING_ONLY,
+            f"check {num} is a FINDING in BOTH modes",
+            f"BUNDLE_ONLY = {vb.BUNDLE_ONLY}, INSTANCE_ONLY = {vb.INSTANCE_ONLY}",
+        )
+
+
 def test_learning_record_check_status() -> None:
     """Check 33 is n/a without a record, instance-only, and warning-only."""
     print("\nlearning record check reports n/a where there is no record:")
@@ -9128,6 +9255,7 @@ def main() -> int:
     test_assessment_checks_status()
     test_learning_record_check_status()
     test_report_check_status()
+    test_levels_check_status()
     test_the_total_is_reproducible_from_this_commit()
     test_check_coverage()
 
