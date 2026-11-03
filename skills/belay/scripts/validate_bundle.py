@@ -55,6 +55,7 @@ accurate, or anything about learner code.
 from __future__ import annotations
 
 import argparse
+import datetime
 import os
 import re
 import sys
@@ -138,10 +139,22 @@ CHECKS: dict[int, str] = {
         "declared events in seq order; a malformed one WARNS",
     34: "report, when declared, is a mapping with an https: or mailto: url and "
         "a known prefill",
+    35: "levels, when declared, is true or false",
+    36: "starts_from, when declared, is 'ref'",
+    37: "teaches, where a lesson declares it, is a non-empty list of concept "
+        "ids, and every id resolves in covers",
+    38: "material, where a lesson declares it, maps objectives the lesson "
+        "teaches to files that exist in its own folder, by level A, B or C",
+    39: "placement, where a lesson declares it, is a boolean on an "
+        "assessment, on at most one lesson, and not on an optional lesson",
+    40: "[instance] STATE.md's '## Levels' ledger is well-formed: levels A, "
+        "B or C, a known source, a date, one row per id",
+    41: "[instance] STATE.md's '## Modules' ledger is well-formed: complete, "
+        "a date and a branch, one row per module",
 }
 
 BUNDLE_ONLY = {12, 13, 26}
-INSTANCE_ONLY = {11, 14, 15, 17, 21, 32, 33}
+INSTANCE_ONLY = {11, 14, 15, 17, 21, 32, 33, 40, 41}
 
 # Checks that can only ever WARN, never produce a finding.
 #
@@ -259,6 +272,7 @@ KNOWN_MANIFEST_FIELDS = (
     "learner_owned",
     "lessons",
     "level",
+    "levels",
     "one_task_at_a_time",
     "optional_lessons",
     "ownership_policy",
@@ -267,6 +281,7 @@ KNOWN_MANIFEST_FIELDS = (
     "report",
     "setup_validators",
     "solution_code",
+    "starts_from",
     "style",
     "subjects",
     "supplies",
@@ -351,6 +366,27 @@ _NOT_DEMONSTRATED_RE = re.compile(r"not demonstrated[ \t]*:", re.IGNORECASE)
 # with the multiplication sign (U+00D7) or, after a space, an ASCII x.
 _NOT_DEMONSTRATED_ITEM_RE = re.compile(
     r"^(?P<id>\S+?)(?:(?:[ \t]*\u00d7|[ \t]+x)[ \t]*(?P<count>\S+))?$"
+)
+
+# STATE.md's `## Levels` and `## Modules` ledgers (checks 40 and 41). Neither
+# depends on `levels: true`: a ledger carried forward from an earlier course
+# may sit in an instance of a bundle that does not use levels, and an id that
+# is not in this bundle's `covers` is therefore not a finding. The dashes are
+# written as escapes, as above.
+LEVELS_SECTION = "Levels"
+MODULES_SECTION = "Modules"
+LEDGER_LEVELS = ("A", "B", "C")
+_LEDGER_ID_RE = re.compile(r"[a-z0-9-]+")
+_DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
+_LEVEL_RECORD_RE = re.compile(
+    r"^[-*+][ \t]+`(?P<id>[^`]+)`[ \t]*[\u2014\u2013-][ \t]*(?P<level>\S+)[ \t]*"
+    r"[\u2014\u2013-][ \t]*(?P<source>\S+)[ \t]+(?P<date>\d{4}-\d{2}-\d{2})"
+    r"(?:[ \t]+\((?P<note>.*)\))?[ \t]*$"
+)
+_MODULE_RECORD_RE = re.compile(
+    r"^[-*+][ \t]+`(?P<id>[^`]+)`[ \t]*[\u2014\u2013-][ \t]*complete[ \t]+"
+    r"(?P<date>\d{4}-\d{2}-\d{2})[ \t]*[\u2014\u2013-][ \t]*branch[ \t]+"
+    r"(?P<branch>[^\s;]+)[ \t]*(?:;(?P<note>.*))?$"
 )
 
 # Progress markers (check 5).
@@ -1664,7 +1700,11 @@ def names_file(text: str, rel_in_folder: str) -> bool:
 
 
 def check_material_reachable(
-    root: Path, manifest: Any, lessons: list[Lesson], report: Report
+    root: Path,
+    manifest: Any,
+    lessons: list[Lesson],
+    report: Report,
+    declared_material: frozenset[str] | set[str] = frozenset(),
 ) -> None:
     """Check 6 - forward direction only.
 
@@ -1680,6 +1720,14 @@ def check_material_reachable(
     tutor already knows it exists without LESSON.md repeating that. This is
     an EXEMPTION, not a loosening - a file no supplies entry covers must
     still be named, exactly as before.
+
+    A path in `declared_material` - a file a lesson's `material` key declared
+    and check 38 accepted - is exempt for the same reason, and counts in the
+    same "cleared by a declaration" tally.
+
+    `text` is the whole LESSON.md, frontmatter included, on purpose: a
+    validator older than `material` accepts those files only because the
+    declaration in the frontmatter names them. Do not strip the frontmatter.
     """
     foldered = [lesson for lesson in lessons if lesson.folder is not None]
     if not foldered:
@@ -1705,7 +1753,9 @@ def check_material_reachable(
                 continue
             checked += 1
             bundle_rel = f"{folder_rel}/{rel_in_folder}"
-            if supplies_covers(supplies_entries, bundle_rel):
+            if bundle_rel in declared_material or supplies_covers(
+                supplies_entries, bundle_rel
+            ):
                 supplied += 1
                 continue
             if not names_file(text, rel_in_folder):
@@ -2190,10 +2240,19 @@ def check_optional_frontmatter(
     report.ran(20, f"{checked} lessons, {len(optional_keys)} of them optional")
 
 
-def section_lines(body: str, heading: str) -> list[str] | None:
-    """The lines under '## <heading>', or None when the section is absent."""
+def section_lines(
+    body: str, heading: str, depth: int | None = None
+) -> list[str] | None:
+    """The lines under '## <heading>', or None when the section is absent.
+
+    With no `depth`, a heading of any depth matches, as the older sections
+    have always been read. With a `depth`, only a heading of exactly that
+    many '#' does, so a `### Modules` under some other section is not taken
+    for the `## Modules` ledger.
+    """
+    hashes = "#+" if depth is None else "#" * depth
     pattern = re.compile(
-        rf"^#+[ \t]+{re.escape(heading)}[ \t]*$", re.IGNORECASE
+        rf"^{hashes}[ \t]+{re.escape(heading)}[ \t]*$", re.IGNORECASE
     )
     lines = body.splitlines()
     for index, line in enumerate(lines):
@@ -2452,6 +2511,286 @@ def check_assesses(
     return declared
 
 
+# Lesson frontmatter for levels (checks 37, 38, 39).
+TEACHES_KEY = "teaches"
+MATERIAL_KEY = "material"
+PLACEMENT_KEY = "placement"
+MATERIAL_LEVELS = ("A", "B", "C")
+
+
+def check_teaches(lessons: list[Lesson], manifest: Any, report: Report) -> None:
+    """Check 37 - both modes.
+
+    `teaches` is the objectives a lesson is about: a non-empty list of
+    concept ids, each a key in `covers`. It is check 31's rule for the same
+    reason - the concept's `summary` is the one definition of the objective -
+    and it takes the same wording when the id is assumed or `covers` is empty.
+
+    Runs over generated lessons too: a lesson is what its frontmatter says,
+    wherever it lives. A bundle in which no lesson declares `teaches` is
+    silent and reports n/a.
+    """
+    covers_raw = manifest.get("covers") if isinstance(manifest, dict) else None
+    covers_malformed = covers_raw is not None and not isinstance(covers_raw, dict)
+    decls = concept_declarations(manifest)
+    covers = set(decls.get("covers", {}))
+    assumes = set(decls.get("assumes", {}))
+    declared = 0
+    checked = 0
+    for lesson in lessons:
+        fm = _lesson_frontmatter(lesson)
+        if fm is None or TEACHES_KEY not in fm:
+            continue
+        declared += 1
+        value = fm[TEACHES_KEY]
+        if not isinstance(value, list) or not value:
+            shown = "nothing" if value is None else repr(value)
+            report.add(
+                37,
+                lesson.rel,
+                f"teaches is {shown}; it must be a non-empty list of the "
+                f"concept ids this lesson teaches, each one a key in "
+                f"tutorial.yaml's 'covers'. Remove the field if the lesson "
+                f"teaches no declared concept.",
+            )
+            continue
+        for entry in value:
+            if not isinstance(entry, str) or not _CONCEPT_ID_RE.fullmatch(entry):
+                report.add(
+                    37,
+                    lesson.rel,
+                    f"teaches names {entry!r}, which is not a concept id. A "
+                    f"concept id is a string matching [a-z0-9-]+ and a key in "
+                    f"tutorial.yaml's 'covers'.",
+                )
+                continue
+            checked += 1
+            if covers_malformed or entry in covers:
+                continue
+            if entry in assumes:
+                why = (
+                    "it is in 'assumes', which the course does not teach, so "
+                    "a lesson cannot be about it"
+                )
+            elif not covers:
+                why = "the manifest declares no 'covers' concepts at all"
+            else:
+                why = "no 'covers' concept has that id"
+            report.add(
+                37,
+                lesson.rel,
+                f"teaches names {entry!r}, which does not resolve: {why}. "
+                f"Declare the concept under 'covers' or correct the id.",
+            )
+    if not declared:
+        report.na(37, "no lesson declares teaches")
+    elif covers_malformed:
+        report.blocked(
+            37, "covers is not a mapping (see check 23), so no id can be resolved"
+        )
+    else:
+        report.ran(
+            37,
+            f"{checked} concept ids in {declared} lesson(s), against "
+            f"{len(covers)} covers concepts",
+        )
+
+
+def _material_path_problem(folder: Path, rel: Any) -> str | None:
+    """Why `rel` is not a file inside `folder`, or None when it is.
+
+    The component rule is resolve_exact's: no '', '.', '..', no backslash, and
+    every component matched in exact case. A symbolic link anywhere on the way
+    is refused too, because following one could leave the folder and the
+    runner would hand that file to the learner.
+    """
+    if not isinstance(rel, str) or not rel:
+        return f"{rel!r} is not a path"
+    if rel.startswith("/"):
+        return f"{rel!r} is absolute; it must be relative to the lesson folder"
+    found, reason = resolve_exact(folder, rel)
+    if found is None:
+        return f"{rel!r}: {reason}"
+    current = folder
+    for part in rel.split("/"):
+        current = current / part
+        if current.is_symlink():
+            return f"{rel!r} passes through a symbolic link, which is not followed"
+    if not found.is_file():
+        return f"{rel!r} is not a file"
+    return None
+
+
+def check_lesson_material(
+    root: Path, lessons: list[Lesson], report: Report
+) -> set[str]:
+    """Check 38 - both modes.
+
+    `material` maps an objective id to a mapping of level (`A`, `B` or `C`) to
+    a file in the lesson's own folder: the file the tutor hands out at that
+    level. So it needs a folder lesson, every objective must be one the lesson
+    `teaches`, and every path must resolve inside the folder.
+
+    Returns the bundle-relative paths of the files it accepted, so check 6
+    can treat a declared file as named: a `material` entry tells the tutor
+    what the file is and when to use it, which is all check 6 asks of a
+    mention in LESSON.md. A file that is not declared keeps check 6's rule.
+    """
+    declared_paths: set[str] = set()
+    declared = 0
+    checked = 0
+    for lesson in lessons:
+        fm = _lesson_frontmatter(lesson)
+        if fm is None or MATERIAL_KEY not in fm:
+            continue
+        declared += 1
+        value = fm[MATERIAL_KEY]
+        if lesson.folder is None:
+            report.add(
+                38,
+                lesson.rel,
+                "material needs a folder lesson: the files live beside "
+                "LESSON.md, and a single-file lesson has no folder. Move the "
+                "lesson to <slug>/LESSON.md or remove material.",
+            )
+            continue
+        if not isinstance(value, dict) or not value:
+            report.add(
+                38,
+                lesson.rel,
+                f"material must be a mapping of objective id to a mapping of "
+                f"level to file, not {value!r}.",
+            )
+            continue
+        teaches_raw = fm.get(TEACHES_KEY)
+        teaches = (
+            {t for t in teaches_raw if isinstance(t, str)}
+            if isinstance(teaches_raw, list)
+            else set()
+        )
+        folder_rel = lesson.folder.relative_to(root).as_posix()
+        for objective, levels in value.items():
+            if str(objective) not in teaches:
+                report.add(
+                    38,
+                    lesson.rel,
+                    f"material names the objective {str(objective)!r}, which "
+                    f"is not in this lesson's teaches. Material is for an "
+                    f"objective the lesson teaches.",
+                )
+            if not isinstance(levels, dict) or not levels:
+                report.add(
+                    38,
+                    lesson.rel,
+                    f"material for {str(objective)!r} must be a mapping of "
+                    f"level (A, B or C) to file, not {levels!r}.",
+                )
+                continue
+            for level, rel in levels.items():
+                checked += 1
+                if level not in MATERIAL_LEVELS:
+                    report.add(
+                        38,
+                        lesson.rel,
+                        f"material for {str(objective)!r} has the level "
+                        f"{level!r}; the levels are A, B and C.",
+                    )
+                    continue
+                problem = _material_path_problem(lesson.folder, rel)
+                if problem is not None:
+                    report.add(
+                        38,
+                        lesson.rel,
+                        f"material for {str(objective)!r} at level {level}: "
+                        f"{problem}. A material path is relative to the "
+                        f"lesson's own folder and names a file in it.",
+                    )
+                    continue
+                declared_paths.add(f"{folder_rel}/{rel}")
+    if not declared:
+        report.na(38, "no lesson declares material")
+    else:
+        report.ran(
+            38, f"{checked} material file(s) declared in {declared} lesson(s)"
+        )
+    return declared_paths
+
+
+def check_placement(lessons: list[Lesson], manifest: Any, report: Report) -> None:
+    """Check 39 - both modes.
+
+    `placement: true` marks the one assessment that decides where a learner
+    starts. It is a boolean; it needs `assesses`, because a placement
+    without an assessment has nothing to ask; at most one lesson carries it;
+    and an optional lesson cannot, because placement runs before the learner
+    has been offered anything. `placement: false` is allowed and says nothing.
+
+    A bundle in which no lesson declares `placement` is silent and n/a.
+    """
+    optional_keys = optional_lesson_keys(manifest)
+    declared = 0
+    marked: list[str] = []
+    for lesson in lessons:
+        fm = _lesson_frontmatter(lesson)
+        if fm is None or PLACEMENT_KEY not in fm:
+            continue
+        declared += 1
+        value = fm[PLACEMENT_KEY]
+        if not isinstance(value, bool):
+            report.add(
+                39,
+                lesson.rel,
+                f"placement is {value!r}; it must be true or false.",
+            )
+            continue
+        if not value:
+            continue
+        marked.append(lesson.rel)
+        if ASSESSES_KEY not in fm:
+            report.add(
+                39,
+                lesson.rel,
+                "placement: true without 'assesses'. The placement lesson is "
+                "an assessment, so it must declare the concepts it assesses.",
+            )
+        if lesson.rel in optional_keys:
+            report.add(
+                39,
+                lesson.rel,
+                "placement: true on an optional lesson. Placement decides "
+                "where the learner starts, so it cannot be a lesson the "
+                "learner may skip.",
+            )
+    if len(marked) > 1:
+        report.add(
+            39,
+            ", ".join(marked),
+            f"{len(marked)} lessons declare placement: true. A course has one "
+            f"placement lesson; keep it on one and remove it from the others.",
+        )
+    if not declared:
+        report.na(39, "no lesson declares placement")
+    else:
+        report.ran(
+            39, f"{declared} declaration(s), {len(marked)} placement lesson(s)"
+        )
+
+
+def join_bullets(lines: list[str]) -> list[str]:
+    """The bullets of a STATE.md section, a wrapped bullet joined into one line.
+
+    The conventional `- None` bullet ("nothing to record") is dropped. Shared
+    by the Assessments, Levels and Modules parsers.
+    """
+    entries: list[str] = []
+    for line in lines:
+        if re.match(r"^[-*+][ \t]", line):
+            entries.append(line.strip())
+        elif entries and line.strip():
+            entries[-1] = entries[-1] + " " + line.strip()
+    return [e for e in entries if not re.fullmatch(r"[-*+][ \t]+[Nn]one\.?", e)]
+
+
 def parse_assessment_records(
     lines: list[str],
 ) -> list[tuple[str, dict[str, Any] | None]]:
@@ -2466,16 +2805,8 @@ def parse_assessment_records(
     Check 32 is built on this, and so is the suite's proof that `skipped` and
     `passed` read back as two different states.
     """
-    entries: list[str] = []
-    for line in lines:
-        if re.match(r"^[-*+][ \t]", line):
-            entries.append(line.strip())
-        elif entries and line.strip():
-            entries[-1] = entries[-1] + " " + line.strip()
     out: list[tuple[str, dict[str, Any] | None]] = []
-    for entry in entries:
-        if re.fullmatch(r"[-*+][ \t]+[Nn]one\.?", entry):
-            continue  # the conventional "nothing to record" bullet
+    for entry in join_bullets(lines):
         match = _ASSESSMENT_RECORD_RE.match(entry)
         if match is None:
             out.append((entry, None))
@@ -2498,6 +2829,184 @@ def parse_assessment_records(
             )
         )
     return out
+
+
+def parse_level_records(
+    lines: list[str],
+) -> list[tuple[str, dict[str, Any] | None]]:
+    """Parse the bullets of a '## Levels' section.
+
+    Returns one (entry text, record) pair per bullet, a wrapped bullet joined
+    into one line. `record` is None when the bullet does not have the shape
+    `` `id` - LEVEL - SOURCE YYYY-MM-DD`` with an optional ``(note)``;
+    otherwise it carries `id`, `level`, `source`, `date` and `note` (None when
+    absent). Whether the level, source and id are VALID is check 40's job.
+    """
+    out: list[tuple[str, dict[str, Any] | None]] = []
+    for entry in join_bullets(lines):
+        match = _LEVEL_RECORD_RE.match(entry)
+        out.append((entry, match.groupdict() if match else None))
+    return out
+
+
+def parse_module_records(
+    lines: list[str],
+) -> list[tuple[str, dict[str, Any] | None]]:
+    """Parse the bullets of a '## Modules' section.
+
+    Same pairing as `parse_level_records`. A record carries `id`, `date`,
+    `branch` and `note` (the free text after an optional ';', else None).
+    """
+    out: list[tuple[str, dict[str, Any] | None]] = []
+    for entry in join_bullets(lines):
+        match = _MODULE_RECORD_RE.match(entry)
+        out.append((entry, match.groupdict() if match else None))
+    return out
+
+
+def _ledger_lines(
+    root: Path, section: str, num: int, report: Report
+) -> list[str] | None:
+    """The lines of a STATE.md ledger section, or None after reporting n/a."""
+    if "STATE.md" not in list_dir(root):
+        report.na(num, "there is no STATE.md (see check 7)")
+        return None
+    text = read_text(root / "STATE.md")
+    if text is None:
+        report.na(num, "STATE.md could not be read (see check 11)")
+        return None
+    _, body = split_frontmatter(text)
+    lines = section_lines(body, section, depth=2)
+    if lines is None:
+        report.na(num, f"STATE.md has no '## {section}' section")
+    return lines
+
+
+def _real_date(value: str) -> bool:
+    try:
+        datetime.date.fromisoformat(value)
+    except ValueError:
+        return False
+    return True
+
+
+def check_levels_ledger(root: Path, report: Report) -> None:
+    """Check 40 - instance mode. Mirrors check 32.
+
+    STATE.md's `## Levels` records one row per concept id, updated in place:
+    the level (A, B or C) the learner works at, where that came from
+    (`placement`, `learner`, or a lesson path) and the date. This proves the
+    SHAPE of the ledger only. An id that is not in this bundle's `covers` is
+    NOT a finding: the ledger may be carried forward from an earlier course,
+    and it does not depend on `levels: true`.
+
+    No section is normal and reports n/a.
+    """
+    where = f"STATE.md (## {LEVELS_SECTION})"
+    lines = _ledger_lines(root, LEVELS_SECTION, 40, report)
+    if lines is None:
+        return
+    seen: dict[str, str] = {}
+    rows = 0
+    for entry, record in parse_level_records(lines):
+        if record is None:
+            report.add(
+                40,
+                where,
+                f"the entry {entry[:70]!r} is not a level row. Each one is the "
+                f"concept id in backticks, a dash (an em dash, an en dash or "
+                f"'-'), {', '.join(LEDGER_LEVELS)}, a dash, the source "
+                f"(placement, learner or a lesson path) and a YYYY-MM-DD date.",
+            )
+            continue
+        rows += 1
+        cid, level, source = record["id"], record["level"], record["source"]
+        if not _LEDGER_ID_RE.fullmatch(cid):
+            report.add(
+                40, where,
+                f"{cid!r} is not a concept id (lowercase letters, digits and "
+                f"hyphens).",
+            )
+        if cid in seen:
+            report.add(
+                40, where,
+                f"{cid!r} is recorded twice, at {seen[cid]!r} and {level!r}. "
+                f"One concept has one row, updated in place.",
+            )
+        else:
+            seen[cid] = level
+        if level not in LEDGER_LEVELS:
+            report.add(
+                40, where,
+                f"{cid!r} is at level {level!r}, which is not one of "
+                f"{', '.join(LEDGER_LEVELS)}.",
+            )
+        if source not in ("placement", "learner") and not source.startswith(
+            ("lessons/", "lessons.generated/")
+        ):
+            report.add(
+                40, where,
+                f"{cid!r} has the source {source!r}. It is 'placement', "
+                f"'learner', or a path starting 'lessons/' or "
+                f"'lessons.generated/'.",
+            )
+        if not _real_date(record["date"]):
+            report.add(
+                40, where,
+                f"{cid!r} has the date {record['date']!r}, which is not a "
+                f"calendar date.",
+            )
+    report.ran(40, f"{rows} level row(s)")
+
+
+def check_modules_ledger(root: Path, report: Report) -> None:
+    """Check 41 - instance mode. Mirrors check 40.
+
+    STATE.md's `## Modules` records one row per module id, updated in place:
+    complete, the date, and the branch the module was done on, with optional
+    free text after a ';'. SHAPE only; the module id is not looked up.
+
+    No section is normal and reports n/a.
+    """
+    where = f"STATE.md (## {MODULES_SECTION})"
+    lines = _ledger_lines(root, MODULES_SECTION, 41, report)
+    if lines is None:
+        return
+    seen: set[str] = set()
+    rows = 0
+    for entry, record in parse_module_records(lines):
+        if record is None:
+            report.add(
+                41,
+                where,
+                f"the entry {entry[:70]!r} is not a module row. Each one is the "
+                f"module id in backticks, a dash (an em dash, an en dash or "
+                f"'-'), 'complete' and a YYYY-MM-DD date, a dash, and 'branch' "
+                f"and the branch name, with an optional ';' and text.",
+            )
+            continue
+        rows += 1
+        mid = record["id"]
+        if not _LEDGER_ID_RE.fullmatch(mid):
+            report.add(
+                41, where,
+                f"{mid!r} is not a module id (lowercase letters, digits and "
+                f"hyphens).",
+            )
+        if mid in seen:
+            report.add(
+                41, where,
+                f"{mid!r} is recorded twice. One module has one row, updated "
+                f"in place.",
+            )
+        seen.add(mid)
+        if not _real_date(record["date"]):
+            report.add(
+                41, where,
+                f"{mid!r} has the date {record['date']!r}, which is not a "
+                f"calendar date.",
+            )
+    report.ran(41, f"{rows} module row(s)")
 
 
 def check_assessment_state(
@@ -4865,6 +5374,70 @@ def check_report(manifest: Any, report: Report) -> None:
     report.ran(34, "declared, malformed" if problems else "declared")
 
 
+# Whether a course uses per-objective levels, and whether its starting code is
+# a Git ref the catalogue names (checks 35, 36).
+LEVELS_KEY = "levels"
+STARTS_FROM_KEY = "starts_from"
+STARTS_FROM_VALUE = "ref"
+
+
+def check_levels_key(manifest: Any, report: Report) -> None:
+    """Check 35 - both modes.
+
+    `levels` is a MAY: a boolean turning on per-objective levels - how
+    closely the tutor guides a learner on each `covers` concept, and which
+    `material` file it loads (bundle-format.md section 2, Levels and modules).
+    A bundle that omits it is complete, and nothing warns. So this check
+    speaks only about a bundle that declares the key with something that is
+    not a boolean, which check 28 cannot see: it knows the key's NAME and
+    nothing about its value.
+
+    The test is `isinstance(value, bool)`, so the string "true" and the
+    integer 1 both fire. yamlite reads `yes` as the string "yes", not as
+    PyYAML's True, so `levels: yes` fires too; write `true`.
+
+    BOTH modes, for check 27's reason: the runner reads the INSTANCE's copy
+    of tutorial.yaml.
+    """
+    if not isinstance(manifest, dict) or LEVELS_KEY not in manifest:
+        report.na(35, "the bundle declares no levels")
+        return
+    value = manifest[LEVELS_KEY]
+    if not isinstance(value, bool):
+        report.add(
+            35, "tutorial.yaml",
+            f"'levels' must be true or false, not {value!r}",
+        )
+        report.ran(35, "declared, malformed")
+        return
+    report.ran(35, "declared")
+
+
+def check_starts_from(manifest: Any, report: Report) -> None:
+    """Check 36 - both modes.
+
+    `starts_from` is a MAY: the course's starting code is the code at a Git
+    ref the catalogue entry's `start_from` names. The only value the format
+    defines is the string `ref`; anything else, a
+    mapping or a list included, is a finding. Absent means n/a and nothing
+    warns.
+
+    BOTH modes, for check 35's reason.
+    """
+    if not isinstance(manifest, dict) or STARTS_FROM_KEY not in manifest:
+        report.na(36, "the bundle declares no starts_from")
+        return
+    value = manifest[STARTS_FROM_KEY]
+    if value != STARTS_FROM_VALUE or not isinstance(value, str):
+        report.add(
+            36, "tutorial.yaml",
+            f"'starts_from' must be '{STARTS_FROM_VALUE}', not {value!r}",
+        )
+        report.ran(36, "declared, malformed")
+        return
+    report.ran(36, "declared")
+
+
 def unknown_manifest_fields(manifest: dict) -> list[str]:
     """The top-level keys of a parsed tutorial.yaml the format does not define.
 
@@ -5056,7 +5629,13 @@ def validate(target: Path, mode: str) -> Report:
         report,
         ("lessons", GENERATED_DIR) if mode == "instance" else ("lessons",),
     )
-    check_material_reachable(target, manifest_dict, all_lessons, report)
+    # Check 38 runs HERE, ahead of the checks that follow check 31, because
+    # check 6 needs the files it accepted: a file a `material` key declares
+    # is named, exactly as a supplies-covered file is.
+    declared_material = check_lesson_material(target, all_lessons, report)
+    check_material_reachable(
+        target, manifest_dict, all_lessons, report, declared_material
+    )
     check_manifest_lists_no_generated(manifest_dict, report)
     # A lesson-scope supplies entry is legible only if its lesson is
     # reachable at all - through 'lessons' or 'optional_lessons', the same
@@ -5078,6 +5657,10 @@ def validate(target: Path, mode: str) -> Report:
     # Check 31, both modes, over all_lessons for check 22's reason: a lesson
     # is an assessment by its frontmatter, wherever it lives.
     assessments = check_assesses(all_lessons, manifest_dict, report)
+    # Checks 37 and 39, both modes, over all_lessons for check 31's reason.
+    # (Check 38 ran above, ahead of check 6, which consumes its result.)
+    check_teaches(all_lessons, manifest_dict, report)
+    check_placement(all_lessons, manifest_dict, report)
     # Disclosure, and NOT a check: no finding, no warning, no number, no
     # effect on the exit code. It is derived here rather than by the tutor so
     # that the banner's content is testable, and it is given the RAW manifest
@@ -5109,6 +5692,10 @@ def validate(target: Path, mode: str) -> Report:
     # Check 34, both modes, for check 27's reason: the report command reads
     # the instance's copy of tutorial.yaml.
     check_report(manifest_dict, report)
+    # Checks 35 and 36, both modes, for check 34's reason: the levels keys are
+    # read from the instance's copy of tutorial.yaml too.
+    check_levels_key(manifest_dict, report)
+    check_starts_from(manifest_dict, report)
     if mode == "bundle":
         check_no_generated_dir(target, report)
         template_fm = check_state_template(target, manifest_dict, report)
@@ -5127,6 +5714,8 @@ def validate(target: Path, mode: str) -> Report:
         check_assessment_state(
             target, manifest_dict, optional_keys, generated, assessments, report
         )
+        check_levels_ledger(target, report)
+        check_modules_ledger(target, report)
         check_learning_record(target, report)
 
     return report
@@ -5153,6 +5742,10 @@ CATALOG_CHECKS: dict[int, str] = {
     6: "every bundle path resolves to a directory holding tutorial.yaml and "
     "STATE.template.md",
     7: "[--portable] no bundle path leaves the catalogue's own directory",
+    8: "goals, when declared, is a mapping of well-formed goals whose "
+    "objectives are each a 'covers' key of some entry, under one goal only",
+    9: "start_from, when an entry declares it, is a mapping of a Git repo "
+    "URL and a ref",
 }
 
 CATALOG_REQUIRED_FIELDS = (
@@ -5195,8 +5788,10 @@ CATALOG_COUNT_FIELDS = ("optional_lesson_count",)
 # text - see the docstring on unknown_entry_fields().
 CATALOG_KNOWN_TOP_LEVEL_FIELDS = (
     "catalog_version",
+    "goals",
     "tutorials",
 )
+CATALOG_GOAL_KEYS = ("title", "summary", "objectives")
 CATALOG_KNOWN_ENTRY_FIELDS = (
     "aliases",
     "assumes",
@@ -5210,6 +5805,7 @@ CATALOG_KNOWN_ENTRY_FIELDS = (
     "report",
     "scope",
     "source",
+    "start_from",
     "style",
     "subjects",
     "title",
@@ -5271,6 +5867,13 @@ CATALOG_LIMITATIONS = """What a pass does and does not mean
   missing is still a check 2 finding, so a misspelled required key produces
   both: the finding that the key is gone, and the warning naming the
   spelling that ate it.
+
+  Check 8 compares a goal's objectives with the `covers` the ENTRIES in
+  this file declare, not with the bundles' own tutorial.yaml, so an
+  objective a bundle teaches and its entry leaves out is reported as
+  taught by nothing. Check 9 proves that `start_from` names a Git URL and a
+  ref. It never contacts the repository: a ref that does not exist, or code
+  that is not what the module was written for, passes.
 
   Nothing here checks a catalogue entry against the bundle's own
   tutorial.yaml. The two are allowed to differ - the bundle is authoritative
@@ -5540,7 +6143,7 @@ def validate_catalog(target: Path, portable: bool) -> Report:
             "nothing and is almost certainly an accident",
         )
     if listed is None:
-        for number in (2, 3, 4, 5, 6, 7):
+        for number in (2, 3, 4, 5, 6, 7, 8, 9):
             if number == 2:
                 report.ran(2)
             else:
@@ -5765,6 +6368,108 @@ def validate_catalog(target: Path, portable: bool) -> Report:
                     + ". A catalogue entry must name a bundle",
                 )
     report.ran(6, f"{len(resolvable)} bundle path(s)")
+
+    # -- check 8: goals
+    #
+    # A goal LISTS its objectives here; nothing is added to a `covers`
+    # concept. An objective must be a `covers` key of some entry in THIS
+    # catalogue, so a goal cannot promise what no course teaches. A `covers`
+    # key under no goal is fine: a goal groups some concepts, not all.
+    if "goals" not in document:
+        report.na(8, "the catalogue declares no 'goals'")
+    else:
+        covered: set[str] = set()
+        for _where, item in entries:
+            covers = item.get("covers")
+            if isinstance(covers, dict):
+                covered.update(str(key) for key in covers)
+        goals = document["goals"]
+        goal_count = 0
+        if not isinstance(goals, dict):
+            report.add(
+                8,
+                target.name,
+                f"'goals' must be a mapping of goal id to goal, not "
+                f"{type(goals).__name__}",
+            )
+        else:
+            owner: dict[str, str] = {}
+            for goal_id, goal in goals.items():
+                goal_count += 1
+                gwhere = f"goals.{goal_id}"
+                if not isinstance(goal_id, str) or not re.fullmatch(
+                    r"[a-z0-9-]+", goal_id
+                ):
+                    report.add(
+                        8,
+                        gwhere,
+                        f"the goal id {goal_id!r} must match [a-z0-9-]+",
+                    )
+                if not isinstance(goal, dict):
+                    report.add(
+                        8,
+                        gwhere,
+                        f"a goal must be a mapping with 'title' and "
+                        f"'objectives', not {type(goal).__name__}",
+                    )
+                    continue
+                if not _is_text(goal.get("title")):
+                    report.add(
+                        8,
+                        gwhere,
+                        f"a goal needs a non-empty string 'title'; it is "
+                        f"{goal.get('title')!r}",
+                    )
+                for key in sorted(
+                    (k for k in goal if k not in CATALOG_GOAL_KEYS), key=str
+                ):
+                    report.add(
+                        8,
+                        gwhere,
+                        f"unknown key {str(key)!r} in a goal; a goal "
+                        f"defines {', '.join(CATALOG_GOAL_KEYS)}",
+                    )
+                objectives = goal.get("objectives")
+                if not _is_text_list(objectives):
+                    report.add(
+                        8,
+                        gwhere,
+                        f"'objectives' must be a non-empty list of strings; "
+                        f"it is {objectives!r}",
+                    )
+                    continue
+                for objective in objectives:
+                    if objective not in covered:
+                        report.add(
+                            8,
+                            gwhere,
+                            f"the objective {objective!r} is not a 'covers' "
+                            f"key of any entry in this catalogue, so no "
+                            f"course here teaches it",
+                        )
+                    if objective in owner:
+                        report.add(
+                            8,
+                            gwhere,
+                            f"the objective {objective!r} is already under "
+                            f"goal {owner[objective]!r}; one objective "
+                            f"belongs to one goal",
+                        )
+                    else:
+                        owner[objective] = str(goal_id)
+        report.ran(8, f"{goal_count} goal(s)")
+
+    # -- check 9: start_from
+    from catalogs import start_from_problems  # one rule for both readers
+
+    declared = [(w, i) for w, i in entries if "start_from" in i]
+    if not declared:
+        report.na(9, "no entry declares 'start_from'")
+    else:
+        for where, item in declared:
+            for problem in start_from_problems(item["start_from"]):
+                report.add(9, where, problem)
+        report.ran(9, f"{len(declared)} start_from declaration(s)")
 
     # -- check 7: portability
     if not portable:

@@ -1,0 +1,62 @@
+bundle_format: 1
+id: stockroom-forecasting
+title: Stockroom Forecasting
+description: >
+  Forecast demand from the counts a stockroom already has, and turn supplier lead
+  times into reorder dates. Continues the sheet from Stockroom Basics.
+subjects: [inventory, forecasting]
+aliases: [demand-forecasting-basics]
+level: intermediate
+style: [project-driven, interactive]
+levels: true
+starts_from: ref
+
+covers:
+  demand-forecasting:
+    summary: >
+      Estimate next period's demand from past counts, and state how wrong the
+      estimate is likely to be.
+  supplier-lead-times:
+    summary: >
+      Measure how long an order takes to arrive and use that to place the order
+      early enough.
+
+assumes:
+  stock-counting:
+    level: working
+    summary: >
+      Count a shelf in a way another person can repeat and get the same number.
+  reorder-points:
+    level: conceptual
+    summary: >
+      Explain the stock level at which an order is placed and what it protects
+      against.
+
+recommended_previous_bundles:
+  - bundle: stockroom-basics
+    because: >
+      It teaches the counting and reorder-point habits this course forecasts from,
+      and you finish it holding the sheet this course starts from.
+
+lessons:
+  - lessons/00-setup.md
+  - lessons/01-placement.md
+  - lessons/02-forecasting.md
+
+workspace_kind: existing-or-new-repository
+tutor_owned:   [tutorial/STATE.md, tutorial/DESIGN.md]
+learner_owned: [stockroom.csv, forecast.csv, notes/**]
+ownership_policy: tutor-must-not-edit-learner-owned
+
+validators:
+  has-forecast: { kind: file-exists, path: forecast.csv }
+  explains-error: { kind: manual }
+
+one_task_at_a_time: true
+solution_code: on-request-only
+advance_on: validated-evidence-only
+
+instance:
+  materialized_from: local:../tests/fixtures
+  materialized_at: 2026-11-03
+  runner_version: 1

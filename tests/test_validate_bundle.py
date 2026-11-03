@@ -135,6 +135,14 @@ BASELINES = {
     "broker": FIXTURES / "durable-event-broker",
     "engine": FIXTURES / "streaming-query-engine",
     "recipes": FIXTURES / "event-stream-recipes",
+    # The two modules of a programme (levelled-programme/catalog.yaml), the
+    # positive control for the levels keys. `module1` is levelled, has a
+    # placement lesson assessing every objective, `teaches` on every lesson
+    # and a folder lesson whose `material` covers levels A and C but not B.
+    # `module2` is levelled, says `starts_from: ref`, names module 1 as a
+    # previous bundle, and its placement lesson assesses only what is new.
+    "module1": FIXTURES / "levelled-programme" / "module-1",
+    "module2": FIXTURES / "levelled-programme" / "module-2",
 }
 
 # Baselines that are already INSTANCES and must not be run through
@@ -145,6 +153,9 @@ INSTANCE_BASELINES = {
     # single-file side-lesson, which STATE.md is sitting on, and a foldered
     # main-path-draft with one material file.
     "generated": FIXTURES / "generated-instance",
+    # An instance of module 2 whose STATE.md carries a `## Levels` row for a
+    # module-1 objective and a `## Modules` row for module 1 (checks 40, 41).
+    "module2-instance": FIXTURES / "levelled-programme" / "instance-of-module-2",
 }
 
 ALL_BASELINES = {**BASELINES, **INSTANCE_BASELINES}
@@ -3162,6 +3173,245 @@ def m_report_prefill_misspelled(root: Path) -> None:
     )
 
 
+# -- checks 35 and 36: levels and starts_from
+
+
+def _declare_key(root: Path, literal: str, name: str, expected: object) -> None:
+    _append_top_level(root, literal, {name: expected})
+
+
+def m_levels_true(root: Path) -> None:
+    _declare_key(root, "levels: true", "levels", True)
+
+
+def m_levels_false(root: Path) -> None:
+    _declare_key(root, "levels: false", "levels", False)
+
+
+def m_levels_string(root: Path) -> None:
+    _declare_key(root, 'levels: "true"', "levels", "true")
+
+
+def m_levels_one(root: Path) -> None:
+    _declare_key(root, "levels: 1", "levels", 1)
+
+
+def m_starts_from_ref(root: Path) -> None:
+    _declare_key(root, "starts_from: ref", "starts_from", "ref")
+
+
+def m_starts_from_branch(root: Path) -> None:
+    _declare_key(root, "starts_from: branch", "starts_from", "branch")
+
+
+def m_starts_from_mapping(root: Path) -> None:
+    _declare_key(root, "starts_from:\n  ref: main", "starts_from", {"ref": "main"})
+
+
+def m_no_levels_keys(root: Path) -> None:
+    """The backward-compatibility control: both keys are MAYs."""
+    declared = vb.load_yaml((root / "tutorial.yaml").read_text(), "tutorial.yaml")
+    assert "levels" not in declared and "starts_from" not in declared, (
+        "this baseline declares levels or starts_from, so it cannot show a "
+        "bundle without them"
+    )
+
+
+# -- checks 37, 38, 39: teaches, material and placement
+
+CLI_CONCEPTS = (
+    "covers:\n"
+    "  argument-parsing:\n"
+    "    summary: Read the command line into a command and its operands.\n"
+    "  error-handling:\n"
+    "    summary: Turn failure into a Result the caller can act on.\n"
+    "assumes:\n"
+    "  rust-installed:\n"
+    "    level: working\n"
+    "    summary: A working Rust toolchain on the learner's machine.\n"
+)
+CLI_LESSON_00 = "lessons/00-hello-args.md"
+CLI_LESSON_01 = "lessons/01-subcommands/LESSON.md"
+CLI_LESSON_02 = "lessons/02-errors-and-tests.md"
+CLI_OPTIONAL = "lessons/pure-core-and-edges.md"
+
+
+def _cli_concepts(root: Path) -> None:
+    """Declare covers and assumes on the cli baseline, which carries neither."""
+    manifest = vb.load_yaml((root / "tutorial.yaml").read_text(), "tutorial.yaml")
+    assert "covers" not in manifest and "assumes" not in manifest
+    append(root / "tutorial.yaml", "\n" + CLI_CONCEPTS)
+    parsed = vb.load_yaml((root / "tutorial.yaml").read_text(), "tutorial.yaml")
+    assert set(parsed["covers"]) == {"argument-parsing", "error-handling"}
+
+
+def _add_fm(root: Path, rel: str, lines: str) -> None:
+    """Append frontmatter lines to a cli lesson, proving the reader saw them."""
+    path = root / rel
+    text = path.read_text()
+    head, sep, rest = text[4:].partition("\n---\n")
+    assert text.startswith("---\n") and sep, f"{rel} has no frontmatter fence"
+    path.write_text("---\n" + head + "\n" + lines + "---\n" + rest)
+    fm = vb.load_yaml(head + "\n" + lines, rel)
+    assert isinstance(fm, dict)
+
+
+def m_teaches_absent(root: Path) -> None:
+    for rel in (CLI_LESSON_00, CLI_LESSON_01, CLI_LESSON_02, CLI_OPTIONAL):
+        assert "teaches:" not in (root / rel).read_text()
+
+
+def m_teaches_valid(root: Path) -> None:
+    _cli_concepts(root)
+    _add_fm(root, CLI_LESSON_01, "teaches: [argument-parsing, error-handling]\n")
+
+
+def m_teaches_string(root: Path) -> None:
+    _cli_concepts(root)
+    _add_fm(root, CLI_LESSON_01, "teaches: argument-parsing\n")
+
+
+def m_teaches_empty(root: Path) -> None:
+    _cli_concepts(root)
+    _add_fm(root, CLI_LESSON_01, "teaches: []\n")
+
+
+def m_teaches_unknown(root: Path) -> None:
+    _cli_concepts(root)
+    _add_fm(root, CLI_LESSON_01, "teaches: [argument-parsing, arg-parsing]\n")
+
+
+def m_teaches_assumed(root: Path) -> None:
+    _cli_concepts(root)
+    _add_fm(root, CLI_LESSON_01, "teaches: [rust-installed]\n")
+
+
+def m_teaches_no_covers(root: Path) -> None:
+    _add_fm(root, CLI_LESSON_01, "teaches: [argument-parsing]\n")
+
+
+MATERIAL_AC = (
+    "teaches: [argument-parsing]\n"
+    "material:\n"
+    "  argument-parsing:\n"
+    "    A: level-a.txt\n"
+    "    C: level-c.txt\n"
+)
+
+
+def _material_files(root: Path) -> None:
+    folder = root / "lessons" / "01-subcommands"
+    (folder / "level-a.txt").write_text("level A\n")
+    (folder / "level-c.txt").write_text("level C\n")
+
+
+def m_material_declared(root: Path) -> None:
+    _cli_concepts(root)
+    _material_files(root)
+    _add_fm(root, CLI_LESSON_01, MATERIAL_AC)
+
+
+def m_material_undeclared_file(root: Path) -> None:
+    """A material file no key declares and LESSON.md never names."""
+    _material_files(root)
+
+
+def m_material_on_single_file(root: Path) -> None:
+    _cli_concepts(root)
+    _add_fm(
+        root, CLI_LESSON_00,
+        "teaches: [argument-parsing]\nmaterial:\n  argument-parsing:\n"
+        "    A: level-a.txt\n",
+    )
+
+
+def m_material_unknown_objective(root: Path) -> None:
+    _cli_concepts(root)
+    _material_files(root)
+    _add_fm(
+        root, CLI_LESSON_01,
+        "teaches: [argument-parsing]\nmaterial:\n  error-handling:\n"
+        "    A: level-a.txt\n",
+    )
+
+
+def _material_one(root: Path, level: str, path: str) -> None:
+    _cli_concepts(root)
+    _material_files(root)
+    _add_fm(
+        root, CLI_LESSON_01,
+        "teaches: [argument-parsing]\nmaterial:\n  argument-parsing:\n"
+        f"    {level}: {path}\n",
+    )
+
+
+def m_material_level_d(root: Path) -> None:
+    _material_one(root, "D", "level-a.txt")
+
+
+def m_material_missing_file(root: Path) -> None:
+    _material_one(root, "A", "no-such-file.txt")
+
+
+def m_material_dotdot(root: Path) -> None:
+    _material_one(root, "A", "../00-hello-args.md")
+
+
+def m_material_absolute(root: Path) -> None:
+    _material_one(root, "A", "/etc/passwd")
+
+
+def m_material_symlink_out(root: Path) -> None:
+    """A link inside the folder that points out of it must not count."""
+    link = root / "lessons" / "01-subcommands" / "level-a.txt"
+    link.symlink_to(root / "lessons" / "00-hello-args.md")
+    _cli_concepts(root)
+    _add_fm(
+        root, CLI_LESSON_01,
+        "teaches: [argument-parsing]\nmaterial:\n  argument-parsing:\n"
+        "    A: level-a.txt\n",
+    )
+
+
+def m_material_not_mapping(root: Path) -> None:
+    _cli_concepts(root)
+    _add_fm(root, CLI_LESSON_01, "teaches: [argument-parsing]\nmaterial: level-a.txt\n")
+
+
+def m_placement_absent(root: Path) -> None:
+    for rel in (CLI_LESSON_00, CLI_LESSON_01, CLI_LESSON_02):
+        assert "placement:" not in (root / rel).read_text()
+
+
+def m_placement_one(root: Path) -> None:
+    _cli_concepts(root)
+    _add_fm(root, CLI_LESSON_00, "assesses: [argument-parsing]\nplacement: true\n")
+
+
+def m_placement_false_without_assesses(root: Path) -> None:
+    _add_fm(root, CLI_LESSON_00, "placement: false\n")
+
+
+def m_placement_without_assesses(root: Path) -> None:
+    _add_fm(root, CLI_LESSON_00, "placement: true\n")
+
+
+def m_placement_two(root: Path) -> None:
+    _cli_concepts(root)
+    _add_fm(root, CLI_LESSON_00, "assesses: [argument-parsing]\nplacement: true\n")
+    _add_fm(root, CLI_LESSON_02, "assesses: [error-handling]\nplacement: true\n")
+
+
+def m_placement_optional(root: Path) -> None:
+    _cli_concepts(root)
+    _add_fm(root, CLI_OPTIONAL, "assesses: [argument-parsing]\nplacement: true\n")
+
+
+def m_placement_string(root: Path) -> None:
+    _cli_concepts(root)
+    _add_fm(root, CLI_LESSON_00, 'assesses: [argument-parsing]\nplacement: "yes"\n')
+
+
 def m_no_report(root: Path) -> None:
     """The backward-compatibility control: the key is a MAY."""
     assert "report" not in vb.load_yaml(
@@ -3671,6 +3921,105 @@ SELF_MATERIALIZING = {
     m_instance_no_frontmatter,
     m_instance_missing_status,
 }
+
+
+# -- checks 40, 41: STATE.md's '## Levels' and '## Modules' ledgers
+
+D = "\u2014"
+LEVEL_ROWS_VALID = (
+    f"- `partition-offsets` {D} A {D} placement 2026-11-03\n"
+    f"- `retained-event-logs` {D} B {D} learner 2026-11-03 (asked to skip)\n"
+    f"- `consumer-groups` {D} C {D} lessons/01-hello.md 2026-11-04\n"
+)
+
+
+def _ledger(section: str, rows: str):
+    def mutate(root: Path) -> None:
+        append(root / "STATE.md", f"\n## {section}\n\n{rows}")
+    return mutate
+
+
+m_levels_valid = _ledger("Levels", LEVEL_ROWS_VALID)
+m_levels_none = _ledger("Levels", "- None\n")
+m_levels_unknown_id = _ledger(
+    "Levels", f"- `not-in-this-bundle` {D} B {D} placement 2026-11-03\n"
+)
+m_levels_generated_source = _ledger(
+    "Levels", f"- `x-y` {D} A {D} lessons.generated/02-extra.md 2026-11-03\n"
+)
+m_levels_wrapped = _ledger(
+    "Levels",
+    f"- `partition-offsets` {D} A {D} placement\n  2026-11-03 (a note that\n"
+    f"  wraps over lines)\n",
+)
+m_levels_level_d = _ledger(
+    "Levels", f"- `partition-offsets` {D} D {D} placement 2026-11-03\n"
+)
+m_levels_no_date = _ledger(
+    "Levels", f"- `partition-offsets` {D} A {D} placement\n"
+)
+m_levels_bad_source = _ledger(
+    "Levels", f"- `partition-offsets` {D} A {D} guess 2026-11-03\n"
+)
+m_levels_duplicate = _ledger(
+    "Levels",
+    f"- `partition-offsets` {D} A {D} placement 2026-11-03\n"
+    f"- `partition-offsets` {D} B {D} learner 2026-11-04\n",
+)
+m_levels_bad_id = _ledger(
+    "Levels", f"- `Partition_Offsets` {D} A {D} placement 2026-11-03\n"
+)
+m_modules_valid_tail = _ledger(
+    "Modules",
+    f"- `intro-module` {D} complete 2026-11-03 {D} branch module/intro; "
+    f"merged\n",
+)
+m_modules_valid_plain = _ledger(
+    "Modules", f"- `intro-module` {D} complete 2026-11-03 {D} branch module/intro\n"
+)
+m_modules_no_branch = _ledger(
+    "Modules", f"- `intro-module` {D} complete 2026-11-03\n"
+)
+m_modules_duplicate = _ledger(
+    "Modules",
+    f"- `intro-module` {D} complete 2026-11-03 {D} branch a\n"
+    f"- `intro-module` {D} complete 2026-11-04 {D} branch b\n",
+)
+m_modules_wrapped = _ledger(
+    "Modules",
+    f"- `intro-module` {D} complete 2026-11-03\n  {D} branch module/intro;\n"
+    f"  merged later\n",
+)
+EN = "\u2013"
+m_levels_en_dash = _ledger(
+    "Levels", f"- `partition-offsets` {EN} A {EN} placement 2026-11-03\n"
+)
+m_levels_hyphen = _ledger(
+    "Levels", "- `partition-offsets` - B - lessons/01-hello.md 2026-11-03\n"
+)
+m_levels_bad_date = _ledger(
+    "Levels", f"- `partition-offsets` {D} A {D} placement 2027-02-30\n"
+)
+m_modules_en_dash = _ledger(
+    "Modules", f"- `intro-module` {EN} complete 2026-11-03 {EN} branch a/b\n"
+)
+m_modules_hyphen = _ledger(
+    "Modules", "- `intro-module` - complete 2026-11-03 - branch a/b\n"
+)
+m_modules_bad_date = _ledger(
+    "Modules", f"- `intro-module` {D} complete 2027-02-30 {D} branch a\n"
+)
+m_modules_bad_id = _ledger(
+    "Modules", f"- `Intro_Module` {D} complete 2026-11-03 {D} branch a\n"
+)
+# A deeper heading of the same name elsewhere is not the ledger: its bullet
+# would be a malformed row if it were read as one.
+m_modules_subsection = _ledger(
+    "Decisions", "### Modules\n\n- split by topic, not by week\n"
+)
+m_levels_subsection = _ledger(
+    "Decisions", "### Levels\n\n- everyone starts at A\n"
+)
 
 
 @dataclass
@@ -4566,6 +4915,119 @@ CASES: list[Case] = [
          where="tutorial.yaml"),
     Case("28: 'report' spelled correctly is silent", 28, "cli", "bundle",
          m_report_https_github, kind="silent"),
+    # ---- checks 37, 38, 39: teaches, material and placement
+    Case("37: a bundle with no teaches is silent", 37, "cli", "bundle",
+         m_teaches_absent, kind="silent"),
+    Case("37: and so is an INSTANCE with none", 37, "cli", "instance",
+         m_teaches_absent, kind="silent"),
+    Case("37: a valid teaches list is silent", 37, "cli", "bundle",
+         m_teaches_valid, kind="silent"),
+    Case("37: a valid teaches list in an INSTANCE is silent", 37, "cli",
+         "instance", m_teaches_valid, kind="silent"),
+    Case("37: teaches as a string fires", 37, "cli", "bundle",
+         m_teaches_string, "teaches is 'argument-parsing'; it must be a non-empty list",
+         where=CLI_LESSON_01),
+    Case("37: teaches: [] fires", 37, "cli", "bundle", m_teaches_empty,
+         "teaches is []; it must be a non-empty list", where=CLI_LESSON_01),
+    Case("37: an id not in covers fires, naming the id", 37, "cli", "bundle",
+         m_teaches_unknown, "teaches names 'arg-parsing', which does not resolve: "
+         "no 'covers' concept has that id", where=CLI_LESSON_01),
+    Case("37: an assumed id fires with the assumes wording", 37, "cli",
+         "bundle", m_teaches_assumed, "it is in 'assumes', which the course "
+         "does not teach", where=CLI_LESSON_01),
+    Case("37: a bundle with no covers at all says so", 37, "cli", "bundle",
+         m_teaches_no_covers, "the manifest declares no 'covers' concepts",
+         where=CLI_LESSON_01),
+    Case("38: a bundle with no material is silent", 38, "cli", "bundle",
+         m_teaches_absent, kind="silent"),
+    Case("38: and so is an INSTANCE with none", 38, "cli", "instance",
+         m_teaches_absent, kind="silent"),
+    Case("38: levels A and C declared, files present, is silent", 38, "cli",
+         "bundle", m_material_declared, kind="silent"),
+    Case("38: the same in an INSTANCE is silent", 38, "cli", "instance",
+         m_material_declared, kind="silent"),
+    Case("38: material on a single-file lesson fires", 38, "cli", "bundle",
+         m_material_on_single_file, "material needs a folder lesson",
+         where=CLI_LESSON_00),
+    Case("38: an objective not in teaches fires", 38, "cli", "bundle",
+         m_material_unknown_objective, "'error-handling', which is not in this "
+         "lesson's teaches", where=CLI_LESSON_01),
+    Case("38: level D fires", 38, "cli", "bundle", m_material_level_d,
+         "level 'D'", where=CLI_LESSON_01),
+    Case("38: a missing file fires", 38, "cli", "bundle", m_material_missing_file,
+         "'no-such-file.txt'", where=CLI_LESSON_01),
+    Case("38: a .. path fires", 38, "cli", "bundle", m_material_dotdot,
+         "'../00-hello-args.md'", where=CLI_LESSON_01),
+    Case("38: an absolute path fires", 38, "cli", "bundle", m_material_absolute,
+         "'/etc/passwd'", where=CLI_LESSON_01),
+    Case("38: a symlink pointing out of the folder fires", 38, "cli", "bundle",
+         m_material_symlink_out, "symbolic link", where=CLI_LESSON_01),
+    Case("38: material that is not a mapping fires", 38, "cli", "bundle",
+         m_material_not_mapping, "material must be a mapping",
+         where=CLI_LESSON_01),
+    Case("6: a material file check 38 declares does not fire check 6", 6,
+         "cli", "bundle", m_material_declared, kind="silent"),
+    Case("6: the same files undeclared still fire check 6", 6, "cli", "bundle",
+         m_material_undeclared_file, "'level-a.txt' is never named",
+         where="lessons/01-subcommands/LESSON.md -> level-a.txt"),
+    Case("39: a bundle with no placement is silent", 39, "cli", "bundle",
+         m_placement_absent, kind="silent"),
+    Case("39: and so is an INSTANCE with none", 39, "cli", "instance",
+         m_placement_absent, kind="silent"),
+    Case("39: one valid placement lesson is silent", 39, "cli", "bundle",
+         m_placement_one, kind="silent"),
+    Case("39: and in an INSTANCE", 39, "cli", "instance", m_placement_one,
+         kind="silent"),
+    Case("39: placement: false needs no assesses", 39, "cli", "bundle",
+         m_placement_false_without_assesses, kind="silent"),
+    Case("39: placement without assesses fires", 39, "cli", "bundle",
+         m_placement_without_assesses, "without 'assesses'", where=CLI_LESSON_00),
+    Case("39: two placement lessons fire once, naming both", 39, "cli", "bundle",
+         m_placement_two, f"{CLI_LESSON_00}, {CLI_LESSON_02}"),
+    Case("39: a placement optional lesson fires", 39, "cli", "bundle",
+         m_placement_optional, "optional lesson", where=CLI_OPTIONAL),
+    Case('39: placement: "yes" fires', 39, "cli", "bundle", m_placement_string,
+         "must be true or false", where=CLI_LESSON_00),
+    # ---- checks 35 and 36: levels and starts_from. Silent rows are the
+    # positive control for the firing ones.
+    Case("35: a bundle with no levels is silent", 35, "cli", "bundle",
+         m_no_levels_keys, kind="silent"),
+    Case("35: and so is an INSTANCE with no levels", 35, "cli", "instance",
+         m_no_levels_keys, kind="silent"),
+    Case("35: levels: true is silent", 35, "cli", "bundle", m_levels_true,
+         kind="silent"),
+    Case("35: levels: false is silent", 35, "cli", "bundle", m_levels_false,
+         kind="silent"),
+    Case("35: an INSTANCE with levels: true is silent", 35, "cli", "instance",
+         m_levels_true, kind="silent"),
+    Case('35: levels: "true" (a string) fires', 35, "cli", "bundle",
+         m_levels_string, "'levels' must be true or false",
+         where="tutorial.yaml"),
+    Case("35: levels: 1 fires", 35, "cli", "bundle", m_levels_one,
+         "'levels' must be true or false", where="tutorial.yaml"),
+    Case("35: an INSTANCE with levels: 1 fires too", 35, "cli", "instance",
+         m_levels_one, "'levels' must be true or false", where="tutorial.yaml"),
+    Case("36: a bundle with no starts_from is silent", 36, "cli", "bundle",
+         m_no_levels_keys, kind="silent"),
+    Case("36: and so is an INSTANCE with none", 36, "cli", "instance",
+         m_no_levels_keys, kind="silent"),
+    Case("36: starts_from: ref is silent", 36, "cli", "bundle",
+         m_starts_from_ref, kind="silent"),
+    Case("36: an INSTANCE with starts_from: ref is silent", 36, "cli",
+         "instance", m_starts_from_ref, kind="silent"),
+    Case("36: starts_from: branch fires", 36, "cli", "bundle",
+         m_starts_from_branch, "'starts_from' must be 'ref'",
+         where="tutorial.yaml"),
+    Case("36: starts_from as a mapping fires", 36, "cli", "bundle",
+         m_starts_from_mapping, "'starts_from' must be 'ref'",
+         where="tutorial.yaml"),
+    Case("36: an INSTANCE with starts_from: branch fires too", 36, "cli",
+         "instance", m_starts_from_branch, "'starts_from' must be 'ref'",
+         where="tutorial.yaml"),
+    Case("28: levels is a DEFINED field, so it is silent", 28, "cli",
+         "bundle", m_levels_true, kind="silent"),
+    Case("28: and so is starts_from", 28, "cli", "bundle",
+         m_starts_from_ref, kind="silent"),
     # ---- check 31: `assesses` (belay#33)
     Case("31: assesses names a misspelled concept id", 31, "broker", "bundle",
          m_assesses_misspelled, "'partition-ofsets'", where=BROKER_LESSON),
@@ -4632,6 +5094,63 @@ CASES: list[Case] = [
     Case("32: a scope that reads as a path and names no lesson", 32, "broker",
          "instance", m_assessment_scope_path_missing,
          "'lessons/03-replication.md'"),
+    # ---- checks 40, 41: STATE.md's '## Levels' and '## Modules' ledgers
+    Case("40: an instance with no '## Levels' section is silent", 40, "broker",
+         "instance", m_assesses_valid, kind="silent"),
+    Case("40: a '- None' bullet is skipped", 40, "broker", "instance",
+         m_levels_none, kind="silent"),
+    Case("40: three valid rows, one per source kind, are silent", 40, "broker",
+         "instance", m_levels_valid, kind="silent"),
+    Case("40: a lessons.generated/ source is silent", 40, "broker", "instance",
+         m_levels_generated_source, kind="silent"),
+    Case("40: an id not in covers is NOT a finding", 40, "broker", "instance",
+         m_levels_unknown_id, kind="silent"),
+    Case("40: a row wrapped over several lines is silent", 40, "broker",
+         "instance", m_levels_wrapped, kind="silent"),
+    Case("40: level D", 40, "broker", "instance", m_levels_level_d,
+         "'D', which is not one of A, B, C", where="STATE.md (## Levels)"),
+    Case("40: a row without a date", 40, "broker", "instance",
+         m_levels_no_date, "is not a level row", where="STATE.md (## Levels)"),
+    Case("40: an unknown source", 40, "broker", "instance", m_levels_bad_source,
+         "the source 'guess'", where="STATE.md (## Levels)"),
+    Case("40: a malformed id", 40, "broker", "instance", m_levels_bad_id,
+         "is not a concept id", where="STATE.md (## Levels)"),
+    Case("40: one id recorded twice", 40, "broker", "instance",
+         m_levels_duplicate, "recorded twice", where="STATE.md (## Levels)"),
+    Case("41: an instance with no '## Modules' section is silent", 41,
+         "broker", "instance", m_assesses_valid, kind="silent"),
+    Case("41: a valid row with a ';' tail is silent", 41, "broker", "instance",
+         m_modules_valid_tail, kind="silent"),
+    Case("41: a valid row without a tail is silent", 41, "broker", "instance",
+         m_modules_valid_plain, kind="silent"),
+    Case("41: a wrapped row is silent", 41, "broker", "instance",
+         m_modules_wrapped, kind="silent"),
+    Case("41: a row without a branch", 41, "broker", "instance",
+         m_modules_no_branch, "is not a module row",
+         where="STATE.md (## Modules)"),
+    Case("41: one module recorded twice", 41, "broker", "instance",
+         m_modules_duplicate, "recorded twice", where="STATE.md (## Modules)"),
+    Case("40: a row separated by en dashes is silent", 40, "broker",
+         "instance", m_levels_en_dash, kind="silent"),
+    Case("40: a row separated by hyphens is silent", 40, "broker",
+         "instance", m_levels_hyphen, kind="silent"),
+    Case("40: a date that is not a calendar date", 40, "broker", "instance",
+         m_levels_bad_date, "not a calendar date",
+         where="STATE.md (## Levels)"),
+    Case("40: a '### Levels' under another section is not the ledger", 40,
+         "broker", "instance", m_levels_subsection, kind="silent"),
+    Case("41: a row separated by en dashes is silent", 41, "broker",
+         "instance", m_modules_en_dash, kind="silent"),
+    Case("41: a row separated by hyphens is silent", 41, "broker",
+         "instance", m_modules_hyphen, kind="silent"),
+    Case("41: a date that is not a calendar date", 41, "broker", "instance",
+         m_modules_bad_date, "not a calendar date",
+         where="STATE.md (## Modules)"),
+    Case("41: a malformed module id", 41, "broker", "instance",
+         m_modules_bad_id, "is not a module id",
+         where="STATE.md (## Modules)"),
+    Case("41: a '### Modules' under another section is not the ledger", 41,
+         "broker", "instance", m_modules_subsection, kind="silent"),
     # ---- check 33 (warning only: the record is evidence, never progress)
     Case("33 (control): a well-formed learning record is quiet", 33, "cli",
          "instance", m_events_valid, kind="silent"),
@@ -6878,8 +7397,8 @@ def test_top_level_near_miss_distance() -> None:
         got = vb.near_misses(name, known)
         record(got == want, f"{name!r} -> {want}", f"got {got}")
     record(
-        set(known) == {"catalog_version", "tutorials"},
-        "the known top-level keys are exactly the two section 5 defines",
+        set(known) == {"catalog_version", "goals", "tutorials"},
+        "the known top-level keys are exactly the three section 5 defines",
         f"got {known}",
     )
     record(
@@ -6919,7 +7438,7 @@ def test_catalog_unknown_top_level_field_warns_and_never_rejects() -> None:
             warned[0].message,
         )
         record(
-            "catalog_version, tutorials" in warned[0].message,
+            "catalog_version, goals, tutorials" in warned[0].message,
             "it lists the top-level fields this document defines, so an "
             "author can check the name against them",
             warned[0].message,
@@ -7165,9 +7684,15 @@ def test_real_catalogue_gains_no_warning() -> None:
         "; ".join(str(w) for w in report.warnings),
     )
     record(
-        sorted(document) == sorted(vb.CATALOG_KNOWN_TOP_LEVEL_FIELDS),
-        "its top-level keys are exactly the two this document defines, "
-        "which is why check 1 has nothing to say about it",
+        # `goals` is optional (check 8), and the published catalogue declares
+        # none, so its keys are the known ones minus `goals`. Before goals
+        # existed this compared against the whole tuple; the sibling sweep
+        # alone saw it stop holding, which is what the sweep is for.
+        sorted(document)
+        == sorted(set(vb.CATALOG_KNOWN_TOP_LEVEL_FIELDS) - {"goals"}),
+        "its top-level keys are exactly the two this document always "
+        "carries (goals is optional and it has none), which is why check 1 "
+        "has nothing to say about it",
         f"top-level keys = {sorted(document)}",
     )
 
@@ -7884,11 +8409,24 @@ def test_manifest_near_miss_distance() -> None:
             f"near_misses({name!r}) -> {expected}",
             f"got {got}",
         )
+    # `level` and `levels` are one edit apart and both defined: the spec fixed
+    # both names, so the pair is the one named exemption. A typo near them
+    # (`levl`) is suggested both, which is honest - the evidence does not pick.
+    # Any OTHER colliding pair still fails.
+    exempt = {"level", "levels"}
     collisions = {
         a: vb.near_misses(a, tuple(b for b in known if b != a))
         for a in known
-        if vb.near_misses(a, tuple(b for b in known if b != a))
+        if a not in exempt
+        and vb.near_misses(a, tuple(b for b in known if b != a))
     }
+    collisions.update({
+        a: [b for b in vb.near_misses(a, tuple(k for k in known if k != a))
+            if b not in exempt]
+        for a in exempt
+        if [b for b in vb.near_misses(a, tuple(k for k in known if k != a))
+            if b not in exempt]
+    })
     record(
         not collisions,
         "no field this format defines is a near miss for another, so a "
@@ -8894,9 +9432,20 @@ def test_skipped_and_passed_are_distinguishable() -> None:
 def test_assessment_checks_status() -> None:
     """Checks 31 and 32 say n/a, not ran, where there is nothing to check."""
     print("\nassessment checks report n/a on a course with no assessment:")
+    # The module baselines are the only ones whose placement lesson assesses,
+    # so check 31 RUNS on them; it stays n/a on every other baseline.
+    assessing = ("module1", "module2")
     for name, path in BASELINES.items():
         report = vb.validate(path, "bundle")
         status = report.status.get(31, ("missing", ""))[0]
+        if name in assessing:
+            record(
+                status == vb.RAN,
+                f"{name}: check 31 RAN on a bundle whose placement lesson "
+                f"declares assesses",
+                f"status = {report.status.get(31)!r}",
+            )
+            continue
         record(
             status == vb.NOT_APPLICABLE,
             f"{name}: check 31 is n/a on a bundle that declares no assesses",
@@ -8960,6 +9509,97 @@ def test_report_check_status() -> None:
         f"BUNDLE_ONLY = {vb.BUNDLE_ONLY}, INSTANCE_ONLY = {vb.INSTANCE_ONLY}, "
         f"WARNING_ONLY = {vb.WARNING_ONLY}",
     )
+
+
+def test_levels_check_status() -> None:
+    """Checks 35 and 36: n/a with the key absent, ran with it declared."""
+    print("\nchecks 35 and 36: the status line, both modes:")
+    for mode in ("bundle", "instance"):
+        for num, mutate, want, label in (
+            (35, m_no_levels_keys, vb.NOT_APPLICABLE, "no levels: n/a"),
+            (35, m_levels_true, vb.RAN, "levels: true: ran"),
+            (35, m_levels_one, vb.RAN, "levels: 1: ran"),
+            (36, m_no_levels_keys, vb.NOT_APPLICABLE, "no starts_from: n/a"),
+            (36, m_starts_from_ref, vb.RAN, "starts_from: ref: ran"),
+            (36, m_starts_from_branch, vb.RAN, "starts_from: branch: ran"),
+        ):
+            with tempfile.TemporaryDirectory() as tmpdir:
+                root = fresh("cli", Path(tmpdir))
+                if mode == "instance":
+                    to_instance(root)
+                mutate(root)
+                report = vb.validate(root, mode)
+            got = report.status.get(num, ("missing", ""))[0]
+            record(got == want, f"check {num}, {mode}: {label}",
+                   f"status = {got!r}")
+    for num in (35, 36):
+        record(
+            num not in vb.BUNDLE_ONLY and num not in vb.INSTANCE_ONLY
+            and num not in vb.WARNING_ONLY,
+            f"check {num} is a FINDING in BOTH modes",
+            f"BUNDLE_ONLY = {vb.BUNDLE_ONLY}, INSTANCE_ONLY = {vb.INSTANCE_ONLY}",
+        )
+
+
+def test_lesson_levels_check_status() -> None:
+    """Checks 37-39: n/a with the key absent, ran with it declared."""
+    print("\nchecks 37, 38 and 39: the status line, both modes:")
+    for mode in ("bundle", "instance"):
+        for num, mutate, want, label in (
+            (37, m_teaches_absent, vb.NOT_APPLICABLE, "no teaches: n/a"),
+            (37, m_teaches_valid, vb.RAN, "teaches: ran"),
+            (38, m_teaches_absent, vb.NOT_APPLICABLE, "no material: n/a"),
+            (38, m_material_declared, vb.RAN, "material: ran"),
+            (39, m_placement_absent, vb.NOT_APPLICABLE, "no placement: n/a"),
+            (39, m_placement_one, vb.RAN, "placement: ran"),
+        ):
+            with tempfile.TemporaryDirectory() as tmpdir:
+                root = fresh("cli", Path(tmpdir))
+                if mode == "instance":
+                    to_instance(root)
+                mutate(root)
+                report = vb.validate(root, mode)
+            got = report.status.get(num, ("missing", ""))[0]
+            record(got == want, f"check {num}, {mode}: {label}",
+                   f"status = {got!r}")
+    for num in (37, 38, 39):
+        record(
+            num not in vb.BUNDLE_ONLY and num not in vb.INSTANCE_ONLY
+            and num not in vb.WARNING_ONLY,
+            f"check {num} is a FINDING in BOTH modes",
+            f"BUNDLE_ONLY = {vb.BUNDLE_ONLY}, INSTANCE_ONLY = {vb.INSTANCE_ONLY}",
+        )
+
+
+def test_ledger_checks_status() -> None:
+    """Checks 40 and 41: n/a without the section, ran with it, instance only."""
+    print("\nchecks 40 and 41: the status line, and bundle mode:")
+    for num, absent, present, label in (
+        (40, m_assesses_valid, m_levels_valid, "levels"),
+        (41, m_assesses_valid, m_modules_valid_plain, "modules"),
+    ):
+        for mutate, want, what in (
+            (absent, vb.NOT_APPLICABLE, "no section: n/a"),
+            (present, vb.RAN, "section present: ran"),
+        ):
+            with tempfile.TemporaryDirectory() as tmpdir:
+                root = fresh("broker", Path(tmpdir))
+                to_instance(root)
+                mutate(root)
+                report = vb.validate(root, "instance")
+            got = report.status.get(num, ("missing", ""))[0]
+            record(got == want, f"check {num} ({label}): {what}",
+                   f"status = {got!r}")
+        record(num in vb.INSTANCE_ONLY and num not in vb.WARNING_ONLY,
+               f"check {num} is instance-only and a finding",
+               f"INSTANCE_ONLY = {vb.INSTANCE_ONLY}")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = fresh("broker", Path(tmpdir))
+        report = vb.validate(root, "bundle")
+    noisy = [f for f in report.findings + report.warnings if f.check in (40, 41)]
+    record(not noisy and 40 not in report.status and 41 not in report.status,
+           "a bundle-mode run never reports check 40 or 41",
+           f"{noisy!r}, status = {report.status.get(40)!r}")
 
 
 def test_learning_record_check_status() -> None:
@@ -9030,6 +9670,155 @@ def test_the_total_is_reproducible_from_this_commit() -> None:
         f"so (here: {'swept' if SWEEP_SIBLINGS else 'skipped'})",
         f"REPO exists = {REPO.exists()}, reason = {reason!r}, "
         f"SWEEP_SIBLINGS = {SWEEP_SIBLINGS}",
+    )
+
+
+PROGRAMME = FIXTURES / "levelled-programme"
+
+
+def test_levelled_programme_is_clean_end_to_end() -> None:
+    """The fixture programme: a catalogue, two module bundles, one instance.
+
+    Spec 2026-11-03 section 5, items 3 and 4. Every new key is exercised
+    and each one's check is shown RUNNING rather than n/a, because a clean
+    result from a check that never ran proves nothing. The programme's own
+    shape is asserted too (goals cover every objective, module 2 assesses
+    only what is new), so a later edit that quietly weakens the fixture
+    fails here instead of passing by emptiness.
+    """
+    print("\nthe levelled programme validates clean, every new check running:")
+    catalogue = PROGRAMME / "catalog.yaml"
+    for portable in (False, True):
+        report = vb.validate_catalog(catalogue, portable)
+        record(
+            report.exit_code() == 0 and not report.warnings,
+            f"the programme catalogue validates clean"
+            f"{' --portable' if portable else ''}, with no warnings",
+            "; ".join(str(f) for f in [*report.findings, *report.warnings]),
+        )
+    cat_report = vb.validate_catalog(catalogue, False)
+    record(
+        cat_report.status.get(8, ("", ""))[0] == vb.RAN
+        and cat_report.status.get(9, ("", ""))[0] == vb.RAN,
+        "catalogue checks 8 (goals) and 9 (start_from) both RAN",
+        f"8 = {cat_report.status.get(8)!r}, 9 = {cat_report.status.get(9)!r}",
+    )
+
+    manifests = {}
+    for name in ("module1", "module2"):
+        report = vb.validate(BASELINES[name], "bundle")
+        record(
+            report.exit_code() == 0 and not report.warnings,
+            f"{name} validates clean as a bundle, with no warnings",
+            "; ".join(str(f) for f in [*report.findings, *report.warnings]),
+        )
+        ran = {n: report.status.get(n, ("missing", ""))[0] for n in (35, 37, 39)}
+        record(
+            all(s == vb.RAN for s in ran.values()),
+            f"{name}: checks 35 (levels), 37 (teaches) and 39 (placement) RAN",
+            f"states = {ran}",
+        )
+        manifests[name] = yamlite.load_yaml((BASELINES[name] / "tutorial.yaml").read_text(), "tutorial.yaml")
+    report = vb.validate(BASELINES["module1"], "bundle")
+    record(
+        report.status.get(38, ("", ""))[0] == vb.RAN
+        and report.status.get(36, ("", ""))[0] == vb.NOT_APPLICABLE,
+        "module1: check 38 (material) RAN and check 36 (starts_from) is n/a",
+        f"38 = {report.status.get(38)!r}, 36 = {report.status.get(36)!r}",
+    )
+    report = vb.validate(BASELINES["module2"], "bundle")
+    record(
+        report.status.get(36, ("", ""))[0] == vb.RAN,
+        "module2: check 36 (starts_from) RAN",
+        f"36 = {report.status.get(36)!r}",
+    )
+
+    # The shape of the programme, read from the files.
+    doc = yamlite.load_yaml(catalogue.read_text(), "catalog.yaml")
+    covered: set[str] = set()
+    for entry in doc["tutorials"]:
+        covered |= set(entry["covers"])
+    goal_objectives = {o for g in doc["goals"].values() for o in g["objectives"]}
+    record(
+        goal_objectives == covered
+        == set(manifests["module1"]["covers"]) | set(manifests["module2"]["covers"]),
+        "the goals list every objective of both modules, and nothing else",
+        f"goals = {sorted(goal_objectives)}, covers = {sorted(covered)}",
+    )
+    starts = {e["id"]: "start_from" in e for e in doc["tutorials"]}
+    record(
+        starts == {"stockroom-basics": False, "stockroom-forecasting": True}
+        and manifests["module2"].get("starts_from") == "ref"
+        and manifests["module1"].get("levels") is True
+        and manifests["module2"].get("levels") is True,
+        "module 2's entry carries start_from, module 1's does not; both are levelled",
+        f"entries with start_from = {starts}",
+    )
+    previous = [r["bundle"] for r in manifests["module2"]["recommended_previous_bundles"]]
+    record(
+        previous == [manifests["module1"]["id"]],
+        "module 2 names module 1 in recommended_previous_bundles",
+        f"previous = {previous}",
+    )
+
+    def frontmatter(path: Path) -> dict:
+        text, _ = vb.split_frontmatter(path.read_text())
+        return yamlite.load_yaml(text or "", path.name)
+
+    def placement_lesson(name: str) -> dict:
+        found = []
+        for rel in manifests[name]["lessons"]:
+            front = frontmatter(BASELINES[name] / rel)
+            if front.get("placement") is True:
+                found.append(front)
+        assert len(found) == 1, f"{name}: {len(found)} placement lessons"
+        return found[0]
+
+    record(
+        set(placement_lesson("module1")["assesses"]) == set(manifests["module1"]["covers"]),
+        "module 1's placement lesson assesses every objective it covers",
+        repr(placement_lesson("module1")["assesses"]),
+    )
+    record(
+        set(placement_lesson("module2")["assesses"]) == set(manifests["module2"]["covers"])
+        and not set(placement_lesson("module2")["assesses"])
+        & set(manifests["module1"]["covers"]),
+        "module 2's placement lesson assesses only objectives new in module 2",
+        repr(placement_lesson("module2")["assesses"]),
+    )
+    every = True
+    for name in ("module1", "module2"):
+        for rel in manifests[name]["lessons"]:
+            every = every and bool(frontmatter(BASELINES[name] / rel).get("teaches"))
+    record(every, "every lesson of both modules declares teaches", "")
+    front = frontmatter(BASELINES["module1"] / "lessons" / "02-counting" / "LESSON.md")
+    record(
+        {k: set(v) for k, v in front["material"].items()}
+        == {"stock-counting": {"A", "C"}},
+        "module 1's folder lesson has material for A and C but not B",
+        repr(front["material"]),
+    )
+
+    instance = INSTANCE_BASELINES["module2-instance"]
+    report = vb.validate(instance, "instance")
+    record(
+        report.exit_code() == 0 and not report.warnings,
+        "the module 2 instance validates clean, with no warnings",
+        "; ".join(str(f) for f in [*report.findings, *report.warnings]),
+    )
+    record(
+        report.status.get(40, ("", ""))[0] == vb.RAN
+        and report.status.get(41, ("", ""))[0] == vb.RAN,
+        "the instance's Levels and Modules ledgers (checks 40, 41) both RAN",
+        f"40 = {report.status.get(40)!r}, 41 = {report.status.get(41)!r}",
+    )
+    state = (instance / "STATE.md").read_text()
+    record(
+        "`stock-counting`" in state
+        and "stock-counting" in manifests["module1"]["covers"]
+        and "`stockroom-basics`" in state,
+        "the Levels row is for a module 1 objective and the Modules row for module 1",
+        "",
     )
 
 
@@ -9128,7 +9917,11 @@ def main() -> int:
     test_assessment_checks_status()
     test_learning_record_check_status()
     test_report_check_status()
+    test_levels_check_status()
+    test_lesson_levels_check_status()
+    test_ledger_checks_status()
     test_the_total_is_reproducible_from_this_commit()
+    test_levelled_programme_is_clean_end_to_end()
     test_check_coverage()
 
     if _notes:

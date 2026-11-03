@@ -1,0 +1,57 @@
+# A programme: one catalogue, two module bundles, and a goal over both.
+#
+#   module-1   Stockroom Basics. Levelled; has a placement lesson over every
+#              objective it covers.
+#   module-2   Stockroom Forecasting. Levelled; starts_from ref, so its entry
+#              carries start_from; names module 1 as a previous bundle; its
+#              placement lesson assesses only what is new in it.
+#
+# The goal lists every objective of both modules. A goal LISTS its objectives
+# here; nothing is added to a covers concept.
+
+catalog_version: 1
+goals:
+  run-a-stockroom:
+    title: Run a small stockroom
+    summary: Count it, reorder it, and forecast what it will need.
+    objectives:
+      - stock-counting
+      - shelf-labelling
+      - reorder-points
+      - demand-forecasting
+      - supplier-lead-times
+tutorials:
+  - id: stockroom-basics
+    title: Stockroom Basics
+    description: Count what is on the shelf, label it, and decide when to reorder.
+    subjects: [inventory, spreadsheets]
+    level: beginner
+    workspace_kind: new-repository
+    covers:
+      stock-counting:
+        summary: Count a shelf in a way another person can repeat.
+      shelf-labelling:
+        summary: Label shelves so a count names where it was taken.
+      reorder-points:
+        summary: Pick the stock level at which an order is placed.
+    source:
+      type: local
+      path: module-1
+
+  - id: stockroom-forecasting
+    title: Stockroom Forecasting
+    description: Forecast demand from existing counts and turn lead times into dates.
+    subjects: [inventory, forecasting]
+    level: intermediate
+    workspace_kind: existing-or-new-repository
+    covers:
+      demand-forecasting:
+        summary: Estimate next period's demand and state the likely error.
+      supplier-lead-times:
+        summary: Measure how long an order takes and order early enough.
+    start_from:
+      repo: https://github.com/example/stockroom-sheet.git
+      ref: main
+    source:
+      type: local
+      path: module-2

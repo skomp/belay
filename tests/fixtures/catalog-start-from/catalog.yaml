@@ -1,0 +1,53 @@
+# Three entries, one for each way an entry can speak about `start_from`, and
+# a top-level `goals` mapping over their concepts. Bundle directories are
+# deliberately absent, as in catalog-optional-lessons: discovery loads
+# metadata only.
+#
+#   with-start       a valid start_from; resolve --json carries the mapping
+#   broken-start     start_from has no `ref`; resolve --json carries null
+#                    and a metadata note, and the course is still offered
+#   without-start    no start_from; resolve --json carries null, no note
+
+catalog_version: 1
+goals:
+  read-a-log:
+    title: Read a retained log
+    objectives: [log-model]
+tutorials:
+  - id: with-start
+    title: Starts From A Repository
+    description: A course that begins from a given repository.
+    subjects: [testing]
+    level: beginner
+    workspace_kind: existing-repository
+    covers:
+      log-model:
+        summary: How a retained log is read.
+    start_from:
+      repo: https://github.com/example/starter.git
+      ref: main
+    source:
+      type: local
+      path: with-start
+
+  - id: broken-start
+    title: Starts From Nothing Usable
+    description: A course whose start_from is missing its ref.
+    subjects: [testing]
+    level: beginner
+    workspace_kind: existing-repository
+    start_from:
+      repo: https://github.com/example/starter.git
+    source:
+      type: local
+      path: broken-start
+
+  - id: without-start
+    title: Starts From Scratch
+    description: A course with no start_from.
+    subjects: [testing]
+    level: beginner
+    workspace_kind: new-repository
+    source:
+      type: local
+      path: without-start

@@ -1,7 +1,7 @@
 # Knowledge assessments — Design
 
 **Date:** 2026-09-19
-**Last amended:** 2026-10-16
+**Last amended:** 2026-11-03
 **Status:** implemented — see §10 for the decisions the implementation added
 **Issue:** belay#33
 **Related:** belay#34, the learning-evidence record, designed and built separately — see §9.
@@ -377,7 +377,7 @@ lesson still appears under `## Generated lessons` with its `reason:`.
 ## 10. Implementation notes
 
 Implemented on 2026-10-16 (belay#33). The worked examples of §7 live in
-`references/runner-protocol.md` §15.10, where the tutor reads them, and the authored quiz
+`references/runner-protocol.md` §15.12, where the tutor reads them, and the authored quiz
 also in `references/bundle-format.md` §6, **Writing an assessment**, where an author does.
 The record is `references/state-lifecycle.md` §11.
 

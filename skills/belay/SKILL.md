@@ -112,10 +112,10 @@ a way to see everything. Section 9 of that file carries the procedure.
 The rule that matters most: read catalogue metadata only. Do not open anything under a
 candidate's bundle path until the learner has chosen.
 
-After the learner chooses, load `references/state-lifecycle.md`, then run
-`belay-catalogs materialize <id>` from the workspace root: it opens the bundle, copies,
-converts `STATE.template.md` and stamps. Only the runner's commands read a bundle; never
-name its directory in a command.
+After the learner chooses, load `references/state-lifecycle.md`, check its section 3
+preconditions, then run `belay-catalogs materialize <id>` from the workspace root: it opens
+the bundle, copies, converts `STATE.template.md` and stamps. Only the runner's commands read
+a bundle; never name its directory in a command.
 
 ## Step 3 — teach
 
@@ -149,11 +149,11 @@ A tutor holds one lesson, not a course.
 | this file | `COURSE.md` |
 | the instance `tutorial.yaml` | `DESIGN.md` in full — only the declared anchors |
 | `STATE.md` | any lesson other than `active_lesson` |
-| the one lesson body | any completed lesson |
-| learner files the task concerns | lesson-folder material the lesson body does not name |
+| the one lesson body, and under `levels: true` its `material` file per objective at the learner's level | any completed lesson |
+| learner files the task concerns | other lesson-folder material the lesson body does not name |
 
 `COURSE.md` is for a learner choosing or re-orienting, not for teaching. Open it only
-when the learner asks what the course covers. A lesson folder's material is loaded only
+when the learner asks what the course covers. Other lesson-folder material is loaded only
 when the lesson body names it and says when.
 
 If you find yourself reading a second lesson to answer a question, stop. Answer from the
@@ -191,9 +191,7 @@ Never collapse these four into pass/fail:
 - **known accepted warning** — it matches an entry in `STATE.md`'s `accepted_warnings`
   and that entry has not expired; note it and move on.
 
-An accepted warning has an `until_lesson` expiry. Once the active lesson reaches it, the
-acceptance is void and the warning is a real finding again. `references/runner-protocol.md`
-has the matching procedure.
+An acceptance expires at its `until_lesson` (`references/runner-protocol.md` section 4).
 
 ## Generated lessons
 

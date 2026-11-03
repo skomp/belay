@@ -183,6 +183,8 @@ advance_on: validated-evidence-only
 | `validators` | MUST (may be `{}`) | Named validators lessons may reference. |
 | `setup_validators` | MAY | Checks the runner performs itself, unprompted, rather than assigning them: a list of `name` + `describe` entries naming validators from `validators`. See **Setup validators** below. |
 | `report` | MAY | Where a learner's defect report goes: a `url` that starts `https://` or `mailto:`, and an optional `prefill` of `github`, `gitlab` or `none`. See **Defect reports** below. |
+| `levels` | MAY | `true` turns on per-objective levels: how closely the tutor guides a learner on each learning objective, and which `material` it loads. Default `false`; absent, the course runs exactly as it would without this key. Any value but `true` or `false` is check 35's finding. See **Levels and modules** below. |
+| `starts_from` | MAY | `ref`, the only value: the course's starting code is the code at a Git ref that the catalogue entry's `start_from` names, not anything in the bundle or the learner's workspace. Any other value is check 36's finding. See **Levels and modules** below. |
 | `one_task_at_a_time` | SHOULD | Default `true`. |
 | `solution_code` | SHOULD | `on-request-only` or `freely`. |
 | `advance_on` | SHOULD | `validated-evidence-only` or `learner-assertion`. |
@@ -1169,6 +1171,66 @@ that a referenced id is *well formed* and stops there — and an unresolved id i
 tolerated. It makes no judgement about whether the course really teaches what `covers` claims,
 whether a level is honestly chosen, or whether a summary is specific enough. Those are yours.
 
+### Levels and modules — `levels` and `starts_from`
+
+> A bundle **MAY** turn on per-objective levels (`levels: true`), and **MAY** say that its
+> starting code is chosen after it was written (`starts_from: ref`).
+
+Both exist for a **programme**: a cohort takes one curriculum together, built and delivered
+one **module** at a time, and arrives with uneven prior knowledge. The format already has
+every part but two, and the mapping is one to one:
+
+| Term | Meaning | In the format |
+|---|---|---|
+| **programme** | the whole curriculum a cohort takes | a catalogue (`catalogue-format.md` section 5.3) |
+| **module** | one stretch of the programme, ending in a checkpoint | a bundle — this document |
+| **learning goal** | a broad content area, taught across many modules | a key in the catalogue's `goals`, never in a bundle |
+| **learning objective** | one thing a learner can do or explain; the unit that is assessed | a `covers` concept |
+| **level** | how closely the tutor guides a learner on one learning objective | a row in the instance's `## Levels` |
+
+Prose says *learning objective*; YAML says `covers` concept. They are the same thing, and
+there is no alias key for either.
+
+**`levels: true`** gives each learner a level per learning objective — **A** (guided), **B**
+(options) or **C** (self-directed) — recorded in their `STATE.md` (`state-lifecycle.md`
+section 13), set by assessments, and carried from one module to the next. What a level
+changes is the runner's, uniformly across courses: how closely the tutor guides a task
+(`runner-protocol.md` section 18.2), and which of a lesson's `material` files it loads
+(section 18.4). Nothing about a level is yours to tune, and three consequences follow:
+
+- **A level gates nothing.** Lesson order, validators, `advance_on` and completion
+  conditions are the same at every level. A learner at A takes the same lessons and reaches
+  the same end as a learner at C; a level changes how they are guided to the evidence, never
+  what evidence they must produce.
+- **The rule that turns an assessment result into a level is the runner's**
+  (`runner-protocol.md` section 15.11). There is no per-course threshold, because a cohort
+  is compared across learners and a threshold per course would make two modules' levels
+  mean different things.
+- **Objective ids are shared across a programme's modules.** That is what lets a level set
+  in module 1 guide module 3. **Concept identifiers** above already makes a `covers` id a
+  stable, cross-bundle name; in a programme, spell one objective one way in every module.
+
+The switch is explicit so that a course cannot change behaviour by accident, and so you can
+write `material` before turning levels on. Without it there is no ledger, no level-dependent
+guidance and no material selection. Three lesson fields carry the rest — `teaches`,
+`material` and `placement` (section 6). Nothing in a bundle names a learning goal. The
+catalogue lists each goal's objectives (`catalogue-format.md` section 5.3), so every bundle
+stays readable by every released runner and validator.
+
+**`starts_from: ref`** says this module's starting code is in neither the bundle nor the
+learner's workspace: it is the code at a Git ref named later, typically the best solution
+of the previous module, which is not known until that module's review. The **catalogue
+entry's `start_from`** names the repository and the ref (`catalogue-format.md` section 5.3),
+and the trainer sets it once the review has chosen. So who writes a module and who chooses
+where it starts stay separate, and the catalogue is the one place the second is said.
+
+Write the module's lessons against the code that start will hold, and do not ship that
+code: it does not exist yet when you write. How a learner starts such a module — a new
+branch from the ref, the old progress left behind, the levels carried forward — is the
+runner's, in `runner-protocol.md` section 18.6 and `state-lifecycle.md` section 13.4.
+**A `starts_from: ref` module needs a runner that knows the key** (section 13). A bundle
+without it starts exactly as any other.
+
 ---
 
 ## 3. `COURSE.md`
@@ -1418,7 +1480,7 @@ file otherwise. A folder holding only `LESSON.md` is pointless; make it a file.
 wholesale, because the entire point of the format is that a tutor holds one lesson in
 context, not a course.
 
-So a folder lesson MUST name its material and say when to use it, with the one exception
+So a folder lesson MUST name its material and say when to use it, with the two exceptions
 stated below:
 
 ```markdown
@@ -1429,12 +1491,17 @@ If the learner asks how minimisation differs from a trie, show `assets/dafsa.svg
 Material that `LESSON.md` never mentions is unreachable. That is not a subtle failure:
 the tutor has no way to know the file exists.
 
-**The exception is material the bundle supplies.** A file a `supplies` entry covers —
+**The first exception is material the bundle supplies.** A file a `supplies` entry covers —
 named directly by a `from`, or lying under a directory `from` — is declared, placed and
 described to the learner without the lesson body saying anything, so the naming rule does
 not apply to it and the validator does not ask for it. Section 2, **Supplied files**,
-says why: a declaration states strictly more than a prose mention does. Every other file
-in the folder still MUST be named.
+says why: a declaration states strictly more than a prose mention does.
+
+**The second is material the lesson declares under `material`** — a file for one learning
+objective at one level, which the tutor loads by the learner's level rather than because
+the body names it (**Writing levelled material** below). The declaration says what the file
+is for and when to load it, which is strictly more than a prose mention, for the reason
+`supplies` gives. Every other file in the folder still MUST be named.
 
 ### Naming and ids
 
@@ -1517,6 +1584,9 @@ An assessment only, and optional there: questions to ask verbatim.
 | `setup_validators` | MAY | Checks the runner performs itself when this lesson opens, before its first task, in the same two-field form the manifest key uses. See section 2, **Setup validators**. |
 | `assesses` | MAY | The `covers` concept ids this lesson assesses. Declaring it is what makes the lesson an **assessment**, and nothing else does. A non-empty list; every id MUST be a key in `covers`. See **Writing an assessment** below. |
 | `supplies` | MAY | Files this lesson hands the learner's workspace when it opens, in the same three-field form the manifest key uses. A lesson-scope `from` MUST resolve inside `lessons/` — anywhere inside it, though this lesson's own folder is the recommended home. Declaring `supplies` does not oblige a single-file lesson to become a foldered one. See section 2, **Supplied files**. |
+| `teaches` | MAY | The learning objectives this lesson teaches, as `covers` concept ids. A non-empty list; every id MUST be a key in `covers` (check 37). Under `levels: true` it is what makes the learner's levels apply to this lesson; a lesson without it is guided as though levels were off. Unlike `assesses`, it changes nothing about how the lesson is judged. |
+| `material` | MAY | Folder lessons only. For each objective in this lesson's `teaches`, a mapping of level — `A`, `B` or `C` — to a file in the lesson's own folder (check 38). See **Writing levelled material** below. |
+| `placement` | MAY | `true` on the one assessment that places a learner on the levels. It needs `assesses`, a bundle has at most one, and it is never an optional lesson (check 39). `false` says nothing. See **Writing a placement lesson** below. |
 
 `design_refs` is how a lesson stays cheap. A lesson about splitting a file into a
 library declares only the anchors it truly needs. It does not pull in storage,
@@ -1630,6 +1700,84 @@ A few questions, one at a time, about the log you have been building. No code.
 
 No validator, no workspace file: the evidence is the learner's answers, judged against
 the three `covers` summaries.
+
+### Writing levelled material
+
+Under `levels: true` (section 2, **Levels and modules**), a lesson says which learning
+objectives it teaches, and a **folder** lesson may add material per objective and level:
+
+```yaml
+---
+id: 02-counting
+title: Counting a shelf
+teaches: [stock-counting]
+material:
+  stock-counting:
+    A: worked-count.md
+    C: count-checklist.md
+---
+```
+
+- **The body is for every level.** Write `LESSON.md` as you would without levels; it is
+  what every learner is taught from. A `material` file adds to it for one objective at one
+  level, and never replaces it.
+- **The tutor loads at most one file per objective in `teaches`**, the one for the learner's
+  level, so the context a lesson costs is the body plus one file per taught objective.
+  Which file it loads when a level has none is `runner-protocol.md` section 18.4, and it is
+  always a file written for more guidance, never less. So write `A` first, and add `B` and
+  `C` when you have them; a missing level is not a defect and nothing reports it.
+- **Write each file for its level** (`runner-protocol.md` section 18.2 is what the tutor does
+  at each): at `A`, a worked example in small steps, reasons first; at `B`, the two or three
+  approaches worth choosing between; at `C`, the goal and its acceptance criteria, and
+  pointers rather than steps.
+- **A file never changes what counts as done.** Completion conditions, validators and
+  `advance_on` are the lesson's and are the same at every level; material that implies a
+  different bar for one level is a defect in the lesson.
+- **Every key under `material` is an objective in this lesson's `teaches`, every level key
+  is `A`, `B` or `C`, and every path is relative to the lesson's own folder and names a file
+  in it** — no `..`, no absolute path, no symbolic link on the way. Check 38 reports each
+  of these, and reports `material` on a single-file lesson, which has no folder to hold it.
+
+A declared file needs no mention in the body (section 6, **Loading material**). Mentioning
+it anyway does no harm, and a runner that predates `material` reaches it only that way
+(section 13).
+
+### Writing a placement lesson
+
+A **placement lesson** is the entry assessment of a levelled module: an ordinary assessment
+(**Writing an assessment** above) whose frontmatter also says `placement: true`, and whose
+result sets the learner's level on each objective it places.
+
+```yaml
+---
+id: 01-placement
+title: Where should you start?
+assesses: [stock-counting, shelf-labelling, reorder-points]
+placement: true
+---
+```
+
+- **List it in `lessons`**, wherever you want it — typically right after a setup lesson.
+  Never in `optional_lessons`: placement decides how every later lesson is guided, so it
+  cannot be a lesson the learner is merely offered. A bundle has at most one. Check 39
+  reports each of these, and a `placement: true` without `assesses`.
+- **`assesses` lists every objective this module teaches.** Any module of a programme may
+  have one, and the tutor asks only about the objectives that have no level yet
+  (`runner-protocol.md` section 15.10): module 1 places everything it lists, and a later
+  module only what is new to this learner. You do not need to know what earlier modules
+  placed, and you should not try.
+- **Write one broad question per objective.** A placement lesson is a survey, not an
+  examination, and `runner-protocol.md` section 15.10 is how far the tutor follows an answer
+  up. Put the questions under `## Questions` if you want them asked verbatim.
+- **Write no remediation into it.** The level it assigns is the response to a weak answer
+  (`runner-protocol.md` section 15.10, where the tutor's three differences from an ordinary
+  assessment are stated). Do not promise the learner a second attempt, and do not point
+  them at a practice path.
+- **Its *Completion conditions* are that each objective it places was asked**, not that
+  each was demonstrated: a placement lesson every learner left at A has done its job.
+- **Its Theory says what the result is for** — that the answers set how closely the tutor
+  guides each objective, and decide nothing else — and, like any assessment's, never the
+  answers.
 
 ### A lesson is not a script
 
@@ -1924,6 +2072,16 @@ Confirm each of these by looking, not by remembering:
       an alias naming it the way `COURSE.md` does
 - [ ] every `assesses` id is a key in `covers`, and an assessment's Theory does not state
       the answers its questions ask for
+- [ ] `levels`, if declared, is `true` or `false`, and `starts_from`, if declared, is `ref`
+      — and the catalogue that carries a `starts_from: ref` module gives its entry a
+      `start_from` once the starting ref is chosen (`catalogue-format.md` section 5.3)
+- [ ] every `teaches` id is a key in `covers`, and in a programme every learning objective
+      is spelled the same way in every module that names it
+- [ ] every `material` entry sits on a folder lesson, names an objective that lesson
+      `teaches`, uses only the levels `A`, `B` and `C`, and points at a file inside that
+      lesson's own folder
+- [ ] at most one lesson declares `placement: true`; it declares `assesses`, is listed in
+      `lessons` rather than `optional_lessons`, and promises no practice or retake
 - [ ] every recommendation names a `bundle` id spelled as that bundle spells its own `id`,
       and a `because` written for the learner
 - [ ] no recommendation names this bundle, and no bundle id appears twice in one list
@@ -2167,9 +2325,10 @@ genuinely cannot be finished with the failure in place.
 
 `bundle_format` stays `1`. `optional_lessons`, `failure_modes`, `supplies`, `covers`,
 `assumes`, `recommended_follow_ups`, `recommended_previous_bundles`,
-`teaching_method`, `setup_validators`, `version`, `report` and the lesson field `assesses` are all additive: a bundle written before this
-section existed is valid exactly as it stands, nothing in this document changes what it means, and no edit
-is implied. Run the validator over it and see.
+`teaching_method`, `setup_validators`, `version`, `report`, `levels`, `starts_from` and the
+lesson fields `assesses`, `teaches`, `material` and `placement` are all additive: a bundle
+written before this section existed is valid exactly as it stands, nothing in this document
+changes what it means, and no edit is implied. Run the validator over it and see.
 
 The other direction is the one to understand before you ship a course that uses the
 feature. A runner that predates it reads `tutorial.yaml`, does not recognise the new
@@ -2215,6 +2374,23 @@ keys, and ignores them. The effect on a learner is precise, and worth stating pl
   learner about a defect it finds, as every runner has, and offers nothing after it; the
   learner can still tell you by whatever route they would have used. An older validator
   reports `report` as an unrecognised top-level field rather than rejecting the bundle;
+- **levels are ignored, and every learner is taught from the body.** An older runner reads
+  no `levels`, `teaches` or `material`: it guides everyone as it guides any course, keeps no
+  `## Levels`, and loads a `material` file only where the lesson body happens to name it.
+  The placement lesson runs as an ordinary assessment, so a weak answer is offered practice
+  and a retake, and nothing is placed. The learner still takes every lesson and reaches the
+  end, because no level gates anything. An older validator warns that `levels` is an
+  unrecognised top-level field — and, because it sits one letter from `level`, calls it a
+  likely misspelling of it. It is not; leave it. Lesson frontmatter fields are read by name,
+  so `teaches`, `material` and `placement` are not seen at all;
+- **a `starts_from: ref` module starts without the code it starts from.** This is the one
+  key here whose loss is a real degradation rather than a missing convenience, and it is
+  worth saying plainly: an older runner ignores `starts_from`, never reads the catalogue
+  entry's `start_from`, and materializes the module in whatever workspace it is given, with
+  none of the code its lessons were written against and no levels carried forward. **A
+  programme that uses `starts_from: ref` needs a runner that knows it.** An older validator
+  warns about the key as an unrecognised top-level field and accepts the bundle, so nothing
+  at authoring time will tell you which runner your learners have;
 - **nothing is taught wrongly.** The main path is untouched by `optional_lessons`, because
   an optional lesson is never in it. An unplaced supply is not the same case — a
   manifest-scope entry IS on the main path — but it costs the learner the toil the key
