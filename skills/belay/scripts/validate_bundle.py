@@ -5360,7 +5360,8 @@ def check_report(manifest: Any, report: Report) -> None:
     report.ran(34, "declared, malformed" if problems else "declared")
 
 
-# Whether a course is split into levels, and where a level starts (checks 35, 36).
+# Whether a course uses per-objective levels, and whether its starting code is
+# a Git ref the catalogue names (checks 35, 36).
 LEVELS_KEY = "levels"
 STARTS_FROM_KEY = "starts_from"
 STARTS_FROM_VALUE = "ref"
@@ -5369,7 +5370,9 @@ STARTS_FROM_VALUE = "ref"
 def check_levels_key(manifest: Any, report: Report) -> None:
     """Check 35 - both modes.
 
-    `levels` is a MAY: a boolean saying the course is organised into levels.
+    `levels` is a MAY: a boolean turning on per-objective levels - how
+    closely the tutor guides a learner on each `covers` concept, and which
+    `material` file it loads (bundle-format.md section 2, Levels and modules).
     A bundle that omits it is complete, and nothing warns. So this check
     speaks only about a bundle that declares the key with something that is
     not a boolean, which check 28 cannot see: it knows the key's NAME and
@@ -5399,8 +5402,9 @@ def check_levels_key(manifest: Any, report: Report) -> None:
 def check_starts_from(manifest: Any, report: Report) -> None:
     """Check 36 - both modes.
 
-    `starts_from` is a MAY: where a level's starting point comes from. The
-    only value the format defines is the string `ref`; anything else, a
+    `starts_from` is a MAY: the course's starting code is the code at a Git
+    ref the catalogue entry's `start_from` names. The only value the format
+    defines is the string `ref`; anything else, a
     mapping or a list included, is a finding. Absent means n/a and nothing
     warns.
 
@@ -5849,6 +5853,13 @@ CATALOG_LIMITATIONS = """What a pass does and does not mean
   missing is still a check 2 finding, so a misspelled required key produces
   both: the finding that the key is gone, and the warning naming the
   spelling that ate it.
+
+  Check 8 compares a goal's objectives with the `covers` the ENTRIES in
+  this file declare, not with the bundles' own tutorial.yaml, so an
+  objective a bundle teaches and its entry leaves out is reported as
+  taught by nothing. Check 9 proves that `start_from` names a Git URL and a
+  ref. It never contacts the repository: a ref that does not exist, or code
+  that is not what the module was written for, passes.
 
   Nothing here checks a catalogue entry against the bundle's own
   tutorial.yaml. The two are allowed to differ - the bundle is authoritative

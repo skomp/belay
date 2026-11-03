@@ -2,7 +2,10 @@
 
 **Date:** 2026-11-03
 **Last amended:** 2026-11-03
-**Status:** designed, not implemented
+**Status:** implemented — see §7 for the decisions the implementation added;
+`bundle-format.md` §2, §6, §10, §13, `catalogue-format.md` §5.3, `runner-protocol.md`
+§15.10-15.11 and §18, `state-lifecycle.md` §13, validator checks 35-41 and catalogue checks
+8-9, `tests/fixtures/levelled-programme/`
 **Related:** the assessments design (2026-09-19), whose assessment lessons set levels here;
 PR: belay#71, whose `remote` progress choice the carry-forward relies on
 
@@ -417,3 +420,35 @@ harness is the check for them, and is filed there as an issue rather than built 
 - **No tamper protection.** Section 1.2 says where a trustworthy result comes from instead.
 - **Nothing in section 1.2** — story scaffolding, use-case guidance, cohort review, the module
   gate, the final project and the certificate are designed separately.
+
+---
+
+## 7. Implementation notes
+
+Implemented on 2026-11-03. Writing the protocol forced six decisions this design left open;
+each is stated once, where the tutor reads it.
+
+1. **The runner cannot see `starts_from` before materializing.** Discovery and `resolve`
+   read the catalogue entry, never the bundle, and the learner's new branch has to exist
+   before `tutorial/` is created. So the procedure keys on the entry: `resolve --json`'s
+   `start_from` decides whether to propose a branch, and a module whose instance turns out
+   to declare `starts_from: ref` with no `start_from` stops before its first task, the
+   just-created `tutorial/` left for the learner to remove (`runner-protocol.md` §18.6). A
+   later `resolve` that also printed the bundle's `starts_from` — it is allowed to open the
+   bundle — would remove the second case.
+2. **Git argument hygiene is the protocol's.** The URL check accepts a dash-led ssh host or
+   scp user, so the tutor refuses a `repo` or `ref` beginning with `-`, puts `--` before
+   them in `git fetch`, and never runs the commands itself (§18.6).
+3. **A quiz the learner asked for sets no level.** It has no lesson path to record as a
+   source, which check 40 requires, and the learner already has a direct route: asking
+   for a different level (§15.11, §18.5).
+4. **An objective's outcome in an attempt** is *demonstrated* when any answer showed it,
+   otherwise its last classified answer's; an objective a stop left unasked is unchanged
+   (§15.11).
+5. **No `## Modules` row for an unfinished module.** Check 41 requires `complete` and a
+   date, so the carry-forward appends nothing for a previous module whose `status` is not
+   `complete`, and says so (`state-lifecycle.md` §13.4).
+6. **The `remote` requirement names PR: belay#71**, which introduces the choice, rather than
+   a section of `state-lifecycle.md`: this design was implemented on a branch without it.
+   Whatever the choice, the previous `STATE.md` reaches the next module only when it is
+   committed, and pushed when the learner changes machine.

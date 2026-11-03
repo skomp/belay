@@ -293,8 +293,9 @@ placement never overwrites a file that already exists.
 
 **What loads each turn** is the runner file, the manifest, your `STATE.md`, the one active
 lesson, the design sections that lesson cites by anchor, and the files in your workspace the
-current task actually concerns. Not `COURSE.md`, not a completed lesson, not the rest of the
-course. That budget is the reason the format exists.
+current task actually concerns — and, in a course with levels, one material file per
+learning objective that lesson teaches, chosen by your level. Not `COURSE.md`, not a
+completed lesson, not the rest of the course. That budget is the reason the format exists.
 
 The normative detail is in the reference documents, which the tutor loads only when it
 needs them:
@@ -304,8 +305,8 @@ needs them:
 | [`SKILL.md`](skills/belay/SKILL.md) | the control plane — orient, resume or discover, the teaching contract |
 | [`bundle-format.md`](skills/belay/references/bundle-format.md) | the normative bundle contract, for authors |
 | [`catalogue-format.md`](skills/belay/references/catalogue-format.md) | catalogues, precedence, failure handling, presenting a choice |
-| [`state-lifecycle.md`](skills/belay/references/state-lifecycle.md) | materialisation, what a completed task and lesson record |
-| [`runner-protocol.md`](skills/belay/references/runner-protocol.md) | the turn loop, validation outcomes, ownership, detours, offers |
+| [`state-lifecycle.md`](skills/belay/references/state-lifecycle.md) | materialisation, what a completed task and lesson record, levels and modules |
+| [`runner-protocol.md`](skills/belay/references/runner-protocol.md) | the turn loop, validation outcomes, ownership, detours, offers, assessments, levels |
 | [design specification](docs/superpowers/specs/2026-09-11-tutorial-runner-design.md) | the architecture, the measured host facts, and the designs that were rejected |
 
 ### The commands
@@ -359,7 +360,7 @@ bin/belay-validate --catalog path/to/catalog.yaml
 
 Run them from a checkout of this repository ([The commands](#the-commands)).
 
-34 bundle checks and 7 catalogue checks. Your run and the runner's run are the same checks
+41 bundle checks and 9 catalogue checks. Your run and the runner's run are the same checks
 over the same files, which is the point: a bundle that passes here starts cleanly there. It
 checks structure — that references resolve, that no progress leaked into the course, that
 every lesson is reachable. It says nothing about whether the course is any good.
@@ -395,7 +396,11 @@ Assumed-concept review, and follow-up recommendations at the end of a course. Up
 course you have started to its newer version, when you ask for it: a plan you review, which
 keeps your progress, your `DESIGN.md` decisions and your generated lessons. A report about a
 defect the tutor finds in a course, drafted for you to read and send to its author
-yourself; the tutor never sends it.
+yourself; the tutor never sends it. Per-objective levels for a cohort programme: an entry
+assessment and every later one set how closely the tutor guides you on each learning
+objective, and which material it hands you, without changing what counts as done; a
+programme's modules are separate courses, and the next one can start from a branch chosen
+after it was written, carrying your levels forward from your own previous branch.
 
 **Known gaps.**
 
@@ -404,7 +409,10 @@ yourself; the tutor never sends it.
   ([belay#22](https://github.com/skomp/belay/issues/22)). The structural checks on
   `optional_lessons` and `failure_modes` are tested; the conversational behaviour around
   them is not. The same holds for assessments: `assesses` and the `## Assessments` record
-  are validated, and the question-and-answer loop is specified but not exercised.
+  are validated, and the question-and-answer loop is specified but not exercised. So with
+  levels: the ledgers and the new keys are validated, and the guidance by level, the
+  placement lesson and the carry-forward between modules are protocol text no suite here
+  runs.
 - **An update cannot tell who changed a file.** The instance keeps no copy of the course as
   it was when you started, so a lesson you worked in, or a `DESIGN.md`, that differs from
   the newer course is shown to you as a difference, and you decide what to keep.
@@ -456,8 +464,8 @@ tutor runs the scripts by their path instead of the `belay-*` commands
 No pytest; five plain scripts, run from a checkout of this repository.
 
 ```
-python3 tests/test_validate_bundle.py     # 873 assertions
-python3 tests/test_catalogs.py            # 482 assertions
+python3 tests/test_validate_bundle.py     # 1015 assertions
+python3 tests/test_catalogs.py            # 529 assertions
 python3 tests/test_plan_update.py         # 129 assertions
 python3 tests/test_evidence.py            # 89 assertions
 python3 tests/test_bin_wrappers.py        # 57 assertions
@@ -480,7 +488,7 @@ BELAY_SWEEP_SIBLING_REPOS=1 python3 tests/test_validate_bundle.py
 Those are separate checkouts at their own revisions, so what they contribute is
 reported on its own line and never added to the total above — `and 24 more against
 sibling repositories outside this commit` on the machine this was measured on. The
-headline stays 873 either way. Run it before publishing a bundle; a plain `python3
+headline stays 1015 either way. Run it before publishing a bundle; a plain `python3
 tests/test_validate_bundle.py` is the check that a commit of *this* repository is
 sound.
 

@@ -5,8 +5,9 @@ first time in a session you are about to change `STATE.md`, when a task complete
 lesson completes, when an offer of an optional lesson is accepted or deferred, when the
 learner acknowledges the assumed-concept review, when you need to advance
 `active_lesson`, when an assessment ends or is interrupted (section 11), when the
-learner asks to update the course to a newer version (section 3.2), or when the learning
-record is missing, broken or asked about (section 12).
+learner asks to update the course to a newer version (section 3.2), when the learning
+record is missing, broken or asked about (section 12), or when a level changes or a module
+that starts from a ref is materialized (section 13).
 
 `STATE.md` is the only place a learner's progress is recorded. Nothing in the bundle
 records progress; nothing outside `STATE.md` in the instance records it either. If you
@@ -89,10 +90,11 @@ work.
 
 ### Body sections
 
-All seven headings are always present, even when a section says "None". Three further
+All seven headings are always present, even when a section says "None". Five further
 sections appear only once the instance needs them: *Generated lessons*, once a lesson has
 been written into this instance (section 8.5), *Optional lessons*, once one has been
-offered (section 9.1), and *Assessments*, once one has been taken (section 11.1).
+offered (section 9.1), *Assessments*, once one has been taken (section 11.1), and *Levels*
+and *Modules*, once a level is set or carried forward (section 13).
 
 | Section | Holds | Does not hold |
 |---|---|---|
@@ -121,6 +123,11 @@ Preconditions:
 - the entry's `source` resolves to a readable bundle directory. `belay-catalogs materialize`
   resolves it itself, exactly as `belay-catalogs resolve` does, from what discovery left on
   disk, and refuses when it does not;
+- the chosen entry's `start_from` has been read, with `belay-catalogs resolve <id> --json`.
+  When it is a mapping, the module starts from a ref, and `runner-protocol.md` section 18.6
+  comes first: the learner's new branch, and the removal of the `tutorial/` that came with
+  it, are what make the last precondition below true. When it is `null`, that section's
+  step 1 says what to check once step 6 below has verified the instance;
 - the workspace root is known, and satisfies the bundle's `workspace_kind`;
 - there is no existing `tutorial/` in that workspace. If there is, stop — `tutorial/` is
   singular, and materializing over it destroys a learner's progress. When the existing
@@ -850,6 +857,8 @@ started lets the tutor assume it exists.
 - an *Assessments* row names a path that is not a lesson declaring `assesses`, holds a
   state other than the four of section 11.2, appears twice, or records something other
   than concept ids under "not demonstrated";
+- a *Levels* or *Modules* row that does not parse, a level other than `A`, `B` or `C`, or
+  one objective or one module recorded twice (section 13.5);
 - `tutorial_id` does not match the manifest's `id`;
 - `STATE.template.md` is present in the instance;
 - the manifest names a lesson file that does not exist.
@@ -1411,7 +1420,10 @@ Validator check 32 checks the shape of this section in an instance.
   demonstrated", which is where practice reads it.
 - **`stopped`** — the learner stopped before the end. **Never written as `passed`**, however
   much was demonstrated first.
-- **`skipped`** — the learner declined a main-path assessment without taking it.
+- **`skipped`** — the learner declined a main-path assessment without taking it; or a
+  placement lesson had nothing to place, because every objective it lists already has a
+  level (`runner-protocol.md` section 15.10). The clause says which, for example
+  `` `lessons/01-placement.md` — skipped — 2027-02-27; every objective already has a level ``.
 
 **`skipped` and `passed` are different states, and must never be written as each other.**
 A skipped assessment read as a passed one is a record claiming evidence nobody gave.
@@ -1608,3 +1620,134 @@ from `STATE.md`.
   derived from the date of the last event and `STATE.md`'s `status` and `active_lesson`.
   A course `in-progress` whose last event is long past was left at `active_lesson`. There
   is no heartbeat, and you do not write one.
+
+---
+
+## 13. Levels and modules
+
+A course whose manifest declares `levels: true` gives the learner a level — A, B or C — on
+each learning objective, and a programme carries those levels from one module to the next
+(`bundle-format.md` section 2, **Levels and modules**). What a level changes, and how an
+assessment sets one, is `runner-protocol.md` sections 15.11 and 18; this section is what
+`STATE.md` records. No second file is introduced: `STATE.md` stays the only place progress
+is recorded.
+
+### 13.1 `## Levels`
+
+```markdown
+## Levels
+
+- `context-engineering` — B — lessons/04-check.md 2027-03-02 (was A)
+- `agentic-patterns` — A — placement 2027-01-12
+- `git-basics` — C — learner 2027-01-12 (assessed B)
+```
+
+**One row per learning objective, updated in place**, in the shape *Assessments* and
+*Optional lessons* already use: `` - `<objective id>` — <level> — <source> <date> ``, and
+an optional parenthesis.
+
+- **The level** is `A`, `B` or `C`.
+- **The source** is what set it: `placement` for the placement lesson, the lesson path of
+  any other authored assessment, or `learner` when the learner asked for it
+  (`runner-protocol.md` section 18.5).
+- **The date** is the day it was set, `YYYY-MM-DD`.
+- **The parenthesis** says what the row replaced: `(was A)` when an assessment moved the
+  level, and `(assessed B)` when the learner chose a level other than the one an assessment
+  had assigned. A row written for the first time, from no row, carries none.
+
+> **An objective without a row is at level A.**
+
+No evidence of prior knowledge means the closest guidance, and recording the absence would
+say nothing. So a fresh instance has no *Levels* section, `STATE.template.md` never has one,
+and nobody writes a row for A merely to say nothing is known.
+
+A row for an objective this course's `covers` does not list is correct and is kept: it was set in
+an earlier module, and a later module may teach that objective again. Validator check 40
+checks the shape of this section in an instance, and never reports such a row.
+
+### 13.2 When a level row is written
+
+Only under `levels: true`, and at exactly three moments:
+
+1. **an authored assessment ends** — when its *Assessments* row is written (section 11),
+   one level row for each objective `runner-protocol.md` section 15.11 says to set. An
+   objective whose level is unchanged keeps its row exactly as it was;
+2. **the learner asks for a different level** — `runner-protocol.md` section 18.5;
+3. **the carry-forward** copies the section into a new module (13.4).
+
+Each one replaces the objective's row in place, never appends a second, and sets
+`updated`. A course without `levels: true` writes no row; a *Levels* section the
+carry-forward brought into one is kept, unread, for the module after it.
+
+No learning-record event is written for a level. The record's event types are a closed
+set (section 12.2), and the `answer` and `assessment` events already hold the evidence a
+level was set from.
+
+### 13.3 `## Modules`
+
+```markdown
+## Modules
+
+- `programme-m1` — complete 2027-02-26 — branch alice/m1; assessments: 6 passed,
+  1 partial; not demonstrated: rag-chunking ×1
+```
+
+**One row per finished module of the programme**, in the order they were finished:
+`` - `<module id>` — complete <date> — branch <branch> ``, then optionally `;` and a
+summary.
+
+- **The module id** is the previous instance's `tutorial_id`.
+- **The date** is the day that module was completed — its `STATE.md`'s `updated` once its
+  `status` was `complete`.
+- **The branch** is the learner's own branch of that module, the one the carry-forward
+  read.
+- **The summary** is a summary of that module's *Assessments*, never a copy of it: how many
+  rows ended in each state, and the objectives still not demonstrated. A section read every
+  turn does not become a transcript of the previous course.
+
+A row is **appended when the next module starts**, by the carry-forward (13.4), and never
+changed afterwards. Validator check 41 checks the shape of this section in an instance.
+
+### 13.4 The carry-forward
+
+It runs **once**, when a module that declares `starts_from: ref` is materialized — after
+`runner-protocol.md` section 18.6 has put the learner on the new branch and materialization
+(section 3) has created `STATE.md`, and before the first task:
+
+1. **Read the learner's own previous `STATE.md`, through Git.** The branch is the one they
+   named at section 18.6 step 3; read it with
+   `git show <their-previous-branch>:tutorial/STATE.md`, which changes nothing in their
+   repository. **Never read the winner's** — not from the winner's branch, and not from the
+   `tutorial/` that came with the winner's code, which section 18.6 removed unread.
+2. **Copy its `## Levels` into the new `STATE.md` unchanged** — every row, including rows
+   for objectives this module does not cover.
+3. **Copy its `## Modules`, and append one row** for the module just finished (13.3). When
+   that module's `status` is not `complete`, append nothing for it, and say so: the row
+   records a finished module, and an unfinished one has no completion date to give it.
+4. **If the previous branch or its `STATE.md` cannot be read**, say so — which one, and
+   why — then write an empty *Levels* and an empty *Modules*, each saying `None.`, and
+   continue: every objective is at A (13.1). **Never borrow another learner's record** to
+   fill the gap, the winner's included. A level is a statement about one person.
+
+Both sections are written in step 2 to 4 even when there is nothing to copy, so the new
+`STATE.md` shows that the carry-forward ran.
+
+**The carry-forward needs the previous `STATE.md` committed, and pushed** when the learner
+continues on another machine. So a `starts_from: ref` module, when the learner is asked
+where their progress is kept, asks for **`remote`**, and says why: the next module reads
+this `STATE.md` from this branch, through Git (the `remote` and `local` choice is PR:
+belay#71). A learner who keeps progress `local` gets step 4 on any other machine — an empty
+ledger, and every objective back at A.
+
+### 13.5 Inconsistencies to report rather than repair
+
+Report, and let the learner decide, as section 7 says for every structural defect:
+
+- a *Levels* row that does not parse, or carries a level other than `A`, `B` or `C`, a
+  source other than `placement`, `learner` or a lesson path, or a date that is not a date;
+- one objective with two *Levels* rows, or one module with two *Modules* rows;
+- a *Modules* row that does not parse.
+
+Do not guess which of two rows was meant, and do not repair a level from the learning
+record: it is evidence, never progress (section 12.1). A level that looks wrong but parses
+is not a defect; the learner may ask for a different one.

@@ -179,7 +179,8 @@ tutorials:
 | Field | Required | Meaning |
 |---|---|---|
 | `catalog_version` | MUST | Top level. `1` for this document. A version you do not recognise is an error, not a guess. |
-| `tutorials` | MUST | Top level. The list of entries. These two are the only top-level keys; every row below is a field of one entry. |
+| `tutorials` | MUST | Top level. The list of entries. |
+| `goals` | MAY | Top level. The programme's learning goals, each listing its learning objectives by `covers` id. Section 5.3. These three are the only top-level keys; every row below is a field of one entry. |
 | `id` | MUST | Stable identity, `[a-z0-9-]+`. Matches the bundle's `id`. |
 | `title` | MUST | Human-facing course name. |
 | `description` | MUST | One or two sentences. This is what a learner reads when choosing. |
@@ -195,6 +196,7 @@ tutorials:
 | `recommended_follow_ups` | MAY | Courses the author suggests **after** this one, each with a `because`. Author order is display order. |
 | `recommended_previous_bundles` | MAY | Courses the author suggests **before** this one, each with a `because`. This is how a course attaches itself to an earlier one. |
 | `report` | MAY | Where a learner's defect report about this course goes, when the bundle's own `tutorial.yaml` says nothing: a `url` starting `https://` or `mailto:`, and an optional `prefill` of `github`, `gitlab` or `none`. The same shape and rules as the manifest key (`bundle-format.md` section 2, **Defect reports**). |
+| `start_from` | MAY | For a module whose bundle declares `starts_from: ref`: the `repo` and `ref` its starting code comes from, set by whoever chooses that start. Section 5.3. |
 | `source` | MUST | Where the bundle is. See section 5.1. |
 
 The entry duplicates fields that also appear in the bundle's `tutorial.yaml`. That is
@@ -226,8 +228,8 @@ likely misspelling, because that is the case with no other signal anywhere: a ru
 an entry by field name and ignores a name it does not know, so `optional_lesson_cnt` is
 silently absent rather than reported, and the entry simply advertises nothing by it.
 
-**The same rule applies at the top level.** A key beside `catalog_version` and
-`tutorials` that this document does not define is warned about, on check 1, and the
+**The same rule applies at the top level.** A key beside `catalog_version`, `tutorials`
+and `goals` that this document does not define is warned about, on check 1, and the
 catalogue still passes. The validator used to reject it, which contradicted the rule
 above and defeated the point of it: the file a newer runner writes is exactly the file an
 older validator has never seen, and refusing it is the one failure an additive format
@@ -331,6 +333,95 @@ work, and the bundle is authoritative once the learner has chosen.
 written before it — including the one in the bundles repository — is still valid with no
 edit. A reader that has never heard of the field ignores it, exactly as `supplies` is
 additive to `bundle_format: 1`.
+
+### 5.3 A programme: `goals`, and an entry's `start_from`
+
+A **programme** is a catalogue whose entries are the modules a cohort takes in order, each
+a bundle (`bundle-format.md` section 2, **Levels and modules**, has the terms). It is built
+one module at a time, so it cannot be shipped as one course, and two things about it are
+known only to whoever runs it: which learning objectives belong to which learning goal, and
+where the next module's code starts. Both are said here, in the one file that person
+already maintains.
+
+```yaml
+catalog_version: 1
+goals:
+  run-a-stockroom:
+    title: Run a small stockroom
+    summary: Count it, reorder it, and forecast what it will need.
+    objectives: [stock-counting, shelf-labelling, reorder-points,
+                 demand-forecasting, supplier-lead-times]
+tutorials:
+  - id: stockroom-forecasting
+    # ... the usual entry fields ...
+    recommended_previous_bundles:
+      - bundle: stockroom-basics
+        because: It starts from the best solution of Stockroom Basics.
+    start_from:
+      repo: https://github.com/example/stockroom-sheet.git
+      ref: main
+```
+
+**`goals`** is a top-level mapping of goal id to goal. A learning goal is a broad content
+area taught across modules, and **it lists its learning objectives** by the `covers` ids
+the modules use:
+
+| Field | Required | Meaning |
+|---|---|---|
+| the key | MUST | the goal id, `[a-z0-9-]+` |
+| `title` | MUST | the goal's name, a non-empty string |
+| `summary` | MAY | a sentence or two on what the goal spans |
+| `objectives` | MUST | a non-empty list of `covers` ids |
+
+- **A goal groups learning objectives, never lessons or modules.** A cross-cutting topic is
+  a goal whose objectives appear in several modules.
+- **Every listed objective is a `covers` key of some entry in this catalogue**, so a goal
+  cannot promise what no course here teaches; and **an objective belongs to at most one
+  goal.** An entry's objective listed under no goal is allowed, and silent.
+- **The link lives here, never on a concept.** A bundle carries nothing for it, which keeps
+  every bundle readable by every released runner and validator: an older validator reports
+  an unknown key *inside* a concept as a finding, and an unknown top-level key here only as
+  a warning.
+
+Nothing in the runner reads `goals` today. It is the programme's own map of what it
+teaches, for the people who run it and for the designs that build on this one.
+
+**`start_from`** is an entry field, a mapping of exactly two keys:
+
+| Field | Required | Meaning |
+|---|---|---|
+| `repo` | MUST | a Git URL: `https://…`, `ssh://…`, or scp-style `user@host:path`. Plain `http://`, `file://` and a local path are refused — the learner fetches from it |
+| `ref` | MUST | the branch or tag the module starts from |
+
+It belongs on the entry of a module whose bundle declares `starts_from: ref`, and it is set
+once the start has been chosen — after the previous module's review has picked a winning
+branch. **Until it is set, that module cannot start**, and the runner says so rather than
+starting it from anything else (`runner-protocol.md` section 18.6, where the runner's use of
+it is stated in full).
+
+**`belay-catalogs resolve <id> --json` and `discover --json` always carry `start_from`**,
+on every entry, so a consumer never has to ask whether the key was considered:
+
+| The entry's `start_from` | In the JSON |
+|---|---|
+| a mapping with a usable `repo` and `ref` | `{"repo": …, "ref": …}` |
+| present and malformed — not a mapping, a key missing or empty, an unknown key, a `repo` that is not a Git URL | `null`, and the reason in that entry's `metadata_notes` |
+| absent | `null`, and no note |
+
+A malformed `start_from` is dropped whole, never passed on half-formed: it is a value the
+tutor builds a Git command from. The course is still offered, without a starting
+repository — and since its bundle needs one, it cannot start until the entry is corrected.
+
+**Checks 8 and 9 of `belay-validate --catalog` are where an author is told.** Check 8
+reports `goals` that is not a mapping, a goal id that does not match `[a-z0-9-]+`, a goal
+without a `title`, `objectives` that is not a non-empty list of strings, an unknown key in a
+goal, an objective that no entry's `covers` declares, and an objective listed under two
+goals. Check 9 reports every reason the reader would drop a `start_from`, as a finding.
+Neither contacts the repository: nothing checks that `ref` exists, or that the code there
+is the code the module was written for.
+
+**`catalog_version` stays `1`.** Both keys are additive, and an older reader warns about
+`goals` and `start_from` as unknown keys (checks 1 and 3) and keeps the catalogue usable.
 
 ---
 
@@ -825,6 +916,7 @@ that is not a number and is still offered with every sound field it has.
 `optional_lesson_count: null` and puts the reason in that entry's `metadata_notes`, so no
 consumer can read an unusable value as a number and none can mistake it for zero. The
 rendered listing prints the same reason as a `metadata problem` line under the entry.
+`start_from` is treated the same way, and section 5.3 tables its three cases.
 
 Two consequences worth stating, because both look like bugs otherwise:
 
