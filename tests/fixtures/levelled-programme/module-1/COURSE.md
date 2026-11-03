@@ -33,6 +33,9 @@ each one starts at.
 
 **02 - Counting a shelf.** Take a repeatable count and label the shelf.
 
+**03 - Working through the shelf stories.** Three prioritised stories, each specified,
+handed off, implemented and reviewed.
+
 ## Where to go after this
 
 The next module in the programme, Stockroom Forecasting, starts from the sheet you

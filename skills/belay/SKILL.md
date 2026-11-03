@@ -149,7 +149,7 @@ A tutor holds one lesson, not a course.
 | this file | `COURSE.md` |
 | the instance `tutorial.yaml` | `DESIGN.md` in full — only the declared anchors |
 | `STATE.md` | any lesson other than `active_lesson` |
-| the one lesson body, and under `levels: true` its `material` file per objective at the learner's level | any completed lesson |
+| the one lesson body, under `levels: true` its `material` file per objective at the learner's level, and in a task lesson the active task file | any completed lesson |
 | learner files the task concerns | other lesson-folder material the lesson body does not name |
 
 `COURSE.md` is for a learner choosing or re-orienting, not for teaching. Open it only
@@ -223,7 +223,6 @@ topic the learner set aside.
 
 The behavioural rule, in one line: **warn briefly, let them defer, re-offer only when an
 anticipated failure has actually been observed, and never offer a completed one again.**
-Offering costs no file open: the manifest you hold has what an offer needs.
 
 `references/runner-protocol.md` section 8 carries the offer, the diagnosis and the guards
 against looping; `references/state-lifecycle.md` section 9 has what `STATE.md` records.
@@ -255,7 +254,7 @@ Load a reference when its condition holds, not before.
 |---|---|
 | `references/catalogue-format.md` | no active instance was found and you must find a tutorial to offer; the learner asks what tutorials are available; the learner wants to add a catalogue or register a course; a catalogue failed to refresh |
 | `references/state-lifecycle.md` | materializing a new instance; the first time this session you are about to change `STATE.md`; a task completes; a lesson completes; an offer of an optional lesson is accepted or deferred; the learner acknowledges the assumed-concept review; you need to advance `active_lesson`; an assessment ends or is interrupted; you are about to write a generated lesson; the learner asks to update the course (section 3.2) |
-| `references/runner-protocol.md` | before the first task of a teaching session; when validating; when completion conditions look met; when unsure whether an edit is yours to make; when considering whether to write a lesson; when deciding whether to offer or re-offer an optional lesson; when the active lesson declares `assesses`, or the learner asks to be quizzed; when a course declares `assumes`; when a course declares `setup_validators`, or a setup check fails, or the learner asks whether a course is safe to run; when a course finishes or the learner asks what comes after it; when the learner asks how they have done; when you report a defect, or the learner does |
+| `references/runner-protocol.md` | before the first task of a teaching session; when validating; when completion conditions look met; when unsure whether an edit is yours to make; when considering whether to write a lesson; when deciding whether to offer or re-offer an optional lesson; when the active lesson declares `assesses`, or the learner asks to be quizzed; when the active lesson declares `tasks`; when a course declares `assumes`; when a course declares `setup_validators`, or a setup check fails, or the learner asks whether a course is safe to run; when a course finishes or the learner asks what comes after it; when the learner asks how they have done; when you report a defect, or the learner does |
 | `references/bundle-format.md` | authoring, importing or repairing a **bundle**, including promoting a generated lesson into one. Not needed to teach. |
 
 A learner's session runs four scripts, each at one moment, never per turn.
@@ -265,14 +264,14 @@ A learner's session runs four scripts, each at one moment, never per turn.
 materialization has just created, before the first task: a finding stops the course from
 starting, a warning never does, and an indeterminate run is not a pass.
 `references/state-lifecycle.md` section 3.1 has the step, `references/runner-protocol.md`
-section 13 the outcomes and the report.
+section 13 the outcomes and the report. `belay-validate --tasks <dir>` checks task files the learner wrote.
 `belay-plan-update` plans, shows and applies an update the learner asked for; a resume
 may only run `--check-version`.
 `belay-evidence` compacts the learning record when a lesson completes.
 
 **No script here ever runs a bundle's validator.** A `command` validator is an argument
 list that *you* run, through your own host, where your host's permission prompt sees it.
-A script here would put every bundle's commands behind one approval given to the runner. `references/runner-protocol.md` section 14 has the rule,
+`references/runner-protocol.md` section 14 has the rule,
 what a course discloses before it runs anything, and the one thing never to tell a learner:
 that a course is safe.
 

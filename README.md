@@ -317,7 +317,7 @@ wrapper in [`bin/`](bin), and the tutor calls the wrapper by its bare name:
 | Command | Runs | When |
 |---|---|---|
 | `belay-catalogs` | `skills/belay/scripts/catalogs.py` | the start of every session: `belay-catalogs find-instance` finds `tutorial/` in this directory or a parent. Then discovery: refresh and list courses, resolve the one you chose, follow-ups; then create `tutorial/` from it and place its supplied files. When the tutor finds a defect in the course, `belay-catalogs report` turns the report it drafted, and you read, into a link you open to send it to the author yourself |
-| `belay-validate` | `skills/belay/scripts/validate_bundle.py` | checks a new instance before the first task; authors check bundles and catalogues with it |
+| `belay-validate` | `skills/belay/scripts/validate_bundle.py` | checks a new instance before the first task; authors check bundles and catalogues with it, and the tutor checks task files you wrote yourself |
 | `belay-plan-update` | `skills/belay/scripts/plan_update.py` | you asked to update a course; it plans, shows each difference, and applies only what you accepted. A resume may ask it whether the course has a newer version |
 | `belay-evidence` | `skills/belay/scripts/evidence.py` | a lesson completed; it compacts `tutorial/EVENTS.jsonl` |
 
@@ -356,11 +356,12 @@ Check your work before you ship it:
 bin/belay-validate path/to/bundle
 bin/belay-validate --instance path/to/project/tutorial
 bin/belay-validate --catalog path/to/catalog.yaml
+bin/belay-validate --tasks path/to/a/directory/of/task/files
 ```
 
 Run them from a checkout of this repository ([The commands](#the-commands)).
 
-41 bundle checks and 9 catalogue checks. Your run and the runner's run are the same checks
+46 bundle checks, 9 catalogue checks and 3 for a directory of task files. Your run and the runner's run are the same checks
 over the same files, which is the point: a bundle that passes here starts cleanly there. It
 checks structure — that references resolve, that no progress leaked into the course, that
 every lesson is reachable. It says nothing about whether the course is any good.
@@ -400,7 +401,11 @@ yourself; the tutor never sends it. Per-objective levels for a cohort programme:
 assessment and every later one set how closely the tutor guides you on each learning
 objective, and which material it hands you, without changing what counts as done; a
 programme's modules are separate courses, and the next one can start from a branch chosen
-after it was written, carrying your levels forward from your own previous branch.
+after it was written, carrying your levels forward from your own previous branch. Task
+lessons: a lesson's tasks come from a folder of task files, exercises or labs or user
+stories, worked one at a time in priority order through states the course names, with your
+progress in your own `STATE.md`; a course can have you write tasks of your own once it has
+taught that.
 
 **Known gaps.**
 
@@ -412,7 +417,8 @@ after it was written, carrying your levels forward from your own previous branch
   are validated, and the question-and-answer loop is specified but not exercised. So with
   levels: the ledgers and the new keys are validated, and the guidance by level, the
   placement lesson and the carry-forward between modules are protocol text no suite here
-  runs.
+  runs. So with task lessons: the keys, the task files and the `## Tasks` rows are
+  validated, and the offer, the states and the review are protocol text.
 - **An update cannot tell who changed a file.** The instance keeps no copy of the course as
   it was when you started, so a lesson you worked in, or a `DESIGN.md`, that differs from
   the newer course is shown to you as a difference, and you decide what to keep.
@@ -464,7 +470,7 @@ tutor runs the scripts by their path instead of the `belay-*` commands
 No pytest; five plain scripts, run from a checkout of this repository.
 
 ```
-python3 tests/test_validate_bundle.py     # 1024 assertions
+python3 tests/test_validate_bundle.py     # 1140 assertions
 python3 tests/test_catalogs.py            # 565 assertions
 python3 tests/test_plan_update.py         # 129 assertions
 python3 tests/test_evidence.py            # 89 assertions
@@ -488,7 +494,7 @@ BELAY_SWEEP_SIBLING_REPOS=1 python3 tests/test_validate_bundle.py
 Those are separate checkouts at their own revisions, so what they contribute is
 reported on its own line and never added to the total above — `and 24 more against
 sibling repositories outside this commit` on the machine this was measured on. The
-headline stays 1024 either way. Run it before publishing a bundle; a plain `python3
+headline stays 1140 either way. Run it before publishing a bundle; a plain `python3
 tests/test_validate_bundle.py` is the check that a commit of *this* repository is
 sound.
 

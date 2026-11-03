@@ -909,8 +909,12 @@ claim that replaced it:
 - an **author** runs it over a bundle or a catalogue before shipping;
 - a **runner** runs it over the instance it has just materialized, before the first task,
   and at the five further moments `references/runner-protocol.md` section 13.1 names;
-- **no teaching turn runs it**, which is the cost rule in `runner-protocol.md` section 1,
-  and **no learner invokes it by hand**.
+- **no teaching turn runs it over a bundle or an instance**, which is the cost rule in
+  `runner-protocol.md` section 1, and **no learner invokes it by hand for those**;
+- **`--tasks <dir>` is the one exception** (corrected 2026-11-03): a teaching turn runs it when the
+  tutor reviews a task file the learner wrote, and before each offer in a lesson that declares
+  `own_tasks`, and a learner may run it by hand over their own files (`runner-protocol.md` section
+  19.6). It reads that directory and never the instance.
 
 So the distinction is *when* it runs and *who* triggers it, never *whether* a learner's
 machine runs it. Both scripts do. `scripts/catalogs.py` (§7.2) runs at discovery;
@@ -941,6 +945,13 @@ repository must satisfy, and what a user's own catalogue must not be held to. Ca
 mode has its own seven checks and its own numbering, because a catalogue is not a bundle
 and a shared table in which most numbers never apply teaches nobody anything. The mode
 stays explicit on the command line for the same reason bundle and instance do.
+
+**Task-file mode** (added 2026-11-03): `--tasks <dir>` checks a directory of task files a learner
+wrote, directly inside it and nothing below. It has its own three checks and numbering, for the same
+reason: at least one `.md` file, which only warns; each file well-formed; no id twice. It never
+applies the rule that a lesson body lists each file, since no lesson is in view, and a missing
+directory exits 2, as in the other modes. `2026-11-03-user-stories-design.md` §4 and §10 hold the
+design.
 
 **Cheap checks** (free once the script exists):
 
@@ -1741,8 +1752,8 @@ real files. One repository cannot satisfy both without duplication.
 | `belay-bundles` repository | **done** — holds five bundles and its own `catalog.yaml` |
 | `rust-automaton-db` bundle | **done** — imported, corrected, verified |
 | `automaton-db/tutorial/` instance + `STATE.md` | **done** — uncommitted |
-| Validator (`skills/belay/scripts/validate_bundle.py`) | **done** — 41 bundle checks + 9 catalogue checks |
-| Validator test suite | **done** — 1024 assertions on a clean checkout, the same on any machine; every check proven firing or warning. `BELAY_SWEEP_SIBLING_REPOS=1` adds the published bundles, counted separately (belay#37) |
+| Validator (`skills/belay/scripts/validate_bundle.py`) | **done** — 46 bundle checks + 9 catalogue checks + 3 for a directory of task files |
+| Validator test suite | **done** — 1140 assertions on a clean checkout, the same on any machine; every check proven firing or warning. `BELAY_SWEEP_SIBLING_REPOS=1` adds the published bundles, counted separately (belay#37) |
 | Optional lessons (`optional_lessons`, `failure_modes`) | **done** — 2026-09-12, §6; checks 18-21 |
 | First-load banner + `teaching_method` | **done** — 2026-09-13, released in 0.6.0; `state-lifecycle.md` §3 step 7, check 27; belay#23 |
 | Offer / defer / re-offer behaviour | **untested** — no harness exercises it; belay#22 |
@@ -1755,6 +1766,7 @@ real files. One repository cannot satisfy both without duplication.
 | Defect reports (`report` key, check 34, `catalogs.py report`, the `reported` event) | **done** — 2026-10-30, belay#86, §15e; `runner-protocol.md` §17. Whether the tutor offers, drafts and records in conversation is untested, as above |
 | Finding the instance by command (`catalogs.py find-instance`) | **done** — 2026-10-31, belay#83, §15f; `runner-protocol.md` §1; `tests/test_catalogs.py` |
 | Per-objective levels and modules as bundles (`levels`, `starts_from`, `teaches`, `material`, `placement`; catalogue `goals` and `start_from`) | **done** — 2026-11-03, designed in `2026-11-03-levels-and-course-structure-design.md`; checks 35-41 and catalogue checks 8-9; `bundle-format.md` §2 and §6, `catalogue-format.md` §5.3, `runner-protocol.md` §15.10-15.11 and §18, `state-lifecycle.md` §13; fixture `tests/fixtures/levelled-programme/`. The tutor's behaviour under levels and the carry-forward are protocol text no suite here executes; a dry run belongs to `skomp/belay-authoring`'s harness |
+| Task lessons (`tasks`, `task_states`, `own_tasks`, `## Tasks`, `belay-validate --tasks`) | **done** — 2026-11-03, belay#93, designed in `2026-11-03-user-stories-design.md`; checks 42-46; fixture `tests/fixtures/levelled-programme/` (two task lessons, an instance with `## Tasks` rows); `bundle-format.md` §6 and §13, `runner-protocol.md` §19, `state-lifecycle.md` §14. The tutor's behaviour is protocol text no suite here executes; the dry run is belay-authoring#43 |
 | Shared YAML reader (`skills/belay/scripts/yamlite.py`) | **done** — the only reader; the PyYAML preference was removed 2026-09-13, belay#29 |
 | `catalog.yaml` inside `belay-bundles` | **done** — 2026-09-12, §15 item 6; generated by `belay-authoring`'s `catalog.py` |
 | `SKILL.md` (the runner control plane) | **done** |
