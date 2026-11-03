@@ -43,17 +43,17 @@ what the programme teaches.
 
 The same programme needs four further pieces. Each is a separate design, built on this one:
 
-1. **Module scaffolding** — a module's user stories arrive pre-cut, cut with options, or
+1. **Module scaffolding** (belay#92) — a module's user stories arrive pre-cut, cut with options, or
    uncut, fading over the course regardless of the learner's levels.
-2. **Use-case guidance** — a prioritised user-story list, and a hand-off to a spec-driven
+2. **Use-case guidance** (belay#93) — a prioritised user-story list, and a hand-off to a spec-driven
    workflow in which the learner specifies and the agent implements.
-3. **Cohort review and the module gate** — at a module's end, grade every participant's
+3. **Cohort review and the module gate** (belay#94) — at a module's end, grade every participant's
    branch on the same criteria (validators for the deterministic share, a rubric judged
    against `covers` summaries for a capped share), explain the best solution and why the
    others convince less, and let every participant continue from the best solution while
    keeping their own `tutorial/` progress. A module is passed when its functional
    requirement is technically met, which is a gate on validators, not on assessments.
-4. **Final project and certificate** — a capstone chosen from a curated set, worked
+4. **Final project and certificate** (belay#95) — a capstone chosen from a curated set, worked
    entirely at level C, and a certificate built from the assessment results of every
    module.
 
