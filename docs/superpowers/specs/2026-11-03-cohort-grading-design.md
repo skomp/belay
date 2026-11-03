@@ -1,0 +1,264 @@
+# Grading a cohort's module, on the trainer's machine — Design
+
+**Date:** 2026-11-03
+**Last amended:** 2026-11-03
+**Status:** designed, not implemented
+**Issue:** belay#94
+**Builds on:** the levels and modules-as-bundles design (2026-11-03, PR: belay#91); the
+user-stories design (PR: belay#101), whose `self-cut` stories and specifications are graded here
+**Related:** belay#95 (final project and certificate), which reads the grades this stores
+
+---
+
+## 1. The problem
+
+In a cohort programme every participant builds the same module on their own branch. At the
+module's checkpoint the solutions are graded on the same criteria, the best one is explained
+and the others are told why they convince less, and everyone continues from the best solution.
+
+Belay has one learner per instance and nothing that looks across participants. It also has no
+grade: an assessment records outcomes, not points.
+
+### 1.1 Decisions taken in the design discussion
+
+- **The trainer grades, on their own machine.** A command such as "grade module programme-m1
+  from the cohort repository" collects every participant's branch and grades it there.
+- **Grades never leave the trainer's machine** except as feedback the trainer sends. They are
+  never written to the cohort repository.
+- **The employer receives only the certificate result** — passed or not passed. Grades, levels,
+  assessment results and rankings stay inside the training. (Agreed with the client on
+  2026-11-03 to keep the works-council question small; the client's legal team confirms it.
+  Recorded on belay#94 and belay#95.)
+- **The grade is hybrid**: validators give a deterministic share, a rubric judged by the AI
+  gives the rest, and the deterministic share is the larger.
+- **The AI proposes and the trainer decides.** Only grades the trainer confirms are final. This
+  is also the human decision GDPR Art. 22 asks for.
+- **Participant code runs in a container**, with the network on, because the modules teach
+  agents that call external services.
+- **The module gate** (a module is passed when its functional requirement is technically met)
+  is a set of validators. It never blocks the participant; it is recorded at the checkpoint.
+- **Exam mode is a per-lesson flag**, as many per bundle as a course needs. Outside an exam
+  lesson the participant's levels decide how much the tutor helps.
+
+---
+
+## 2. Format
+
+### 2.1 `grading:` in a module bundle's `tutorial.yaml`
+
+```yaml
+grading:
+  image: python:3.12-slim          # the container the validators run in
+  network: true                    # default false
+  env: [ANTHROPIC_API_KEY]         # the only environment variables passed in
+  timeout_minutes: 15              # per branch, for all validators together
+  validators:                      # deterministic share: the points if the validator passes
+    scorer-tests: { points: 30, gate: true }
+    latency-nfr:  { points: 20 }
+    lint:         { points: 10 }
+  rubric:                          # judged share
+    - id: failure-handling
+      points: 15
+      standard: Every external call has a timeout and a handled failure path.
+      evidence: code               # code | specs | stories; default code
+    - id: exam-design
+      points: 10
+      standard: The design choice is justified against the stated non-functional requirement.
+      lesson: lessons/07-exam.md   # optional: grade only that lesson's work
+    - id: spec-quality
+      points: 10
+      standard: Each acceptance criterion is testable and traced to a task.
+      evidence: specs
+```
+
+- **A validator earns its points when it passes and none when it does not.** There is no partial
+  credit for a validator; a module that wants finer points splits a validator into several.
+- **The deterministic share is at least 60% of the total points.** The runner fixes the
+  proportion so that every module and every cohort means the same thing by "hybrid".
+- **A rubric criterion's `standard` is one checkable sentence**, in the spirit of a `covers`
+  summary. The grader judges a branch against it and quotes the evidence.
+- **`evidence` says where the grader looks**: the code, the participant's specifications
+  (user-stories design, section 2.4), or the participant's own story files at `self-cut`
+  (user-stories design, section 2.3). `stories` is allowed only in a bundle that has a
+  `self-cut` story lesson.
+- **`lesson`** limits a criterion to the work of one lesson — typically an exam lesson.
+- `grading:` is in `tutorial.yaml`, so **participants can read the criteria from the start.**
+  They never see anyone's grades.
+
+### 2.2 Exam lessons
+
+```yaml
+---
+id: 07-exam
+title: Exam — design under a latency budget
+exam: true                         # new, MAY
+---
+```
+
+In an exam lesson, whatever the participant's level:
+
+- the help ladder stops at rung 3, and the tutor reveals no solution;
+- the tutor says at the start that the lesson is an exam, and what that means for help;
+- levelled material and level-dependent guidance do not apply.
+
+A bundle may have any number of exam lessons, or none. A final-project bundle is a bundle whose
+lessons are exam lessons; there is no separate final-project concept here.
+
+### 2.3 The gate
+
+A validator with `gate: true` is a gate validator. The gate of a module is passed when all its
+gate validators pass.
+
+- **The participant's tutor** runs gate validators like any other validator. When one fails it
+  says the module's gate is not met yet. It never blocks.
+- **The grader** records gate passed or not passed for each participant at the checkpoint.
+- **Everyone continues from the winning branch either way.** "Not passed" is an input to the
+  certificate (belay#95).
+
+---
+
+## 3. The grading run
+
+The trainer asks, in their own Claude Code session with Belay, to grade a module from a cohort
+repository. The tutor runs a new script, `belay-grade`, step by step, and shows each step's
+result before the next.
+
+1. **Collect.** `belay-grade collect <repo> <module-id>` fetches the cohort repository into a
+   local cache and lists the branches matching `*/<module-id>`: participant (the part before
+   the slash), branch, last commit and its date. The trainer confirms the list or removes
+   entries. Branches that match no convention are listed separately and never graded.
+2. **Run.** For each confirmed branch, `belay-grade run` checks out a fresh temporary copy and
+   runs the bundle's `grading.validators` in a container (section 4). It records, per
+   validator, passed or failed, its output (truncated to a fixed size), and whether it is a gate
+   validator. This step has no AI judgement.
+3. **Judge.** The tutor judges **every branch against every rubric criterion in one pass**,
+   side by side, so the standard does not drift from one participant to the next. Per criterion
+   and branch it records points (an integer from 0 to the criterion's points), and evidence:
+   quoted code, specification text or validator output, with file and line.
+4. **Propose.** `belay-grade propose` writes the proposal: per participant the validator
+   points, the rubric points with evidence, the gate result and the total; the ranking; and a
+   draft of why the best solution is best and what the others lack. Nothing is final.
+5. **Confirm.** The trainer goes through the proposal and may change any criterion's points,
+   with a reason. `belay-grade confirm` writes the final grades only when the trainer confirms,
+   and records who confirmed, when, and every change with its reason.
+6. **Draft the outputs**, only after confirmation:
+   - **the shared module review**, for the cohort repository: the winning solution and what
+     made it best, and the weaknesses several solutions shared — with no participant names and
+     no grades;
+   - **private feedback** per participant: their own points per criterion with evidence, their
+     gate result, and what would have earned more;
+   - **the suggested start** for the next module: the cohort repository and the winning branch.
+
+**The grader never publishes, sends or pushes anything.** Committing the shared review, sending
+each participant their feedback, and setting the next module's start are the trainer's actions.
+
+---
+
+## 4. Running participant code
+
+Grading executes code the trainer has not reviewed, much of it written by agents. Isolation
+therefore comes from what the code cannot reach on the trainer's machine:
+
+- **A container per branch**, from the bundle's `grading.image`, using docker or podman.
+  **Without a container runtime, step 2 stops and says so.** It never falls back to running the
+  code directly.
+- **Only the checkout is mounted**, at a fixed path. Nothing of the trainer's — no home
+  directory, no `~/.ssh`, no Git or GitHub credentials, no Claude login — is mounted or copied.
+- **Network as declared**: on only when `grading.network` is true.
+- **Environment as declared**: only the variables named in `grading.env` are passed, taken from
+  the trainer's environment. The grader warns when one is missing and never passes an
+  undeclared one. The protocol tells the trainer to use a separate key for grading, with a
+  spending limit, because participant code can read and send anything it is given.
+- **A time limit per branch** (`grading.timeout_minutes`). A branch that exceeds it has its
+  remaining validators recorded as failed, with the reason.
+
+---
+
+## 5. Where grades live
+
+```
+~/.local/share/belay/grading/<cohort>/<module-id>/
+├── proposal.json
+├── final.json
+├── final.<date>.json            # a previous confirmation, kept when re-graded
+├── review.md                    # the shared module review, draft
+└── feedback/<participant>.md    # private feedback, draft
+```
+
+- `<cohort>` is derived from the repository URL. The base directory follows `XDG_DATA_HOME`.
+- **`belay-grade` refuses to write inside any Git work tree**, so grades cannot be committed by
+  accident.
+- **Re-grading** writes a new proposal. `final.json` is replaced only by a new confirmation, and
+  the previous one is kept beside it with its date.
+- **`belay-grade forget <cohort>`** deletes a cohort's grades. How long grades are kept is the
+  trainer's decision; the protocol says so, because it is a data-protection question.
+- The certificate (belay#95) reads the `final.json` of every module of a cohort from here.
+
+The `final.json` shape is the contract belay#95 builds on: per participant, per validator
+`{passed, points}`, per criterion `{points, max, evidence, changed_by_trainer, reason}`, `gate`,
+`total`, `max_total`; and at the top `module`, `bundle_version`, `confirmed_by`, `confirmed_at`.
+
+---
+
+## 6. Validator
+
+New checks take the next free numbers. All are silent when the key is absent.
+
+| Check | Mode | Reports |
+|---|---|---|
+| grading shape | both | `grading` not a mapping; an unknown key; `image` not a non-empty string; `network` not a boolean; `env` not a list of valid variable names; `timeout_minutes` not a positive integer |
+| grading validators | both | a name that is not a declared validator; `points` not a positive integer; `gate` not a boolean |
+| grading rubric | both | a criterion without `id`, positive integer `points`, or a non-empty `standard`; a duplicate `id`; `evidence` other than `code`, `specs`, `stories`; `stories` without a `self-cut` story lesson in the bundle; `lesson` that is not a lesson of the bundle |
+| grading share | both | the validator points less than 60% of the total |
+| exam | both | `exam` not a boolean |
+
+---
+
+## 7. Compatibility
+
+`grading` and `exam` are additive; `bundle_format` stays `1`. A course without `grading` is
+unchanged, and `belay-grade` refuses it with a message naming the missing key. An older runner
+ignores `grading` — gate validators are still ordinary validators — and ignores `exam`, so an
+exam lesson is taught as an ordinary lesson; `bundle-format.md` section 13 says so.
+
+---
+
+## 8. Documents that change
+
+| Document | Change |
+|---|---|
+| `bundle-format.md` | section 2: `grading`; section 6: `exam`, and **Writing an exam lesson**; section 13: the older-runner rows |
+| `runner-protocol.md` | a new section, **Grading a cohort**: the six steps, the never-publish rule, the separate grading key; section 15: exam lessons (rung 3, no solutions, levels not applied); the gate as the participant's tutor reports it |
+| `README.md` | `belay-grade` and the feature list |
+| `bin/` | a `belay-grade` wrapper, as for the other scripts |
+| the levels spec (2026-11-03) | section 1.2: exam mode is per lesson, replacing "a graded task runs in exam mode" |
+
+---
+
+## 9. Acceptance criteria
+
+1. Existing courses are unaffected: all suites pass unchanged, and the sibling sweep reports no
+   new finding and no new warning.
+2. Each new check has a fixture that trips it and a silent control.
+3. A fake cohort — a local bare Git repository with three participant branches for a fixture
+   module (one passing everything, one failing a gate validator) and one branch outside the
+   naming convention — is collected, run, proposed and confirmed end to end. The suites never
+   need docker: the container runtime is replaceable through an environment variable, and a
+   stub runtime records the arguments it receives.
+4. A test asserts, from the stub's record, that only the checkout is mounted and only the
+   declared variables are passed; that no runtime stops step 2; that the grader refuses to write
+   inside a Git work tree; that a confirmation with a changed criterion records its reason; and
+   that re-grading keeps the previous `final.json`.
+5. The judging step and the drafted texts are AI output; their behaviour is added to the dry
+   run in belay-authoring#43.
+
+---
+
+## 10. Non-goals
+
+- **No upload, no sending, no push.** The trainer publishes and sends.
+- **No grades in the cohort repository, and none to the employer.**
+- **No partial credit for a validator.**
+- **The certificate** — belay#95.
+- **The participant's tutor asking for the starting branch** — a separate change, discussed on
+  2026-11-03 and not yet decided.
