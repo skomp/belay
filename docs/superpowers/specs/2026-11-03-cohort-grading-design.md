@@ -64,7 +64,7 @@ grading:
     - id: exam-design
       points: 10
       standard: The design choice is justified against the stated non-functional requirement.
-      lesson: lessons/07-exam.md   # optional: grade only that lesson's work
+      paths: [exam/07/**]          # the folder lessons/07-exam.md tells the participant to use
     - id: spec-quality
       points: 10
       standard: Each acceptance criterion is testable and traced to a task.
@@ -81,7 +81,13 @@ grading:
   `learner_owned` (`bundle-format.md` section 2). A course that grades specifications or
   participant-written task files points a criterion at them — for example `specs/**` or the
   `own_tasks` directory of a task lesson. Without `paths` the grader looks at the whole branch.
-- **`lesson`** limits a criterion to the work of one lesson — typically an exam lesson.
+- **Only `command`, `file-exists` and `file-contains` validators can earn points.** `manual` needs
+  a learner to supply evidence, and no learner is present during grading; `git-diff` inspects
+  uncommitted changes, and a fresh checkout has none. Only `command` runs in the container
+  (section 4); the two file kinds are checked directly on the checkout and run no code.
+- **A branch does not record which lesson produced which file**, so a criterion cannot name a
+  lesson. An exam lesson tells the participant which folder to put the work in, and the criterion
+  points there with `paths`.
 - `grading:` is in `tutorial.yaml`, so **participants can read the criteria from the start.**
   They never see anyone's grades.
 
@@ -207,8 +213,8 @@ New checks take the next free numbers. All are silent when the key is absent.
 | Check | Mode | Reports |
 |---|---|---|
 | grading shape | both | `grading` not a mapping; an unknown key; `image` not a non-empty string; `network` not a boolean; `env` not a list of valid variable names; `timeout_minutes` not a positive integer |
-| grading validators | both | a name that is not a declared validator; `points` not a positive integer; `gate` not a boolean |
-| grading rubric | both | a criterion without `id`, positive integer `points`, or a non-empty `standard`; a duplicate `id`; `paths` not a non-empty list of globs the ownership dialect accepts; `lesson` that is not a lesson of the bundle |
+| grading validators | both | a name that is not a declared validator; a validator of kind `manual` or `git-diff`; `points` not a positive integer; `gate` not a boolean |
+| grading rubric | both | a criterion without `id`, positive integer `points`, or a non-empty `standard`; a duplicate `id`; `paths` not a non-empty list of globs the ownership dialect accepts |
 | grading share | both | the validator points less than 60% of the total |
 | exam | both | `exam` not a boolean |
 
