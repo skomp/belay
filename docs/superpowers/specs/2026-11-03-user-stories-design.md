@@ -81,7 +81,7 @@ statement and a check; Belay requires nothing of it.
 never reach the instance; and a directory directly under `lessons/` without a `LESSON.md` is a
 check 4 finding. Inside the lesson's folder the files are copied by every materializer, arrive
 read-only at `tutorial/lessons/<lesson>/<tasks>/`, and reach a running instance through the
-existing update path (2026-09-11 spec, section 15c). A changed task file is a MINOR revision; a
+existing update path (2026-09-11 spec, section 15c). A changed or new task file is a MINOR revision; a
 removed or renamed one is MAJOR, because an instance's `## Tasks` row may name it.
 
 ### 2.2 The task lesson
@@ -147,8 +147,9 @@ completion changes: a task lesson may still declare validators and completion co
    or skipping one, needs a reason the participant states; the tutor records it (`skipped`,
    reason in the parenthesis).
 2. **Work.** The tutor writes the row in the first state and follows the lesson body for what
-   that state asks of the participant. It moves the row to the next state when the body's
-   condition for that state is met, and back to an earlier one when the body says so.
+   that state asks of the participant. A row enters a later state only once the body's condition
+   for that state's work is met (section 10, item 1), and goes back to an earlier one when the body
+   says so.
 3. **Guide by level.** Inside each state the participant's level for the objective the body
    names for that state decides how closely the tutor guides (`runner-protocol.md` section 18).
    An exam lesson (cohort-grading design) caps help at rung 3 as everywhere.
@@ -232,9 +233,10 @@ belongs in `bundle-format.md` as the worked example.
   opens a pull request into the participant's module branch.
 - The body's **Implemented** section: the participant returns with the pull request; the tutor
   runs the module's validators and asks about any change the session made to the specification.
-- The body's **Reviewed** section: the participant walks through the diff against the
-  acceptance criteria; the objective is `code-review`; failing validators send the story back to
-  handed-off.
+- The body's **Reviewed** section: while the row reads `implemented`, the participant walks
+  through the diff against the acceptance criteria; the objective is `code-review`; the row
+  becomes `reviewed` when that is done and validators pass; failing validators send the story
+  back to handed-off.
 - A later lesson that has taught story writing declares `own_tasks: stories/` and gives a
   `## Writing a story` checklist; from then on participants cut a use case (listed in the body)
   into stories of their own.
@@ -272,29 +274,67 @@ belongs in `bundle-format.md` as the worked example.
 ## 10. Implementation notes
 
 Implemented on 2026-11-03. Writing the validator and the protocol forced these decisions, which
-this design left open; each is stated once, where its reader reads it.
+this design left open, and the branch review ruled on others. Each is stated once, where its
+reader reads it. §3 item 2, §2.1 and §7 are corrected in place to agree with them.
 
-1. **`--tasks` has its own check table**, numbered like a catalogue's: at least one `.md` file,
+**Rulings of the branch review (fix round 1):**
+
+1. **A row enters a state only once the work the body names for that state is done.** While that
+   work goes on, the row stays in the previous state, so the last state means done with its work
+   finished. A closed task stays closed unless the participant asks to reopen it. The first state
+   is written on taking the task, so its work and the second's share it, and *Next task* says
+   which is under way. A lesson with one state writes no row until the work is done
+   (`runner-protocol.md` §19.2, `bundle-format.md` §6).
+2. **A state the body says nothing about is no defect report.** The tutor says the lesson does not
+   describe it, and moves the row when the participant says that work is done. A last state with no
+   section has no work of its own. `DEFECT_KINDS` does not change (§19.2).
+3. **A review is a row write of its own**, updating an existing row's free text. A review of a file
+   not yet taken has no row, and is only spoken (`state-lifecycle.md` §14.2).
+4. **Open and active are scoped** to the tasks the current offer can list, plus a request-written
+   task taken in this lesson, which the row's parenthesis names. A request-written task left open
+   when its lesson ends is not active in the next. A row closed under an earlier lesson's states
+   stays closed, and a row in a state the active lesson does not declare is never active: it counts
+   as closed. Only a row for a file in the active lesson's own `tasks` directory is reported for
+   this (§19, `state-lifecycle.md` §14.4).
+5. **The own-task id comparison is a step of the tutor's review.** `--tasks` compares inside one
+   directory. On a clash the participant renames the file, and it stays out of the offer until
+   then (§19.6).
+6. **A new task file is a MINOR revision**: additive, like a new optional lesson
+   (`bundle-format.md` §2).
+
+**Decisions taken while writing:**
+
+7. **`--tasks` has its own check table**, numbered like a catalogue's: at least one `.md` file,
    which only warns; each file well-formed; no id twice. A missing directory exits 2, like
    `--instance` and `--catalog`.
-2. **A malformed id in a `## Tasks` row is a finding** (check 46), and so is a malformed state or
+8. **A malformed id in a `## Tasks` row is a finding** (check 46), and so is a malformed state or
    date. An id is still never looked up.
-3. **"Records the result as evidence" (section 3, item 4) has no event to use.** The learning
-   record's event types are a closed set, and none holds a review. So the result goes in the
-   row's free text, and in *Concepts demonstrated* when the work shows the objective used. A
-   review sets no level (`runner-protocol.md` §19.3, §19.4).
-4. **The offer reads three frontmatter lines per task, and the active task's file whole**, so a
-   task lesson still costs one lesson plus one file (§19.1).
-5. **Taking a later task first passes over nothing for good.** The reason goes in the taken task's
-   parenthesis, and the tasks passed over stay open. Only skipping writes `skipped` (§19.1).
-6. **A task written on request does not join the offer of the lesson it was written in, and does
-   not hold up that lesson's completion**, which is what "stay the default path" comes to. Taking
-   it there and then is taking a later task first. In a lesson with no `tasks` it waits (§19.6).
-7. **Finding the nearest later `own_tasks` searches for one frontmatter line** over the instance's
-   lessons and opens none of them, the one thing §1's "never another lesson" gives way to (§19.6).
-8. **A file with `--tasks` findings stays out of the offer until corrected**, having no usable id
-   or priority, and holds up nothing else (§19.6).
-9. **Ids should be distinct across a bundle's task lessons**, because rows belong to the module and
-   check 46 reports two rows for one id. No check compares directories (`bundle-format.md` §6).
-10. **Moving a row keeps its earlier review results in the free text**, because the row is updated
-    in place and the trainer reads it (§19.4).
+9. **"Records the result as evidence" (§3 item 4) has no event to use.** The learning record's
+   event types are a closed set, and none holds a review. So the result goes in the row's free
+   text, and in *Concepts demonstrated* when the work shows the objective used, with no validator
+   needed because the review is the evidence. A review sets no level (`state-lifecycle.md` §14.2,
+   §19.3).
+10. **The offer reads three frontmatter lines per task, and the active task's file whole**, so a
+    task lesson still costs one lesson plus one file. The only other body it reads is a task file
+    under review (§19.1).
+11. **Taking a later task first passes over nothing for good.** The reason goes in the taken task's
+    parenthesis, which survives a state change, and the tasks passed over stay open. Only skipping
+    writes `skipped` (§19.1).
+12. **A task written on request does not join the offer of the lesson it was written in, and does
+    not hold up that lesson's completion**, which is what "stay the default path" comes to. Taking
+    it there and then is taking a later task first. In a lesson with no `tasks` it waits (§19.6).
+13. **Finding the nearest later `own_tasks` searches for one frontmatter line** over the instance's
+    lessons and opens none of them, the one thing §1's "never another lesson" gives way to. During
+    a detour the count starts from `resume_at`, which itself counts (§19.6).
+14. **The format review runs before each offer in a lesson with `own_tasks`**, as well as when a file
+    is reviewed, because nothing records which files passed. A file that fails stays out of the offer
+    and holds up nothing else. `--tasks` is therefore the one validator mode a teaching turn may run
+    (§13.1, §19.6).
+15. **The section 5 reading.** "Writes no learner-owned file" keeps section 5's exemptions: section 5
+    applies unchanged, its exemptions included, and a task lesson adds none (§19.5).
+16. **A checklist worded as a body's condition never holds a row.** That keeps "never refuses to move
+    on" true against "moves when the body's condition is met" (§19.4).
+17. **Ids should be distinct across a bundle's task lessons**, because rows belong to the module and
+    check 46 reports two rows for one id. No check compares directories (`bundle-format.md` §6).
+18. **Moving a row keeps its earlier review results in the free text**, because the row is updated
+    in place and the trainer reads it (`state-lifecycle.md` §14.2).

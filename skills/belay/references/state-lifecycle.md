@@ -1789,18 +1789,21 @@ of a cohort works on the same task, and an issue has one state for all of them.
 - `014-export` — skipped — 2027-03-05 (depends on 013, which is not merged)
 ```
 
-**One row per task, updated in place**, in the shape and with the wrapping rules of
-*Levels* (13.1): `` - `<id>` — <state> — ``, then free text that ends in a date, and an optional
-parenthesis. The separators are read as for *Levels*.
+**One row per task, updated in place**: `` - `<id>` — <state> — ``, then free text that ends in
+a date, and an optional parenthesis. Write the separators as em dashes; check 46 also reads an
+en dash or a hyphen, as for *Levels* (13.1). A long row may wrap: an indented line below a bullet
+is read as part of that bullet, so the date and the parenthesis may sit on a later line.
 
 - **The id** is the task file's `id`.
-- **The state** is one of the active lesson's `task_states`, or `skipped`. When the lesson
-  declares none, its states are `in-progress` and `done`.
+- **The state** is one of the active lesson's states (`runner-protocol.md` section 19), or
+  `skipped`. A row enters a state only once that state's work is done, except the first
+  (`runner-protocol.md` section 19.2).
 - **The free text** may be empty, and holds what the course or the tutor needs to name: a pull
-  request, the result of a review (`runner-protocol.md` section 19.4). Nothing here calls a
-  service to find out about it.
+  request, the result of a review (14.2). Nothing here calls a service to find out about it.
 - **The date** is the day of the last change to the row, `YYYY-MM-DD`.
-- **The parenthesis** holds the reason for a skip, or for taking a task out of order.
+- **The parenthesis** holds the reason for a skip, or for taking a task out of order, and for a
+  task the learner asked to add it also names the lesson it was taken in. It survives a state
+  change, so an out-of-order reason is not lost.
 
 > **A task with no row has not been started.**
 
@@ -1809,27 +1812,37 @@ writes a row to say a task is waiting.
 
 ### 14.2 When a row is written
 
-Only while a task lesson is active, and at exactly three moments, each of which sets `updated`:
+Only while a task lesson is active, and at exactly four moments, each of which sets the row's
+date and `updated`:
 
 1. **the learner takes a task** — the row, in the first state. It records that they took the
    task, which has happened, and claims nothing about the work (section 1). A task taken out of
-   order carries the reason in its parenthesis;
+   order carries the reason in its parenthesis. A lesson with one state writes this row when the
+   work is done (`runner-protocol.md` section 19.2);
 2. **the learner skips a task** — the row, in `skipped`, with the reason in its parenthesis;
-3. **the state changes**, forwards or back, by `runner-protocol.md` section 19.2 — the row is
-   rewritten in place, and *Next task* with it.
+3. **the state changes**, forwards or back, a reopening included, by `runner-protocol.md` section
+   19.2 — the row is rewritten in place, and *Next task* with it;
+4. **a review ends** (`runner-protocol.md` section 19.4) — the free text of the **existing** row
+   gains which checklist, and what was not met, kept brief, and earlier results stay. A review
+   of a file not yet taken has no row and writes none: it is only spoken.
 
-A row reaching the last state is also a completed task: section 4 applies. A row moved to an
-earlier state is not a failure and is not recorded as one; the row simply says where the task
-is now.
+A row entering the last state is also a completed task, so section 4 applies. "Validates" there
+means here that the body's condition for that state is met, whether or not it names a validator.
+*Concepts demonstrated* also takes an objective at moment 4, when the work reviewed shows the
+learner using it, by the test of section 4's item 2: used, not explained. No validator need
+have run, because the review is the evidence.
 
-No learning-record event is written for a row. The record's event types are a closed set
-(section 12.2).
+A row moved to an earlier state is not a failure and is not recorded as one; the row simply says
+where the task is now.
+
+No learning-record event is written for a row or a review. The record's event types are a closed
+set (section 12.2), and none of them holds either.
 
 ### 14.3 The section belongs to the module
 
 - **Completing a lesson leaves the rows alone.** Section 5 resets nothing here, so one module's
   rows accumulate across its task lessons, and a row may outlive the lesson that declared its
-  state.
+  state. Which rows the active lesson acts on is `runner-protocol.md` section 19, at its top.
 - **A new module starts with no rows.** The carry-forward (13.4) does not copy them, because
   they are about that module's tasks and not about the learner.
 - **An update leaves the rows alone** (section 3.2), including a row naming a task file the new
@@ -1846,9 +1859,11 @@ with `task_states`, because a row may outlive the lesson that declared them.
 Report, and let the learner decide, as section 7 says for every structural defect:
 
 - a *Tasks* row that does not parse, or one id with two rows;
-- two open tasks of the active lesson with rows, when one task is active at a time;
-- a row for a task of the active lesson whose state is neither one of that lesson's states nor
-  `skipped`.
+- two rows that would both be the active task (`runner-protocol.md` section 19);
+- a row for a task file in the active lesson's own `tasks` directory whose state is neither one
+  of that lesson's states nor `skipped`. That file's states can only have come from this lesson,
+  so the course changed under the row, or the row was edited.
 
-Do not guess which was meant. A row for a task of no lesson you can see is not one of these: it
-may be one the learner wrote, or one an earlier lesson's states describe.
+Do not guess which was meant. These are not inconsistencies: a row outside the active lesson's
+scope, which is kept and ignored; and a row for a learner's own task file in a state this lesson
+does not declare, which an earlier lesson wrote and which counts as closed.

@@ -401,7 +401,7 @@ how large the change feels:
 
 | Bump | Meaning | Examples |
 |---|---|---|
-| MINOR | A live instance can take the change as one set. The learner still asks for the update, and accepts it with one answer. | A correction to lesson prose. A fix to a check script. A new optional lesson. A new `supplies` entry. A new lesson added after the last lesson. A changed task file. |
+| MINOR | A live instance can take the change as one set. The learner still asks for the update, and accepts it with one answer. | A correction to lesson prose. A fix to a check script. A new optional lesson. A new `supplies` entry. A new lesson added after the last lesson. A changed task file. A new task file, which is additive, like a new optional lesson. |
 | MAJOR | A live instance cannot take the change as one set. The learner reviews the update file by file. | The `lessons` list changes order. A lesson is removed. A lesson `id` changes. The completion conditions of a lesson change. A task file is removed or renamed, because an instance's `## Tasks` row may name it. |
 
 A MAJOR bump resets MINOR to `0`: `"2.4"` becomes `"3.0"`. Two authors who apply the table
@@ -1825,7 +1825,8 @@ As a member of the sales team I want incoming leads scored so that I call the be
 | `title` | MUST | a non-empty string |
 | `priority` | MUST | an integer; lower is earlier; ties are broken by `id` |
 
-Check 43 reports each of these. **The body is yours**: a user story carries acceptance
+Check 43 reports a breach of each of these but one: nothing can check that an `id` stayed
+stable once published, and that is yours to hold. **The body is yours**: a user story carries acceptance
 criteria, an exercise a statement and a check, and the format requires nothing of it. A
 subfolder of the `tasks` directory holds no task files. A file directly inside it that is not
 `.md` is ordinary lesson material, which this section's naming rule still covers.
@@ -1855,9 +1856,13 @@ validator accept the files: its check 6 requires every file in a lesson folder t
 by `LESSON.md`. Check 43 reports a file the body does not list and a listed path that does
 not exist.
 
-**The body says what happens in each state**: what the state asks of the learner, what has
-to be true for the task to move on, and anything that sends it back. Give each state its own
-section. Under `levels: true`, name the learning objective the state exercises, from this
+**The body says what happens in each state**: what work the state asks of the learner, what
+has to be true for that work to count as done, and anything that sends the task back. **A
+row enters a state only once that state's work is done**, and while the work goes on it stays
+in the previous state, so a row names the last state whose work is finished and the last
+state means done, with its work finished (`runner-protocol.md` section 19.2). Give each state
+its own section, except that the last needs none unless it has work of its own. Under
+`levels: true`, name the learning objective the state exercises, from this
 lesson's `teaches`. Where you want the tutor to review the work, give the state a checklist;
 the tutor reviews against it and names what is not met, and its review never stops the
 learner moving on. To make something stop them, declare it as a validator or a completion
@@ -1880,6 +1885,9 @@ hand-off and the review are what the programme writes into its lessons.
 
 - **The keys:** `tasks: stories/`, `task_states: [specifying, handed-off, implemented,
   reviewed]`.
+- **How the row moves:** it enters a state when that state's work is done. So it reads
+  `specifying` from when the story is taken until the hand-off is done, `handed-off` until the
+  participant is back and the *Implemented* work is done, and `implemented` during the review.
 - **The body's *Specifying* section:** the participant writes `specs/<story-id>.md`. A `## Spec
   criteria` checklist asks for testable acceptance criteria, non-functional requirements
   named, and a split into tasks. The objective for this state is `spec-writing`.
@@ -1891,9 +1899,10 @@ hand-off and the review are what the programme writes into its lessons.
 - **The body's *Implemented* section:** the participant returns with the pull request; the
   tutor runs the module's validators and asks about any change the session made to the
   specification.
-- **The body's *Reviewed* section:** the participant walks through the diff against the
-  acceptance criteria. The objective is `code-review`, and failing validators send the story
-  back to *handed-off*.
+- **The body's *Reviewed* section:** while the row reads `implemented`, the participant walks
+  through the diff against the acceptance criteria. The objective is `code-review`. The row
+  becomes `reviewed` when that is done and the validators pass; failing validators send it back
+  to `handed-off`.
 - **A later lesson that has taught story writing** declares `own_tasks: stories/` and gives a
   `## Writing a story` checklist; from then on participants cut a use case, listed in the
   body, into stories of their own.
@@ -2210,8 +2219,8 @@ Confirm each of these by looking, not by remembering:
 - [ ] `task_states` and `own_tasks` appear only beside `tasks`; `task_states` is a non-empty
       list of distinct `[a-z0-9-]+` names without `skipped`; `own_tasks` is a relative
       workspace path with no `..` segment
-- [ ] every task lesson's body says what each state asks and when the task moves on, and makes
-      sense to a runner that has never heard of `tasks` (section 13)
+- [ ] every task lesson's body says what each state but the last asks and when that work is
+      done, and makes sense to a runner that has never heard of `tasks` (section 13)
 - [ ] every recommendation names a `bundle` id spelled as that bundle spells its own `id`,
       and a `because` written for the learner
 - [ ] no recommendation names this bundle, and no bundle id appears twice in one list

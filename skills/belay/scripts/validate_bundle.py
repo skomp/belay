@@ -7,8 +7,8 @@ before the first task, and at the five further moments
 references/runner-protocol.md section 13.1 names. Over a bundle or an
 instance it is never run on a teaching turn, and a learner never invokes it
 by hand. `--tasks` is the one mode that differs: it reads a directory of task
-files a learner wrote, on the turn the tutor reviews one (section 19.6 there),
-and the learner may run it too.
+files a learner wrote, when the tutor reviews one or offers tasks (section 19.6
+there), and the learner may run it too.
 
 It is safe on a learner's machine because it is stdlib-only (below) and reads
 without writing: no file in the bundle, the instance or the workspace is
