@@ -19,8 +19,10 @@ from __future__ import annotations
 
 import json
 import os
+import pwd
 import shutil
 import signal
+import socket
 import stat
 import subprocess
 import sys
@@ -128,6 +130,9 @@ def test_cohort_from_url_forms() -> None:
         "ssh://git@github.com:22/acme/team-7.git",
         "git@github.com:acme/team-7.git",
         "git@github.com:acme/team-7",
+        "https://github.com:443/acme/team-7.git",
+        "ssh://github.com/acme/team-7",
+        "ssh://git@github.com:022/acme/team-7",
     ]
     names = {gr.cohort_name(u) for u in same}
     record(len(names) == 1, "https, ssh and scp forms of one repository are one cohort",
@@ -140,25 +145,45 @@ def test_cohort_from_url_forms() -> None:
         "https://github.com/acme-team/7.git",   # slugs alike, must not collide
         "https://gitlab.com/acme/team-7.git",   # another host
         "https://github.com/Acme/team-7.git",   # paths are case sensitive
+        "https://github.com:8443/acme/team-7.git",   # another port is another server
+        "ssh://git@github.com:2222/acme/team-7.git",
+        "ssh://github.com:443/acme/team-7.git",      # 443 is the default of https only
+        "https://github.com:22/acme/team-7.git",     # 22 is the default of ssh only
+        "alice@github.com:acme/team-7",              # another ssh account
+        "ssh://bob@github.com/acme/team-7",
     ]
     all_names = {name} | {gr.cohort_name(u) for u in other}
-    record(len(all_names) == 5, "different URLs, even slug-alike ones, never collide",
+    record(len(all_names) == len(other) + 1, "different URLs, even slug-alike ones, never collide",
            str(sorted(all_names)))
     plain = gr.cohort_name("git@github.com:acme/team-7.git")
-    for url in ("user:tok3n@github.com:acme/team-7.git", "https://user:p@ss@github.com/acme/team-7.git",
-                "https://user:tok3n@github.com/acme/team-7.git", "ssh://u:tok3n@github.com/acme/team-7"):
+    for url in ("https://user:p@ss@github.com/acme/team-7.git",
+                "https://user:tok3n@github.com/acme/team-7.git",
+                "https://tok3n@github.com/acme/team-7.git",
+                "ssh://git:tok3n@github.com/acme/team-7"):
         n = gr.cohort_name(url)
         record("tok3n" not in n and n == plain and "ss" not in n.split("-team")[0],
                f"credentials in {url!r} never reach the cohort name, and the cohort is unchanged", n)
+    # An ssh user is an account, not a credential; its password is one.
+    for url, bare_user in (("user:tok3n@github.com:acme/team-7.git", "user@github.com:acme/team-7.git"),
+                           ("ssh://u:tok3n@github.com/acme/team-7", "ssh://u@github.com/acme/team-7")):
+        n = gr.cohort_name(url)
+        record("tok3n" not in n and "tok3n" not in gr.normalise_url(url) and n == gr.cohort_name(bare_user),
+               f"the password in {url!r} changes nothing: the cohort is that of the user alone", n)
     record(gr.cohort_name("host.com:8080/o/r") != gr.cohort_name("ssh://host.com:8080/o/r"),
            "scp host.com:8080/o/r (a directory) stays distinct from ssh://host.com:8080/o/r (a port)")
-    record(gr.cohort_name("ssh://host.com:8080/o/r") == gr.cohort_name("https://host.com/o/r"),
-           "a URL's port is dropped")
+    record(gr.cohort_name("ssh://host.com:8080/o/r") != gr.cohort_name("https://host.com/o/r"),
+           "a non-default port is kept: it can be another server")
+    record(gr.cohort_name("ssh://host.com:22/o/r") == gr.cohort_name("https://host.com:443/o/r")
+           == gr.cohort_name("https://host.com/o/r"), "a default port equals none")
+    record(gr.cohort_name("alice@h:cohort") != gr.cohort_name("bob@h:cohort"),
+           "two ssh accounts on a host are two cohorts: an scp path is relative to the account's home")
     hostile = ["https://h/../../etc/x", "git@h:../../x", "https://h/a b/c;d", "https://h/-x/y"]
     for url in hostile:
         n = gr.cohort_name(url)
         record(("/" not in n and "\\" not in n and ".." not in n and not n.startswith("-")
                 and n not in ("", ".")), f"cohort name for {url!r} is one safe component", n)
+    dotted = gr.cohort_name("https://h/a..b/c")
+    record(gr.valid_cohort_arg(dotted), "forget accepts the name of a path holding '..'", dotted)
     record(refused(gr.cohort_name, "") is not None, "an empty URL is refused")
 
 
@@ -303,6 +328,7 @@ def test_cli() -> None:
 
 COHORT_URL = "https://cohort.invalid/acme/team-1.git"
 TOKEN_URL = "https://user:s3cr3t-t0ken@cohort.invalid/acme/team-1.git"
+ALICE_URL = "alice@cohort.invalid:acme/team-1"
 IMAGE = "python:3.12-slim"
 SECRET = "sk-grading-VALUE-123456"
 UNDECLARED = "sk-trainer-PERSONAL-987"
@@ -352,13 +378,28 @@ PARTICIPANTS = {
     },
 }
 
-HOSTILE_BRANCHES = ("-x/m1", "$(touch${IFS}pwned)/m1", "a;touch${IFS}pwned/m1", "deep/er/m1")
+# As pushed -> as listed. Git allows every one of these in a ref name. U+0085, U+2028 and
+# U+2029 are line ends to str.splitlines; U+009B is a terminal's control sequence introducer;
+# "\\udcff" is the raw byte 0xFF, which is not UTF-8.
+HOSTILE_BRANCHES = {
+    "-x/m1": "-x/m1",
+    "$(touch${IFS}pwned)/m1": "$(touch${IFS}pwned)/m1",
+    "a;touch${IFS}pwned/m1": "a;touch${IFS}pwned/m1",
+    "deep/er/m1": "deep/er/m1",
+    "a\u0085b/m1": "a\\x85b/m1",
+    "a\u2028b/m1": "a\\u2028b/m1",
+    "a\u2029b/m1": "a\\u2029b/m1",
+    "a\u009bb/m1": "a\\x9bb/m1",
+    "caf\udcff/m1": "caf\\xff/m1",
+}
+HOSTILE_OTHER = {"x\u2028y": "x\\u2028y"}
 
 STUB = """#!{python}
-import json, os, signal, subprocess, sys
+import json, os, shutil, signal, subprocess, sys
 RECORD = {record!r}
 INFO_FAILS = {info_fails!r}
 KILL_FAILS = {kill_fails!r}
+DIGEST_FAILS = {digest_fails!r}
 args = sys.argv[1:]
 entry = dict(argv=args, env=dict(os.environ))
 cmd = args[0] if args else ""
@@ -372,6 +413,9 @@ if cmd == "run":
             parsed["rm"] = True; i += 1; continue
         value = args[i + 1]
         if flag == "--name": parsed["name"] = value
+        elif flag == "--pids-limit": parsed["pids"] = value
+        elif flag == "--memory": parsed["memory"] = value
+        elif flag == "--security-opt": parsed["security"] = value
         elif flag == "--network": parsed["network"] = value
         elif flag == "-v": parsed["mounts"].append(value)
         elif flag == "-w": parsed["workdir"] = value
@@ -382,8 +426,13 @@ if cmd == "run":
     parsed["command"] = args[i + 1:]
     src = parsed["mounts"][0].split(":")[0]
     git = os.path.join(src, ".git")
+    snapshot = RECORD + ".git-snapshot"
+    if os.path.isdir(git) and not os.path.exists(snapshot):
+        shutil.copytree(git, snapshot)
     entry["checkout"] = dict(
         src=src,
+        tree=sorted(os.path.relpath(os.path.join(d, f), src) for d, _, fs in os.walk(src)
+                    for f in fs if not os.path.relpath(d, src).split(os.sep)[0] == ".git"),
         files=sorted(n for n in os.listdir(src) if n != ".git"),
         git_config=open(os.path.join(git, "config")).read() if os.path.isdir(git) else None,
         hooks_dir=os.path.exists(os.path.join(git, "hooks")),
@@ -396,6 +445,11 @@ with open(RECORD, "a") as handle:
 if cmd == "info":
     sys.exit(1 if INFO_FAILS else 0)
 if cmd == "pull":
+    sys.exit(0)
+if cmd == "image":
+    if DIGEST_FAILS:
+        sys.exit(1)
+    print("sha256:stubdigest")
     sys.exit(0)
 if cmd == "kill":
     if KILL_FAILS:
@@ -449,7 +503,7 @@ class Scene:
     """A temp world: a bare cohort, a stub runtime, a data home, a test git config."""
 
     def __init__(self, tmp: str, *, info_fails: bool = False, kill_fails: bool = False,
-                 module_yaml: str = MODULE_YAML) -> None:
+                 digest_fails: bool = False, module_yaml: str = MODULE_YAML) -> None:
         self.tmp = Path(tmp).resolve()
         self.data = self.tmp / "data"
         self.bare = self.tmp / "cohort.git"
@@ -466,10 +520,11 @@ class Scene:
         self.add_branch("alice/m2", {"README.md": "another module\n"})
         config = self.tmp / "gitconfig"
         config.write_text(
-            f'[url "file://{self.bare}"]\n\tinsteadOf = {COHORT_URL}\n\tinsteadOf = {TOKEN_URL}\n')
+            f'[url "file://{self.bare}"]\n\tinsteadOf = {COHORT_URL}\n\tinsteadOf = {TOKEN_URL}\n'
+            f'\tinsteadOf = {ALICE_URL}\n')
         self.record = self.tmp / "stub-record.jsonl"
         self.stub = self.tmp / "stub-runtime"
-        self.write_stub(self.stub, info_fails, kill_fails)
+        self.write_stub(self.stub, info_fails, kill_fails, digest_fails)
         self.bundle = self.tmp / "bundle"
         self.bundle.mkdir()
         (self.bundle / "tutorial.yaml").write_text(module_yaml)
@@ -489,11 +544,13 @@ class Scene:
             "TMPDIR": str(self.tmp),
         }
 
-    def write_stub(self, path: Path, info_fails: bool = False, kill_fails: bool = False) -> None:
+    def write_stub(self, path: Path, info_fails: bool = False, kill_fails: bool = False,
+                   digest_fails: bool = False) -> None:
         path.write_text(STUB.replace("{python}", sys.executable)
                         .replace("{record!r}", repr(str(self.record)))
                         .replace("{info_fails!r}", repr(info_fails))
                         .replace("{kill_fails!r}", repr(kill_fails))
+                        .replace("{digest_fails!r}", repr(digest_fails))
                         .replace("{mount}", MOUNT))
         path.chmod(path.stat().st_mode | stat.S_IXUSR)
 
@@ -503,7 +560,7 @@ class Scene:
 
     def add_hostile_branches(self) -> None:
         sha = self.commits["alice/m1"]
-        for branch in HOSTILE_BRANCHES:
+        for branch in (*HOSTILE_BRANCHES, *HOSTILE_OTHER):
             git_fixture("--git-dir", str(self.bare), "update-ref", f"refs/heads/{branch}", sha,
                         cwd=self.tmp)
 
@@ -569,7 +626,9 @@ def test_classify_branch() -> None:
         ("$(id)/m1", "refused", None),
         ("a;b/m1", "refused", None),
         ("a\n/m1", "refused", None),
-        ("aé/m1", "refused", None),
+        ("a\u00e9/m1", "refused", None),
+        ("a\u2028b/m1", "refused", None),
+        ("a\\xffb/m1", "refused", None),
         ("main", "other", None),
         ("alice/m2", "other", None),
         ("alice/m1x", "other", None),
@@ -598,10 +657,12 @@ def test_collect() -> None:
         head_other = lines.index(next(l for l in lines if l.startswith("no convention")))
         refused_rows = [l.strip() for l in lines[head_refused + 1:head_other] if l.strip()]
         other_rows = [l.strip() for l in lines[head_other + 1:] if l.strip()]
-        record(sorted(refused_rows) == sorted(HOSTILE_BRANCHES),
-               "hostile participant names are listed apart as refused", str(refused_rows))
-        record(sorted(other_rows) == ["alice/m2", "main"],
-               "branches outside the convention are listed apart", str(other_rows))
+        record(sorted(refused_rows) == sorted(HOSTILE_BRANCHES.values()),
+               "hostile participant names are listed apart as refused, escaped", str(refused_rows))
+        record(sorted(other_rows) == sorted(["alice/m2", "main", *HOSTILE_OTHER.values()]),
+               "branches outside the convention are listed apart, escaped", str(other_rows))
+        record(out.isascii() or all(c.isprintable() or c == "\n" for c in out),
+               "nothing but printable characters reaches the terminal", repr(out))
         participants_block = "\n".join(lines[:head_refused])
         record(not any(b in participants_block for b in HOSTILE_BRANCHES),
                "no hostile name is in the participants' block", participants_block)
@@ -649,7 +710,8 @@ def test_collect_url_rules() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         scene = Scene(tmp)
         for bad in (str(scene.bare), f"file://{scene.bare}", "http://h/o/r", "ext::sh -c id",
-                    "https://h/o/r;id", "https://-oProxy/x"):
+                    "https://h/o/r;id", "https://-oProxy/x",
+                    "https://h/o/r?token=abc", "https://h/o/r#abc", "git@h:o/r?token=abc"):
             for command in (("collect", bad, "m1"),
                             ("run", "--bundle", str(scene.bundle), bad, "m1")):
                 code, out, err = scene.cli(*command)
@@ -709,10 +771,12 @@ def test_run_results() -> None:
         record(data["module"] == "m1" and data["bundle_version"] == "1.2.0"
                and data["cohort"] == gr.cohort_name(COHORT_URL),
                "the working file names the module, version and cohort", str(data)[:200])
-        record(sorted(data["refused"]) == sorted(HOSTILE_BRANCHES), "the working file lists refused branches",
-               str(data["refused"]))
-        for branch in HOSTILE_BRANCHES:
-            record(branch in out, f"run lists {branch!r} as not graded", out)
+        record(sorted(data["refused"]) == sorted(HOSTILE_BRANCHES.values()),
+               "the working file lists refused branches, escaped", str(data["refused"]))
+        record(HOSTILE_OTHER["x\u2028y"] in data["no_convention"],
+               "the working file lists other branches, escaped", str(data["no_convention"]))
+        for shown in HOSTILE_BRANCHES.values():
+            record(shown in out, f"run lists {shown!r} as not graded", out)
         record(not (scene.cwd / "pwned").exists() and not any(
             b in " ".join(r["argv"]) for r in scene.records() for b in HOSTILE_BRANCHES),
             "no hostile branch name reached the runtime or a shell")
@@ -738,7 +802,9 @@ def test_container_command() -> None:
             p = row["parsed"]
             src = row["checkout"]["src"]
             names.add(p["name"])
-            want = ["run", "--rm", "--name", p["name"], "--network", "none",
+            want = ["run", "--rm", "--name", p["name"],
+                    "--pids-limit", "512", "--memory", "4g", "--security-opt", "no-new-privileges",
+                    "--network", "none",
                     "-v", f"{src}:{MOUNT}", "-w", MOUNT, "-e", "GRADE_KEY",
                     IMAGE, "sh", p["command"][1]]
             record(row["argv"] == want, "the container command is exactly the declared shape",
@@ -1054,12 +1120,17 @@ def test_run_refusals() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         scene = Scene(tmp)
         code, out, err = scene.run_all()
-        record(code == gr.EXIT_REFUSED and "collect" in err and scene.records("run") == [],
-               "run before collect is refused, naming collect", f"{code} {err}")
+        record(code == gr.EXIT_REFUSED and "collect" in err and scene.records("run") == []
+               and "cohort.invalid" not in err,
+               "run before collect is refused, naming collect and no form it would refuse",
+               f"{code} {err}")
         scene.cli("collect", COHORT_URL, "m1")
-        code, out, err = scene.run_all("--only", "alice", "nobody")
+        code, out, err = scene.run_all("--only", "alice", "--only", "nobody")
         record(code == gr.EXIT_REFUSED and "nobody" in err and scene.records("run") == [],
                "--only with an unknown participant runs nothing", f"{code} {err}")
+        code, out, err = scene.run_all("--only", "alice", "bob")
+        record(code == gr.EXIT_USAGE and scene.records("run") == [],
+               "--only takes one value each", f"{code} {err}")
         code, out, err = scene.cli("run", "--bundle", str(scene.bundle), COHORT_URL, "m2")
         record(code == gr.EXIT_REFUSED and "m1" in err and "m2" in err,
                "a module id that is not the bundle's is refused", f"{code} {err}")
@@ -1122,16 +1193,25 @@ def test_run_again_and_only() -> None:
 
 
 def test_exit_125_is_not_a_silent_fail() -> None:
-    yaml = hang_yaml('  boom: { kind: command, command: [sh, -c, "exit 125"] }', "    boom: { points: 10 }")
+    for status, words in ((125, ("runtime refused", "rootless podman", "--pids-limit")),
+                          (126, ("could not be run",)), (127, ("could not be run",))):
+        yaml = hang_yaml(f'  boom: {{ kind: command, command: [sh, -c, "exit {status}"] }}',
+                         "    boom: { points: 10 }")
+        with tempfile.TemporaryDirectory() as tmp:
+            scene = Scene(tmp, module_yaml=yaml)
+            scene.cli("collect", COHORT_URL, "m1")
+            code, out, err = scene.run_all("--only", "alice")
+            got = scene.results()["branches"]["alice"]["validators"]["boom"]
+            record(code == gr.EXIT_REFUSED and str(status) in err and got["passed"] is False
+                   and all(w in got["reason"] for w in words),
+                   f"exit {status} says plainly what it may mean, and the exit code says so",
+                   f"{code} {err} {got}")
+    yaml = hang_yaml('  boom: { kind: command, command: [sh, -c, "exit 124"] }', "    boom: { points: 10 }")
     with tempfile.TemporaryDirectory() as tmp:
         scene = Scene(tmp, module_yaml=yaml)
         scene.cli("collect", COHORT_URL, "m1")
         code, out, err = scene.run_all("--only", "alice")
-        got = scene.results()["branches"]["alice"]["validators"]["boom"]
-        record(code == gr.EXIT_REFUSED and "125" in err and got["passed"] is False
-               and "runtime" in got["reason"],
-               "exit 125 is reported as possibly the runtime's fault, and the exit code says so",
-               f"{code} {err} {got}")
+        record(code == 0, "control: exit 124 is an ordinary failure", f"{code} {err}")
 
 
 def test_checkout_removal() -> None:
@@ -1217,6 +1297,212 @@ def test_trainer_git_config_does_not_reach_the_checkout() -> None:
         record(str(hooks) not in co["git_config"], "the trainer's git config is not in the checkout")
 
 
+def test_cache_is_not_reused_for_another_url() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = Scene(tmp)
+        scene.cli("collect", COHORT_URL, "m1")
+        other_port = "https://cohort.invalid:8443/acme/team-1.git"
+        for url, why in ((other_port, "another port"), ("ssh://carl@cohort.invalid/acme/team-1", "another account")):
+            code, out, err = scene.run_all(url=url)
+            record(code == gr.EXIT_REFUSED and "collect" in err and scene.records("run") == [],
+                   f"run under {why} does not grade the commits of the collected URL", f"{code} {err}")
+        code, out, err = scene.run_all("--only", "alice", url="https://cohort.invalid:443/acme/team-1.git")
+        record(code == 0 and scene.records("run") != [], "control: the default port is the same cohort",
+               f"{code} {err}")
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = Scene(tmp)
+        code, out, err = scene.cli("collect", ALICE_URL, "m1")
+        record(code == 0, "collect over an account's scp URL", f"{code} {err}")
+        code, out, err = scene.run_all(url="bob@cohort.invalid:acme/team-1")
+        record(code == gr.EXIT_REFUSED and "collect" in err and scene.records("run") == [],
+               "another ssh account does not reuse the cache", f"{code} {err}")
+        code, out, err = scene.run_all("--only", "alice", url=ALICE_URL)
+        record(code == 0 and scene.records("run") != [], "control: the same account does", f"{code} {err}")
+
+
+def test_run_with_a_token_url() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = Scene(tmp)
+        scene.cli("collect", TOKEN_URL, "m1")
+        code, out, err = scene.run_all(url=TOKEN_URL)
+        record(code == 0 and sorted(scene.results()["branches"]) == ["alice", "bob", "carol"],
+               "run works with a URL holding a credential, in the same cohort", f"{code} {err}")
+        root = scene.data / "belay" / "grading"
+        holding = [str(p) for p in root.rglob("*") if p.is_file() and b"s3cr3t" in p.read_bytes()]
+        record(holding == [] and "s3cr3t" not in out + err,
+               "the credential is in no stored file and no output", str(holding))
+        record(all("s3cr3t" not in json.dumps(r) for r in scene.records()),
+               "the credential reaches the runtime neither as an argument nor in its environment")
+
+
+def test_mounted_git_discloses_nothing() -> None:
+    login = pwd.getpwuid(os.getuid()).pw_name
+    host = socket.gethostname()
+    # A name under 5 characters can occur by chance in compressed bytes.
+    names = [n for n in (login, host) if len(n) >= 5]
+
+    def found_in(tree: Path, needles: list[str]) -> set[str]:
+        hits = set()
+        for path in tree.rglob("*"):
+            if path.is_file():
+                data = path.read_bytes()
+                hits |= {n for n in needles if n.encode() in data}
+        return hits
+
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = Scene(tmp)
+        scene.cli("collect", COHORT_URL, "m1")
+        scene.run_all("--only", "alice")
+        snapshot = Path(str(scene.record) + ".git-snapshot")
+        cache = str(scene.data / "belay" / "grading" / gr.cohort_name(COHORT_URL) / gr.CACHE_NAME)
+        needles = [cache, str(scene.tmp), *names]
+        record(snapshot.is_dir() and any(snapshot.rglob("*")), "the stub kept what was mounted")
+        hits = found_in(snapshot, needles)
+        record(hits == set(), "the mounted .git holds no cache path, login or hostname", str(hits))
+        record(not (snapshot / "FETCH_HEAD").exists() and not (snapshot / "logs").exists(),
+               "the mounted .git has no FETCH_HEAD and no reflog")
+        # Control: the same steps with git's defaults do disclose them, so the scan can see them.
+        control = scene.tmp / "control"
+        env = gr.clean_git_env()
+        for step in (["init", "-q", "--template=", str(control)],
+                     ["-C", str(control), "fetch", "-q", "--no-tags", "--", cache,
+                      "+refs/heads/alice/m1:refs/heads/alice/m1"],
+                     ["-C", str(control), "checkout", "-q", "--detach", scene.commits["alice/m1"]]):
+            subprocess.run(["git", *step], env=env, capture_output=True, check=True)
+        hits = found_in(control / ".git", [cache, *names])
+        record(hits == {cache, *names}, "control: git's defaults write them, and the scan finds them", str(hits))
+
+
+def test_docker_proxies_warning() -> None:
+    proxy = "http://u:proxy-p4ss@proxy.corp:3128"
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = Scene(tmp)
+        scene.cli("collect", COHORT_URL, "m1")
+        code, out, err = scene.run_all("--only", "alice")
+        record(code == 0 and "proxies" not in err, "control: no docker config, no warning", err)
+        conf = Path(scene.env["HOME"]) / ".docker" / "config.json"
+        conf.parent.mkdir(parents=True)
+        conf.write_text("{ not json")
+        code, out, err = scene.run_all("--only", "alice")
+        record(code == 0 and "proxies" not in err, "an unreadable docker config changes nothing", f"{code} {err}")
+        conf.write_text(json.dumps({"auths": {}}))
+        code, out, err = scene.run_all("--only", "alice")
+        record(code == 0 and "proxies" not in err, "control: a config with no proxies is silent", err)
+        conf.write_text(json.dumps({"proxies": {"default": {"httpProxy": proxy}}}))
+        code, out, err = scene.run_all("--only", "alice")
+        record(code == 0 and "proxies" in err and "warning" in err, "a proxies key warns", f"{code} {err}")
+        text = (scene.store() / "run.json").read_text()
+        record("proxies" in text and "proxy-p4ss" not in text + out + err and "proxy.corp" not in text + out + err,
+               "the warning is in the working file, and the value is nowhere", err)
+        moved = scene.tmp / "dockercfg"
+        moved.mkdir()
+        env = dict(scene.env, DOCKER_CONFIG=str(moved))
+        code, out, err = scene.cli("run", "--bundle", str(scene.bundle), COHORT_URL, "m1", "--only", "alice", env=env)
+        record(code == 0 and "proxies" not in err, "DOCKER_CONFIG replaces ~/.docker", err)
+        (moved / "config.json").write_text(json.dumps({"proxies": {"default": {"httpProxy": proxy}}}))
+        code, out, err = scene.cli("run", "--bundle", str(scene.bundle), COHORT_URL, "m1", "--only", "alice", env=env)
+        record(code == 0 and "proxies" in err and "proxy-p4ss" not in err, "$DOCKER_CONFIG/config.json is read", err)
+
+
+def test_run_json_records() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = Scene(tmp)
+        scene.cli("collect", COHORT_URL, "m1")
+        scene.run_all()
+        branch = scene.results()["branches"]["alice"]
+        record(branch["runtime"] == str(scene.stub) and branch["image_digest"] == "sha256:stubdigest",
+               "each branch records the runtime and the image's digest", str(branch)[:200])
+        # A full re-run starts empty: a deleted branch does not stay.
+        git_fixture("--git-dir", str(scene.bare), "update-ref", "-d", "refs/heads/carol/m1", cwd=scene.tmp)
+        scene.cli("collect", COHORT_URL, "m1")
+        code, out, err = scene.run_all("--only", "alice")
+        record("carol" in scene.results()["branches"], "control: --only keeps what it did not run")
+        code, out, err = scene.run_all()
+        record(code == 0 and sorted(scene.results()["branches"]) == ["alice", "bob"],
+               "a full re-run drops a deleted branch", str(sorted(scene.results()["branches"])))
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = Scene(tmp, digest_fails=True)
+        scene.cli("collect", COHORT_URL, "m1")
+        code, out, err = scene.run_all("--only", "alice")
+        record(code == 0 and scene.results()["branches"]["alice"]["image_digest"] == "unknown",
+               "a digest the runtime does not give is recorded as unknown", f"{code} {err}")
+
+
+def test_real_checkout_failure() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = Scene(tmp)
+        scene.cli("collect", COHORT_URL, "m1")
+        cache = scene.data / "belay" / "grading" / gr.cohort_name(COHORT_URL) / gr.CACHE_NAME
+        blob = git_fixture("--git-dir", str(cache), "rev-parse", "refs/heads/alice/m1:README.md", cwd=scene.tmp)
+        loose = cache / "objects" / blob[:2] / blob[2:]
+        record(loose.exists(), "the fixture can reach the blob it breaks", str(loose))
+        loose.unlink()
+        code, out, err = scene.run_all()
+        data = scene.results()["branches"]
+        record(code == gr.EXIT_REFUSED and all(
+            v["passed"] is False and "checkout failed" in v["reason"] for v in data["alice"]["validators"].values()),
+            "a real git failure fails that branch's validators with the reason", f"{code} {data['alice']}")
+        record(data["bob"]["validators"]["lint"]["passed"] is True
+               and data["carol"]["validators"]["scorer-tests"]["passed"] is True,
+               "the other participants are still graded")
+        srcs = {r["checkout"]["src"] for r in scene.records("run")}
+        record(len(scene.records("run")) == 4 and len(srcs) == 2, "the broken branch starts no container", str(srcs))
+        record(scene.leftovers() == [], "it leaves nothing behind", str(scene.leftovers()))
+
+
+def test_gitmodules_are_not_followed() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = Scene(tmp)
+        work = scene.work
+        target = scene.commits["alice/m1"]
+        git_fixture("checkout", "-q", "--orphan", "with-module", cwd=work)
+        git_fixture("rm", "-rfq", "--ignore-unmatch", ".", cwd=work)
+        (work / ".gitmodules").write_text(f'[submodule "sub"]\n\tpath = sub\n\turl = {scene.bare}\n')
+        (work / "README.md").write_text("erin\n")
+        (work / "run-tests.sh").write_text("exit 0\n")
+        (work / "lint.sh").write_text("exit 0\n")
+        git_fixture("add", "-A", cwd=work)
+        git_fixture("update-index", "--add", "--cacheinfo", f"160000,{target},sub", cwd=work)
+        git_fixture("commit", "-q", "-m", "module", cwd=work)
+        git_fixture("push", "-q", str(scene.bare), "HEAD:refs/heads/erin/m1", cwd=work)
+        control = scene.tmp / "control"
+        git_fixture("-c", "protocol.file.allow=always", "clone", "-q", "--recurse-submodules",
+                    "-b", "erin/m1", str(scene.bare), str(control), cwd=scene.tmp)
+        scene.cli("collect", COHORT_URL, "m1")
+        code, out, err = scene.run_all("--only", "erin")
+        co = scene.records("run")[0]["checkout"]
+        record((control / "sub" / "README.md").exists(), "control: a recursive clone would fetch it")
+        record(code == 0 and not any(p.startswith("sub/") for p in co["tree"]) and ".gitmodules" in co["tree"],
+               "a .gitmodules is not followed: the submodule's files are not in the checkout", f"{code} {co['tree']}")
+        record(not (Path(str(scene.record) + ".git-snapshot") / "modules").exists(),
+               "no submodule repository is fetched")
+
+
+def test_local_git_timeout() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = Scene(tmp)
+        scene.cli("collect", COHORT_URL, "m1")
+        prelude = "grade.PROBE_TIMEOUT = 0.000001"
+        code, out, err = scene.cli("collect", COHORT_URL, "m1", prelude=prelude)
+        # collect reaches list_branches after a real fetch
+        record(code == gr.EXIT_USAGE and "Traceback" not in err and "did not finish" in err,
+               "a local git that times out in collect is reported, no traceback", f"{code} {err}")
+        code, out, err = scene.run_all(prelude=prelude)
+        record(code == gr.EXIT_USAGE and "Traceback" not in err and "did not finish" in err,
+               "a local git that times out in run is reported, no traceback", f"{code} {err}")
+        record(scene.records("run") == [], "and nothing ran")
+
+
+def test_only_takes_positionals_after_it() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = Scene(tmp)
+        scene.cli("collect", COHORT_URL, "m1")
+        code, out, err = scene.cli("run", "--only", "alice", "--only", "bob", "--bundle", str(scene.bundle),
+                                   COHORT_URL, "m1")
+        record(code == 0 and sorted(scene.results()["branches"]) == ["alice", "bob"],
+               "--only before the positionals does not swallow them; it repeats", f"{code} {err}")
+
+
 def main() -> int:
     for test in (test_cohort_from_url_forms, test_store_dir_follows_xdg, test_work_tree_refusal,
                  test_forget, test_scheme, test_cli, test_classify_branch, test_collect,
@@ -1225,7 +1511,11 @@ def main() -> int:
                  test_huge_output_end_to_end, test_time_limit, test_interrupted_run_kills_the_container,
                  test_hanging_regex, test_file_checks, test_no_runtime, test_run_refusals,
                  test_run_again_and_only, test_exit_125_is_not_a_silent_fail, test_checkout_removal,
-                 test_trainer_git_config_does_not_reach_the_checkout):
+                 test_trainer_git_config_does_not_reach_the_checkout,
+                 test_cache_is_not_reused_for_another_url, test_run_with_a_token_url,
+                 test_mounted_git_discloses_nothing, test_docker_proxies_warning, test_run_json_records,
+                 test_real_checkout_failure, test_gitmodules_are_not_followed, test_local_git_timeout,
+                 test_only_takes_positionals_after_it):
         try:
             test()
         except Exception:  # pragma: no cover

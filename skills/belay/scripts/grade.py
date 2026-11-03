@@ -4,7 +4,7 @@
 Usage:
     grade.py collect <repo> <module-id>
         fetch the cohort repository into the local cache and list the branches
-    grade.py run --bundle <dir> <repo> <module-id> [--only <participant>...]
+    grade.py run --bundle <dir> <repo> <module-id> [--only <participant>]...
         run the bundle's validators on each collected branch, in a container
     grade.py forget <cohort>     delete one cohort's stored grades and cache
     grade.py --help
@@ -39,7 +39,7 @@ Exit codes:
        a work tree, the cohort name is not a bare name, the repository is not a
        Git URL, or there is no working container runtime. Also a finished run
        with a result that may not be a judgement of the code: a failed checkout,
-       or a container that exited 125.
+       or a container that exited 125, 126 or 127.
     2  usage or I/O error, or a fetch that failed
 
 Stdlib only, Python 3.11, and the shared restricted reader yamlite.py.
@@ -98,9 +98,19 @@ KILL_TIMEOUT = 30
 CLEANUP_TIMEOUT = 120
 # A file bigger than this is not read for `file-contains`.
 FILE_CHECK_MAX_BYTES = 16 * 1024 * 1024
-# The container runtime's own convention for "the runtime failed", which docker
-# and podman share. A command inside can exit with it as well.
-RUNTIME_FAILURE_STATUS = 125
+# The conventions docker and podman share: 125, the runtime itself failed; 126 and
+# 127, the command could not be run. A command inside can exit with these as well.
+RUNTIME_REFUSED_STATUS = 125
+COMMAND_NOT_RUN_STATUSES = (126, 127)
+
+# Limits on every container, so that one branch's code cannot take the trainer's
+# machine down with a fork bomb or by eating its memory, or gain privileges through
+# a setuid program. Rootless podman can refuse the first two without cgroup
+# delegation; that shows as RUNTIME_REFUSED_STATUS.
+PIDS_LIMIT = "512"
+MEMORY_LIMIT = "4g"
+SECURITY_OPT = "no-new-privileges"
+CONTAINER_LIMITS = ("--pids-limit", PIDS_LIMIT, "--memory", MEMORY_LIMIT, "--security-opt", SECURITY_OPT)
 
 GRADABLE_KINDS = ("command", "file-exists", "file-contains")
 
@@ -253,37 +263,51 @@ def load_scheme(bundle: Path) -> Scheme:
 _SAFE = re.compile(r"[^A-Za-z0-9._-]+")
 
 
-def normalise_url(repo_url: str) -> str:
-    """host/path of a repository URL, whatever its form.
+_DEFAULT_PORTS = {"https": "443", "ssh": "22"}
 
-    https://Host/o/r.git, ssh://git@host/o/r and git@host:o/r all give
-    host/o/r, so one repository is one cohort however it was typed. Anything
-    up to the last '@' of the authority (user, password, token) is dropped
-    first, so a credential can never reach a cohort name, and the same
-    repository with or without credentials is one cohort.
+
+def normalise_url(repo_url: str) -> str:
+    """[user@]host[:port]/path: one string per repository, however it was typed.
+
+    https://Host/o/r.git, ssh://git@host/o/r and git@host:o/r all give host/o/r.
+    Two forms that can reach different repositories stay different, because the
+    cache and the grades are keyed on this: a port other than the scheme's default
+    can be another server, and an scp path is relative to the ssh user's home.
+    `git` is the shared ssh user of a forge, and equals none.
+
+    A credential never reaches it. All of an https userinfo is one (the part up to
+    the last '@' of the authority), and so is an ssh password. So one repository
+    with or without a credential is one cohort.
     """
     url = repo_url.strip()
-    has_scheme = "://" in url
-    if has_scheme:
-        url = url.split("://", 1)[1]
+    scheme, has_scheme, rest = url.partition("://")
+    scheme = scheme.lower() if has_scheme else ""
+    if not has_scheme:
+        rest = url
     # The authority ends at the first '/'; in scp form that is after host:dir,
     # which holds no '@' of its own, so the last '@' before it is the userinfo's.
-    head, slash, tail = url.partition("/")
-    head = head.rpartition("@")[2]
-    if not has_scheme and ":" in head and not head.startswith((".", "/")):
-        # scp form host:path. A leading numeric part is a directory, not a
-        # port, so host.com:8080/o/r (scp) stays distinct from
-        # ssh://host.com:8080/o/r (a port); only the latter drops its port.
-        host, _, first = head.partition(":")
-        url = f"{host}/{first}{slash}{tail}"
+    head, slash, tail = rest.partition("/")
+    userinfo, _, address = head.rpartition("@")
+    user = "" if scheme in ("https", "http") else userinfo.partition(":")[0]
+    if user == "git":
+        user = ""
+    port = ""
+    if not has_scheme and ":" in address and not address.startswith((".", "/")):
+        # scp form host:path. A leading numeric part is a directory, not a port.
+        host, _, first = address.partition(":")
+        path = f"{first}{slash}{tail}"
     else:
-        host = head.split(":", 1)[0] if has_scheme else head
-        url = host + slash + tail
-    host, _, path = url.partition("/")
+        host, _, port = address.partition(":") if has_scheme else (address, "", "")
+        path = tail
+        port = str(int(port)) if port.isdigit() else port
+        if port == _DEFAULT_PORTS.get(scheme):
+            port = ""
     path = path.strip("/")
     if path.endswith(".git"):
         path = path[:-4]
-    return f"{host.lower()}/{path}".strip("/")
+    who = f"{user}@" if user else ""
+    where = f":{port}" if port else ""
+    return f"{who}{host.lower()}{where}/{path}".strip("/")
 
 
 def cohort_name(repo_url: str) -> str:
@@ -296,7 +320,8 @@ def cohort_name(repo_url: str) -> str:
     if not norm:
         raise GradeError("the repository URL is empty", EXIT_USAGE)
     tail = "-".join(norm.split("/")[-2:])
-    slug = _SAFE.sub("-", tail).strip("-.") or "cohort"
+    # No "..": `forget` refuses a name holding one, and it must accept every name collect prints.
+    slug = re.sub(r"\.{2,}", ".", _SAFE.sub("-", tail)).strip("-.") or "cohort"
     digest = hashlib.sha256(norm.encode("utf-8")).hexdigest()[:10]
     return f"{slug[:60]}-{digest}"
 
@@ -407,11 +432,13 @@ def classify_branch(branch: str, module: str) -> tuple[str, str | None]:
 
 def checked_url(repo: str) -> str:
     """The URL rule of `catalogs.start_from_problems`, which is `is_git_url`."""
-    if not is_git_url(repo):
+    # `?` and `#` are refused on top of that rule: a token in a query or fragment
+    # is not in the authority, so it would reach a directory name and the output.
+    if not is_git_url(repo) or "?" in repo or "#" in repo:
         raise GradeError(
             "the repository is not a Git URL; use https://..., ssh://... or "
             "user@host:path, whose host (and any user) begins with a letter or digit, "
-            "and which holds no whitespace and none of ` $ ; | & < > ( ) ' \" \\"
+            "and which holds no whitespace and none of ` $ ; | & < > ( ) ' \" \\ ? #"
         )
     return repo
 
@@ -474,9 +501,7 @@ def fetch_cache(repo: str, cache: Path) -> None:
     """
     make_private(cache)
     if not (cache / "HEAD").exists():
-        init = clean_git(["init", "--quiet", "--bare", "--template=", str(cache)], PROBE_TIMEOUT)
-        if init.returncode != 0:
-            raise GradeError(f"cannot create the cache: {init.stderr.decode(errors='replace')}", EXIT_USAGE)
+        local_git(["init", "--quiet", "--bare", "--template=", str(cache)], "create the cache")
     run = run_git(
         ["-c", "core.hooksPath=/dev/null", "--git-dir", str(cache), "fetch", "--quiet", "--prune",
          "--no-tags", "--no-write-fetch-head", "--", repo, "+refs/heads/*:refs/heads/*"],
@@ -489,26 +514,48 @@ def fetch_cache(repo: str, cache: Path) -> None:
         )
 
 
+def escape_name(name: str) -> str:
+    """A branch name a participant chose, with anything unprintable made visible.
+
+    It is shown to the trainer's terminal and stored, so it can carry no control
+    sequence and no line end. Backslash cannot be in a ref name, so this is unambiguous.
+    """
+    return "".join(c if c.isprintable() else c.encode("unicode_escape").decode("ascii") for c in name)
+
+
+def local_git(args: list[str], what: str) -> subprocess.CompletedProcess:
+    """clean_git on the local cache, where a failure is a message and not a traceback."""
+    try:
+        done = clean_git(args, PROBE_TIMEOUT)
+    except subprocess.TimeoutExpired as exc:
+        raise GradeError(f"cannot {what}: git did not finish within {PROBE_TIMEOUT} seconds", EXIT_USAGE) from exc
+    if done.returncode != 0:
+        raise GradeError(f"cannot {what}: {done.stderr.decode('utf-8', 'replace').strip()}", EXIT_USAGE)
+    return done
+
+
 def list_branches(cache: Path, module: str) -> Listing:
-    done = clean_git(
+    done = local_git(
         ["--git-dir", str(cache), "for-each-ref",
          "--format=%(refname:lstrip=2)%09%(objectname)%09%(committerdate:iso-strict)", "refs/heads"],
-        PROBE_TIMEOUT,
+        "read the cache",
     )
-    if done.returncode != 0:
-        raise GradeError(f"cannot read the cache: {done.stderr.decode(errors='replace')}", EXIT_USAGE)
     listing = Listing()
-    # A tab cannot be in a ref name. Bytes that are not UTF-8 become U+FFFD,
-    # which fails the participant pattern, so such a name is listed and not used.
-    for line in done.stdout.decode("utf-8", "replace").splitlines():
+    # Lines end at "\n" alone: str.splitlines also splits on U+0085, U+2028 and
+    # U+2029, which git allows in a ref name, and neither "\n" nor a tab can be in
+    # one. Bytes that are not UTF-8 become \xNN, whose backslash fails the
+    # participant pattern, so such a name is listed and not used.
+    for line in done.stdout.decode("utf-8", "backslashreplace").split("\n"):
+        if not line:
+            continue
         branch, commit, date = line.split("\t")
         kind, who = classify_branch(branch, module)
         if kind == "participant":
             listing.participants.append(BranchRef(who, branch, commit, date))
         elif kind == "refused":
-            listing.refused.append(branch)
+            listing.refused.append(escape_name(branch))
         else:
-            listing.other.append(branch)
+            listing.other.append(escape_name(branch))
     return listing
 
 
@@ -585,11 +632,11 @@ def container_argv(
 ) -> list[str]:
     """The one command that starts participant code. An argument list, no shell.
 
-    One mount, the checkout. Variables by name only: `-e NAME` takes the value
+    One mount, the checkout. CONTAINER_LIMITS. Variables by name only: `-e NAME` takes the value
     from the runtime's own environment, so no value is on a command line. --rm
     and a generated --name make the container killable and leave nothing behind.
     """
-    argv = [runtime, "run", "--rm", "--name", name]
+    argv = [runtime, "run", "--rm", "--name", name, *CONTAINER_LIMITS]
     if not network:
         argv += ["--network", "none"]
     argv += ["-v", f"{checkout}:{MOUNT}", "-w", MOUNT]
@@ -733,16 +780,19 @@ class CheckoutFailed(Exception):
 def make_checkout(cache: Path, ref: BranchRef, target: Path, deadline: float) -> None:
     """A fresh repository holding this branch alone, from the local cache.
 
-    Not a clone: it has no remote, so no URL, cache path or credential is in its
-    config. No template, so no hooks directory. It fetches one ref, so another
-    participant's work is not in what is mounted. The branch reaches git only as
-    an argument, and only after it passed the participant pattern.
+    This `.git` is mounted, so it holds nothing of the trainer's. Not a clone: it
+    has no remote, so no URL or credential is in its config. No FETCH_HEAD and no
+    reflog: those would hold the cache's path, and the trainer's login and hostname.
+    No template, so no hooks directory. It fetches one ref, so another participant's
+    work is not in what is mounted. The branch reaches git only as an argument, and
+    only after it passed the participant pattern.
     """
+    quiet_logs = ["-C", str(target), "-c", "core.logAllRefUpdates=false"]
     steps = (
         ["init", "--quiet", "--template=", str(target)],
-        ["-C", str(target), "fetch", "--quiet", "--no-tags", "--", str(cache),
+        [*quiet_logs, "fetch", "--quiet", "--no-tags", "--no-write-fetch-head", "--", str(cache),
          f"+refs/heads/{ref.branch}:refs/heads/{ref.branch}"],
-        ["-C", str(target), "checkout", "--quiet", "--force", "--detach", ref.commit],
+        [*quiet_logs, "checkout", "--quiet", "--force", "--detach", ref.commit],
     )
     for step in steps:
         done = clean_git(step, max(deadline - time.monotonic(), 0.001))
@@ -849,6 +899,16 @@ def verdict(share: ValidatorShare, passed: bool, output: str = "", reason: str |
     }
 
 
+def not_a_judgement(status: int) -> str:
+    if status == RUNTIME_REFUSED_STATUS:
+        return (f"exit status {status}: the container runtime refused the command. This may be a limit "
+                f"on rootless podman (--pids-limit, --memory need cgroup delegation) or an image it "
+                "could not start, so this may not be a judgement of the code. The command itself can "
+                "also exit with this status.")
+    return (f"exit status {status}: the command could not be run in the image, or it exited with this "
+            "status itself, so this may not be a judgement of the code.")
+
+
 def run_branch(plan: RunPlan, ref: BranchRef, warnings: list[str]) -> tuple[dict, bool]:
     """Every validator's result for one branch, and whether a result is suspect.
 
@@ -910,10 +970,9 @@ def run_branch(plan: RunPlan, ref: BranchRef, warnings: list[str]) -> tuple[dict
                 found[share.name] = verdict(share, False, output, outcome.error)
             elif outcome.status == 0:
                 found[share.name] = verdict(share, True, output)
-            elif outcome.status == RUNTIME_FAILURE_STATUS:
+            elif outcome.status == RUNTIME_REFUSED_STATUS or outcome.status in COMMAND_NOT_RUN_STATUSES:
                 suspect = True
-                reason = (f"exit status {outcome.status}: the container runtime may have failed to start "
-                          "the container, so this may not be a judgement of the code")
+                reason = not_a_judgement(outcome.status)
                 found[share.name] = verdict(share, False, output, reason)
                 warnings.append(f"{ref.participant}: {share.name}: {reason}")
             else:
@@ -1047,6 +1106,39 @@ def pull_image(plan: RunPlan, warnings: list[str]) -> None:
     warnings.append(f"could not pull {plan.scheme.image}: {detail}")
 
 
+def docker_proxy_warning() -> str | None:
+    """The docker client adds its config's `proxies` to every container, undeclared.
+
+    Only whether the key is set is read; a proxy URL can hold a password, so its
+    value is never printed or stored. An unreadable config is docker's business.
+    """
+    directory = os.environ.get("DOCKER_CONFIG")
+    base = Path(directory) if directory else Path(os.environ.get("HOME", "/nonexistent")) / ".docker"
+    path = base / "config.json"
+    try:
+        config = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not (isinstance(config, dict) and config.get("proxies")):
+        return None
+    return (f"{path} sets `proxies`: docker adds a proxy address, and any password in it, to every "
+            "container, though grading.env does not declare it. Remove it for grading if that matters.")
+
+
+def image_digest(plan: RunPlan) -> str:
+    """The image the results came from, or "unknown". A tag can move between runs."""
+    try:
+        done = subprocess.run(
+            [plan.runtime, "image", "inspect", "--format", "{{.Id}}", plan.scheme.image or ""],
+            env=plan.runtime_env, stdin=subprocess.DEVNULL, capture_output=True,
+            timeout=PROBE_TIMEOUT, check=False,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return "unknown"
+    digest = done.stdout.decode("utf-8", "replace").strip()
+    return digest if done.returncode == 0 and digest else "unknown"
+
+
 def build_plan(repo: str, scheme: Scheme, runtime: str, warnings: list[str]) -> RunPlan:
     runtime_env = {k: os.environ[k] for k in RUNTIME_ENV_KEYS if k in os.environ}
     declared = []
@@ -1093,12 +1185,17 @@ def cmd_run(args: argparse.Namespace) -> int:
     warnings: list[str] = []
     plan = build_plan(repo, scheme, runtime, warnings)
     if not (plan.cache / "HEAD").exists():
-        raise GradeError(f"nothing is collected for this repository; run collect {normalise_url(repo)} first")
+        raise GradeError("nothing is collected for this repository; run collect with the same URL first")
     listing = list_branches(plan.cache, args.module)
     selected = select_branches(listing, args.only)
     probe_runtime(runtime, plan.runtime_env)
+    digest_of_image = "unknown"
     if any(v.declared.get("kind") == "command" for v in scheme.validators):
         pull_image(plan, warnings)
+        digest_of_image = image_digest(plan)
+        proxy_warning = docker_proxy_warning()
+        if proxy_warning:
+            warnings.append(proxy_warning)
 
     path = store / RUN_FILE
     digest = scheme_digest(scheme)
@@ -1115,7 +1212,8 @@ def cmd_run(args: argparse.Namespace) -> int:
         "refused": listing.refused,
         "no_convention": listing.other,
         "warnings": warnings,
-        "branches": earlier_results(path, digest, warnings),
+        # A full run starts empty, so a deleted branch does not stay.
+        "branches": earlier_results(path, digest, warnings) if args.only else {},
     }
     print(f"cohort: {data['cohort']}")
     any_suspect = False
@@ -1124,6 +1222,8 @@ def cmd_run(args: argparse.Namespace) -> int:
         for ref in selected:
             record, suspect = run_branch(plan, ref, warnings)
             any_suspect = any_suspect or suspect
+            record["runtime"] = runtime
+            record["image_digest"] = digest_of_image
             data["branches"][ref.participant] = record
             write_json_private(path, data)  # after each branch: a stopped run keeps the rest
             print(f"{ref.participant} ({ref.branch}, {ref.commit[:12]}):")
@@ -1164,8 +1264,8 @@ def _add_collect_args(parser: argparse.ArgumentParser) -> None:
 def _add_run_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--bundle", required=True, help="the module's bundle directory")
     _add_collect_args(parser)
-    parser.add_argument("--only", nargs="+", action="extend", metavar="participant",
-                        help="grade only these participants; others' results are kept")
+    parser.add_argument("--only", action="append", metavar="participant",
+                        help="grade only this participant, repeat for more; others' results are kept")
 
 
 # name -> (function, help, argument-adder). Add propose/confirm here.
