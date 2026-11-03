@@ -111,7 +111,9 @@ every file in a lesson folder to be named by `LESSON.md`.
 **The body says what happens in each state.** For a user story that is the course's process —
 what a good specification needs, how to hand it to the implementation session, what to check on
 return, how to review. The tutor follows the body; the runner knows only the state names and
-their order.
+their order. A row is in the state whose work is under way; only the last state is entered once
+its work is finished, and that work happens while the row is in the state before it (section 10,
+item 1).
 
 **The lesson completes when every task is in its last state or `skipped`.** Nothing else about
 completion changes: a task lesson may still declare validators and completion conditions.
@@ -147,9 +149,9 @@ completion changes: a task lesson may still declare validators and completion co
    or skipping one, needs a reason the participant states; the tutor records it (`skipped`,
    reason in the parenthesis).
 2. **Work.** The tutor writes the row in the first state and follows the lesson body for what
-   that state asks of the participant. A row enters a later state only once the body's condition
-   for that state's work is met (section 10, item 1), and goes back to an earlier one when the body
-   says so.
+   that state asks of the participant. It moves the row to the next state when the body's
+   condition for that state is met, and back to an earlier one when the body says so. Only the last
+   state differs: the row enters it once its work is finished (section 10, item 1).
 3. **Guide by level.** Inside each state the participant's level for the objective the body
    names for that state decides how closely the tutor guides (`runner-protocol.md` section 18).
    An exam lesson (cohort-grading design) caps help at rung 3 as everywhere.
@@ -275,16 +277,16 @@ belongs in `bundle-format.md` as the worked example.
 
 Implemented on 2026-11-03. Writing the validator and the protocol forced these decisions, which
 this design left open, and the branch review ruled on others. Each is stated once, where its
-reader reads it. §3 item 2, §2.1 and §7 are corrected in place to agree with them.
+reader reads it. §2.1, §2.2, §3 item 2 and §7 are corrected in place to agree with them.
 
-**Rulings of the branch review (fix round 1):**
+**Rulings of the branch review:**
 
-1. **A row enters a state only once the work the body names for that state is done.** While that
-   work goes on, the row stays in the previous state, so the last state means done with its work
-   finished. A closed task stays closed unless the participant asks to reopen it. The first state
-   is written on taking the task, so its work and the second's share it, and *Next task* says
-   which is under way. A lesson with one state writes no row until the work is done
-   (`runner-protocol.md` §19.2, `bundle-format.md` §6).
+1. **A row is in the state whose work is under way.** `specifying` means the specification is being
+   written, and `handed-off` means the participant is in the implementation session. Only the last
+   state differs: it is entered once its work is finished, and that work happens while the row is
+   in the state before it. For the default states, `in-progress` is under way and `done` is finished.
+   In a one-state lesson the row is written when the work is finished. A closed task stays closed
+   unless the participant asks to reopen it (`runner-protocol.md` §19.2, `bundle-format.md` §6).
 2. **A state the body says nothing about is no defect report.** The tutor says the lesson does not
    describe it, and moves the row when the participant says that work is done. A last state with no
    section has no work of its own. `DEFECT_KINDS` does not change (§19.2).
@@ -294,8 +296,11 @@ reader reads it. §3 item 2, §2.1 and §7 are corrected in place to agree with 
    task taken in this lesson, which the row's parenthesis names. A request-written task left open
    when its lesson ends is not active in the next. A row closed under an earlier lesson's states
    stays closed, and a row in a state the active lesson does not declare is never active: it counts
-   as closed. Only a row for a file in the active lesson's own `tasks` directory is reported for
-   this (§19, `state-lifecycle.md` §14.4).
+   as closed. That also catches a request-written task left open under an earlier lesson, if a later
+   offer lists its file, because the tutor cannot read the earlier lesson's states; the participant
+   can reopen it. The parenthesis is the only record that shows, after a cold start, which lesson
+   such a task was taken in. Only a row for a file in the active lesson's own `tasks` directory is
+   reported for an undeclared state (§19, `state-lifecycle.md` §14.4).
 5. **The own-task id comparison is a step of the tutor's review.** `--tasks` compares inside one
    directory. On a clash the participant renames the file, and it stays out of the offer until
    then (§19.6).

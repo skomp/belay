@@ -1858,10 +1858,9 @@ not exist.
 
 **The body says what happens in each state**: what work the state asks of the learner, what
 has to be true for that work to count as done, and anything that sends the task back. **A
-row enters a state only once that state's work is done**, and while the work goes on it stays
-in the previous state, so a row names the last state whose work is finished and the last
-state means done, with its work finished (`runner-protocol.md` section 19.2). Give each state
-its own section, except that the last needs none unless it has work of its own. Under
+row is in the state whose work is under way. Only the last state differs: it is entered once its
+work is finished**, and that work happens while the row is in the state before it, so the last
+state means done (`runner-protocol.md` section 19.2). Give each state its own section, except that the last needs none unless it has work of its own. Under
 `levels: true`, name the learning objective the state exercises, from this
 lesson's `teaches`. Where you want the tutor to review the work, give the state a checklist;
 the tutor reviews against it and names what is not met, and its review never stops the
@@ -1885,9 +1884,10 @@ hand-off and the review are what the programme writes into its lessons.
 
 - **The keys:** `tasks: stories/`, `task_states: [specifying, handed-off, implemented,
   reviewed]`.
-- **How the row moves:** it enters a state when that state's work is done. So it reads
-  `specifying` from when the story is taken until the hand-off is done, `handed-off` until the
-  participant is back and the *Implemented* work is done, and `implemented` during the review.
+- **How the row moves:** it reads `specifying` while the specification is being written,
+  `handed-off` while the participant is in the implementation session, and `implemented` once
+  they are back, through the *Implemented* work and the review. Only `reviewed` is entered once
+  its work is finished.
 - **The body's *Specifying* section:** the participant writes `specs/<story-id>.md`. A `## Spec
   criteria` checklist asks for testable acceptance criteria, non-functional requirements
   named, and a split into tasks. The objective for this state is `spec-writing`.

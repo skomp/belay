@@ -2815,22 +2815,19 @@ skipping it for a stated reason.
 
 ### 19.2 Work through the states
 
-**A row enters a state only once the work the body names for that state is done.** While that
-work goes on, the row stays in the previous state. So a row names the last state whose work is
-finished, and the last state means the task is done.
+**A row is in the state whose work is under way.** Write it in the first state when the learner
+takes the task, and not when you offer it. Move it to the next state when the body's condition
+for the current state is met, and back to an earlier state when the body says so. Apart from a
+skip and a reopening, nothing else moves it.
 
-The first state is the one exception, because there is no earlier state to wait in. Write the
-row in the first state when the learner takes the task, and not when you offer it. The first
-state's work and the second's both happen with the row there, and *Next task* says which is
-under way. When a lesson has only one state, write no row until its work is done, because the
-row closes the task; until then the active task is the one *Next task* names.
+**Only the last state differs: it is entered once its work is finished.** Its work happens while
+the row is in the state before it, so the last state means done. With the default states,
+`in-progress` is under way and `done` is finished. When a lesson has only one state, write the
+row when the work is finished, because the row closes the task; until then the active task is the
+one *Next task* names.
 
 Read the active task's file, and follow the lesson body for the state whose work is under way:
-the state after the row's, or the first state until its work is done.
-
-Move the row into the next state when the body's condition for that state is met, and back to
-an earlier state when the body says so. Apart from a skip and a reopening, nothing else moves
-it.
+the row's state, or the last state once the work of the state before it is done.
 
 **When the body says nothing about a state:**
 
@@ -2951,8 +2948,7 @@ up completion.
 
 - **Opening every task file to build the offer.** Section 19.1.
 - **Treating a stated reason as something to approve.** Section 19.1.
-- **Writing a row into a state before that state's work is done**, other than the first.
-  Section 19.2.
+- **Writing a row into the last state before its work is finished.** Section 19.2.
 - **Moving a row on your impression that the work is finished**, rather than on the body's
   condition. Section 19.2.
 - **Treating a row from an earlier lesson as this lesson's active task.** The terms at the top of

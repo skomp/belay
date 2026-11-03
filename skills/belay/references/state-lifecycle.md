@@ -1796,8 +1796,8 @@ is read as part of that bullet, so the date and the parenthesis may sit on a lat
 
 - **The id** is the task file's `id`.
 - **The state** is one of the active lesson's states (`runner-protocol.md` section 19), or
-  `skipped`. A row enters a state only once that state's work is done, except the first
-  (`runner-protocol.md` section 19.2).
+  `skipped`. A row is in the state whose work is under way; only the last state is entered once
+  its work is finished (`runner-protocol.md` section 19.2).
 - **The free text** may be empty, and holds what the course or the tutor needs to name: a pull
   request, the result of a review (14.2). Nothing here calls a service to find out about it.
 - **The date** is the day of the last change to the row, `YYYY-MM-DD`.
@@ -1818,7 +1818,7 @@ date and `updated`:
 1. **the learner takes a task** — the row, in the first state. It records that they took the
    task, which has happened, and claims nothing about the work (section 1). A task taken out of
    order carries the reason in its parenthesis. A lesson with one state writes this row when the
-   work is done (`runner-protocol.md` section 19.2);
+   work is finished (`runner-protocol.md` section 19.2);
 2. **the learner skips a task** — the row, in `skipped`, with the reason in its parenthesis;
 3. **the state changes**, forwards or back, a reopening included, by `runner-protocol.md` section
    19.2 — the row is rewritten in place, and *Next task* with it;
