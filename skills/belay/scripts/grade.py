@@ -181,20 +181,33 @@ def normalise_url(repo_url: str) -> str:
     """host/path of a repository URL, whatever its form.
 
     https://Host/o/r.git, ssh://git@host/o/r and git@host:o/r all give
-    host/o/r, so one repository is one cohort however it was typed.
+    host/o/r, so one repository is one cohort however it was typed. Anything
+    up to the last '@' of the authority (user, password, token) is dropped
+    first, so a credential can never reach a cohort name, and the same
+    repository with or without credentials is one cohort.
     """
     url = repo_url.strip()
-    if "://" in url:
+    has_scheme = "://" in url
+    if has_scheme:
         url = url.split("://", 1)[1]
-    elif re.match(r"^[^/@:]*@?[^/:]+:(?!//)", url) and not url.startswith(("/", ".")):
-        url = url.replace(":", "/", 1)  # scp form host:path
-    url = url.split("@", 1)[1] if "@" in url.split("/", 1)[0] else url
+    # The authority ends at the first '/'; in scp form that is after host:dir,
+    # which holds no '@' of its own, so the last '@' before it is the userinfo's.
+    head, slash, tail = url.partition("/")
+    head = head.rpartition("@")[2]
+    if not has_scheme and ":" in head and not head.startswith((".", "/")):
+        # scp form host:path. A leading numeric part is a directory, not a
+        # port, so host.com:8080/o/r (scp) stays distinct from
+        # ssh://host.com:8080/o/r (a port); only the latter drops its port.
+        host, _, first = head.partition(":")
+        url = f"{host}/{first}{slash}{tail}"
+    else:
+        host = head.split(":", 1)[0] if has_scheme else head
+        url = host + slash + tail
     host, _, path = url.partition("/")
-    host = host.split(":", 1)[0].lower() if "/" in url else host.lower()
     path = path.strip("/")
     if path.endswith(".git"):
         path = path[:-4]
-    return f"{host}/{path}".strip("/")
+    return f"{host.lower()}/{path}".strip("/")
 
 
 def cohort_name(repo_url: str) -> str:
@@ -269,7 +282,9 @@ def forget(cohort: str) -> str:
     root = grading_root()
     refuse_work_tree(root)
     target = root / cohort
-    if target.is_symlink() or not target.is_dir():
+    if target.is_symlink():
+        return f"{target} is a symlink, not a cohort directory; left alone, nothing deleted"
+    if not target.is_dir():
         return f"no grades stored for cohort {cohort}; nothing deleted"
     if target.resolve().parent != root.resolve():  # belt and braces
         raise GradeError(f"{target} is not directly inside the store; not deleting")

@@ -134,6 +134,16 @@ def test_cohort_from_url_forms() -> None:
     all_names = {name} | {gr.cohort_name(u) for u in other}
     record(len(all_names) == 5, "different URLs, even slug-alike ones, never collide",
            str(sorted(all_names)))
+    plain = gr.cohort_name("git@github.com:acme/team-7.git")
+    for url in ("user:tok3n@github.com:acme/team-7.git", "https://user:p@ss@github.com/acme/team-7.git",
+                "https://user:tok3n@github.com/acme/team-7.git", "ssh://u:tok3n@github.com/acme/team-7"):
+        n = gr.cohort_name(url)
+        record("tok3n" not in n and n == plain and "ss" not in n.split("-team")[0],
+               f"credentials in {url!r} never reach the cohort name, and the cohort is unchanged", n)
+    record(gr.cohort_name("host.com:8080/o/r") != gr.cohort_name("ssh://host.com:8080/o/r"),
+           "scp host.com:8080/o/r (a directory) stays distinct from ssh://host.com:8080/o/r (a port)")
+    record(gr.cohort_name("ssh://host.com:8080/o/r") == gr.cohort_name("https://host.com/o/r"),
+           "a URL's port is dropped")
     hostile = ["https://h/../../etc/x", "git@h:../../x", "https://h/a b/c;d", "https://h/-x/y"]
     for url in hostile:
         n = gr.cohort_name(url)
@@ -154,15 +164,19 @@ def test_store_dir_follows_xdg() -> None:
             for bad in ("../x", "a/b", "..", ""):
                 record(refused(gr.store_dir, "https://h/o/r", bad) is not None,
                        f"module id {bad!r} is refused")
-        old = os.environ.pop("XDG_DATA_HOME", None)
+        saved = {k: os.environ.get(k) for k in ("XDG_DATA_HOME", "HOME")}
         try:
+            os.environ.pop("XDG_DATA_HOME", None)
             home = Path(tmp) / "home"
             os.environ["HOME"] = str(home)
             record(gr.data_home() == home / ".local" / "share",
                    "without XDG_DATA_HOME the base is ~/.local/share", str(gr.data_home()))
         finally:
-            if old is not None:
-                os.environ["XDG_DATA_HOME"] = old
+            for k, v in saved.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
 
 
 def test_work_tree_refusal() -> None:
@@ -231,6 +245,8 @@ def test_forget() -> None:
         code, out, err = run_cli(data, "forget", "evil")
         record((outside / "precious").exists(), "forget never follows a symlink out of the store",
                f"{code} {out}{err}")
+        record("symlink" in out and "left alone" in out,
+               "forget on a symlinked cohort says it is a symlink and was left alone", out)
 
 
 def test_scheme() -> None:
