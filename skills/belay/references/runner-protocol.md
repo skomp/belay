@@ -265,7 +265,8 @@ procedure when they do.
 ### The runner's four commands, and a host without them
 
 The runner's scripts are started by bare command: `belay-catalogs`, `belay-validate`,
-`belay-plan-update` and `belay-evidence`. Claude Code puts the plugin's `bin/` directory on
+`belay-plan-update` and `belay-evidence`. A trainer's fifth, `belay-grade`, grades a
+cohort's module work and is not part of a learner's course. Claude Code puts the plugin's `bin/` directory on
 the Bash tool's `PATH`, so the command names no path in the plugin cache, and under
 `permissions.blockReadsOutsideWorkingDirectories` a bare command whose arguments stay
 inside the workspace starts without asking the learner. An argument that names a path
