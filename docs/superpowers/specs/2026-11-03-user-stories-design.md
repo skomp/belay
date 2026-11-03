@@ -65,9 +65,16 @@ them, or to let a later lesson ask the participant to write stories of their own
 
 ### 2.1 Story files
 
-Given story files live **in the module bundle**, in the directory the story lesson names
-(section 2.2). Materialization copies them into the instance with the rest of the bundle, so
-they sit at `tutorial/<stories>/` and are **read-only there, like `tutorial/lessons/`**. A
+Given story files live **in the story lesson's own folder** — the lesson is a folder lesson,
+and its stories are in a subdirectory of it, for example
+`lessons/04-build-the-scorer/stories/`. Materialization already copies `lessons/` in full, so
+the stories arrive at `tutorial/lessons/04-build-the-scorer/stories/` with no change to
+materialization or to the update path, and are **read-only there, like every lesson file**.
+
+Measured on 2026-11-03, before choosing this: materialization copies only `tutorial.yaml`,
+`COURSE.md`, `DESIGN.md` and `lessons/`, so a `stories/` directory at the bundle root would not
+reach the instance; and a directory directly under `lessons/` without a `LESSON.md` is a check 4
+finding. A
 correction reaches a running instance through the existing update path (2026-09-11 spec,
 section 15c): a changed story is a MINOR revision; a removed or renamed story is MAJOR, because
 an instance's `## Stories` row may name it.
@@ -104,7 +111,7 @@ A story lesson is an ordinary lesson in the module bundle that declares `stories
 id: 04-build-the-scorer
 title: Build the lead scorer
 teaches: [spec-writing, code-review, pull-requests]
-stories: stories/              # new, MAY: the bundle directory holding the given story files
+stories: stories/              # new, MAY: a directory inside this lesson's folder
 specs: specs/                  # new, MAY: where specifications are written; default specs/
 ---
 ```
@@ -114,13 +121,16 @@ specs: specs/                  # new, MAY: where specifications are written; def
 - **Its body MUST carry a non-empty `## Spec criteria` section**: the checklist the tutor
   reviews each specification against (section 3, step 2). The criteria are the course's, so
   every participant's specification is held to the same standard.
-- **The body MUST also describe the work in prose**, for a runner that predates this design
-  (section 5).
+- **Its body lists every story file by path**, one line each with the story's title — for
+  example `- stories/012-lead-scoring.md — Score incoming leads`. The list is the prose an older
+  runner teaches from (section 5), and it is what makes an older validator accept the files:
+  its check 6 requires every file in a lesson folder to be named by `LESSON.md`. The new
+  validator checks the list against the directory (section 4).
 - **It completes when every story for this module is `reviewed`.** The module gate — the
   module's validators passing — is belay#94's, and this design leaves room for it rather than
   defining it.
-- `stories` is relative to the bundle root; `specs` is relative to the workspace root. Neither
-  contains a `..` segment or is absolute.
+- `stories` is relative to the lesson's folder; `specs` is relative to the workspace root.
+  Neither contains a `..` segment or is absolute.
 
 ### 2.3 The story stage, and use cases
 
@@ -128,7 +138,7 @@ A story lesson declares how much of the story work the participant does:
 
 ```yaml
 story_stage: given             # new, MAY: given | self-cut; default given
-use_cases: use-cases/          # new: required at self-cut, not allowed otherwise; in the bundle
+use_cases: use-cases/          # new: required at self-cut, not allowed otherwise; in the lesson folder
 own_stories: stories/          # new, at self-cut: where the participant writes stories; workspace
 ```
 
@@ -137,7 +147,8 @@ own_stories: stories/          # new, at self-cut: where the participant writes 
 | `given` | finished story files, in the bundle | nothing; intake starts from them |
 | `self-cut` | use case files, in the bundle | cuts each use case into story files, in the format of section 2.1 |
 
-**A use case file** lives in the bundle, in the directory `use_cases` names: frontmatter `id`
+**A use case file** lives in the lesson's folder, in the directory `use_cases` names, and the
+lesson body lists each one by path, as for stories: frontmatter `id`
 and `title` (the same rules as section 2.1), and a body describing the goal, the users and the
 constraints. At `self-cut` the lesson's input is its use cases; each one produces the stories
 the five steps then run on.
@@ -260,10 +271,10 @@ silent when its key is absent.
 
 | Check | Mode | Reports |
 |---|---|---|
-| stories | both | `stories` not a string; an absolute path or a `..` segment; a directory that does not exist in the bundle or holds no story file; a lesson declaring `stories` without a non-empty `## Spec criteria` section |
+| stories | both | `stories` on a single-file lesson; `stories` not a string; an absolute path or a `..` segment; a directory that does not exist in the lesson's folder or holds no story file; a story file the lesson body does not list, or a listed path that does not exist; a lesson declaring `stories` without a non-empty `## Spec criteria` section |
 | story files | both | for each file in a `stories` directory: frontmatter missing `id`, `title` or `priority`; `priority` not an integer; an `id` that does not match `[a-z0-9-]+` or does not equal the filename stem; two stories with one `id`; no non-empty `## Acceptance criteria` section |
 | specs | both | the same path rules for `specs`; `specs` without `stories` |
-| story stage | both | `story_stage` other than `given`, `self-cut`; `story_stage` without `stories`; `use_cases` or `own_stories` missing at `self-cut`, present at another stage, or breaking the path rules; a `use_cases` directory with no use case file, or a use case without `id`, `title` or a body; a lesson at `self-cut` without a non-empty `## Story criteria` section; a name in `## Objectives by step` that is not in `teaches` |
+| story stage | both | `story_stage` other than `given`, `self-cut`; `story_stage` without `stories`; `use_cases` or `own_stories` missing at `self-cut`, present at another stage, or breaking the path rules; a `use_cases` directory with no use case file, a use case without `id`, `title` or a body, or a use case file the body does not list; a lesson at `self-cut` without a non-empty `## Story criteria` section; a name in `## Objectives by step` that is not in `teaches` |
 | story rows | instance | a `## Stories` row that does not parse, an unknown state (`writing`, `specifying`, `handed-off`, `implemented`, `reviewed`, `skipped`), or two rows for one id |
 
 Story ids in `## Stories` are not checked against the bundle's stories, because a row may
@@ -282,15 +293,14 @@ step 0 and the participant can run it themselves.
 `stories` is unchanged.
 
 An **older runner** reads a story lesson as an ordinary lesson and teaches from its body. That
-is why section 2.2 requires the body to describe the work in prose: `bundle-format.md`
+is why section 2.2 requires the body to list the stories, in prose an older runner can teach from: `bundle-format.md`
 section 13 gains this as an authoring obligation, in the pattern optional lessons already use
 ("the course must be completable by a learner who declines everything").
 
-An **older validator** ignores the keys, because lesson frontmatter keys are read by name, and
-it reads the story and use case files as files in the bundle. Its check 6 (every file in a
-lesson folder is named by the lesson) applies only inside lesson folders, so a top-level
-`stories/` directory is not reported; a `stories` directory inside a lesson folder would be,
-and section 2.2 therefore recommends the bundle root.
+An **older validator** ignores the keys, because lesson frontmatter keys are read by name. It
+accepts the story and use case files because the lesson body names each one, which is what its
+check 6 asks of every file in a lesson folder. An **older materializer** copies them, because
+they are inside `lessons/`.
 
 ---
 
@@ -298,7 +308,7 @@ and section 2.2 therefore recommends the bundle root.
 
 | Document | Change |
 |---|---|
-| `bundle-format.md` | section 1 (layout): the `stories/` and use case directories; section 6: `stories`, `specs`, `story_stage`, `use_cases`, `own_stories`, `## Spec criteria`, `## Story criteria`, `## Objectives by step`, and **Writing a story lesson**; section 13: the older-runner obligation; section 10's self-check |
+| `bundle-format.md` | section 6: `stories`, `specs`, `story_stage`, `use_cases`, `own_stories`, `## Spec criteria`, `## Story criteria`, `## Objectives by step`, and **Writing a story lesson**; section 13: the older-runner obligation; section 10's self-check |
 | `runner-protocol.md` | a new section, **User stories**: step 0 at each stage, the five steps, the level effects, the never-blocks rule, the hand-off text |
 | `state-lifecycle.md` | `## Stories`: shape, states, when each is written, that it is not carried forward |
 | `SKILL.md` | the loading table: during a story lesson, the active story file and its specification |
@@ -312,9 +322,10 @@ and section 2.2 therefore recommends the bundle root.
    new finding and no new warning.
 2. Each new check, and each story-file finding, has a fixture that trips it and a silent
    control.
-3. The `levelled-programme` fixture's module 1 gains a story lesson at `given` with a
-   `stories/` directory of three stories; module 2 gains a story lesson at `self-cut` with a
-   `use-cases/` directory of one use case. An instance of module 2 has a `## Stories` row in
+3. The `levelled-programme` fixture's module 1 gains a folder story lesson at `given` with a
+   `stories/` subdirectory of three listed stories; module 2 gains a folder story lesson at
+   `self-cut` with a `use-cases/` subdirectory of one listed use case. Main's validator
+   (exported with `git archive`) accepts both bundles with no finding. An instance of module 2 has a `## Stories` row in
    each state, and validates clean; both bundles validate clean.
 4. `belay-validate --stories` on a directory of participant-written stories reports each
    story-file finding, and is silent on a valid directory.
