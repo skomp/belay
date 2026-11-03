@@ -181,8 +181,11 @@ branch. Its shape is the course's `## Spec criteria`, not the runner's.
    new story gets its own row, and intake (step 1) then runs over them in the priority the
    participant gave.
 
-   **At `given` there is no step 0**: the tutor works from the trainer's story files and does
-   not offer story writing. The lesson that teaches story writing is where that starts.
+   **At `given` the tutor does not offer step 0**: it works from the trainer's story files, and
+   the lesson that teaches story writing is where story writing starts. If the participant
+   asks to write a story of their own, the tutor runs step 0 for that one story, reviewing it
+   against the lesson's `## Story criteria` when the lesson has them and against the story
+   format of section 2.1 otherwise. The trainer's stories stay the default path.
 
 1. **Intake.** The tutor lists the open stories for this module in priority order and proposes
    the first. Taking a later one first, or skipping one, needs a reason the participant states;
