@@ -38,10 +38,15 @@ the programme, and are not part of any course.
   validators and the trainer's review decide that.
 - **The course keeps control of what is assessed**: the objectives a story lesson `teaches`,
   the module's validators, and the story stage.
-- **Writing stories is part of the course.** Early modules hand the participant finished
-  stories; later modules hand out stories with options; the late modules hand out a use case
-  and the participant cuts it into stories. Story writing is a learning objective with a level
-  and a review, like specification writing.
+- **Writing stories is part of the course, and the course decides when it starts.** A
+  participant is first exposed to good stories and only writes stories after a lesson has
+  taught it. So the early story lessons deliver finished stories, and only lessons after the
+  one that teaches story writing hand out a use case for the participant to cut into stories.
+  Story writing is a learning
+  objective with a level and a review, like specification writing.
+- **Belay supports two stages, not three.** A client's intermediate step — stories handed out
+  with options for how to cut them — is course content: the trainer writes the options into
+  the story's text, and the tutor treats it as an ordinary given story.
 
 ---
 
@@ -109,14 +114,13 @@ specs: specs/                  # new, MAY: where specifications are written; def
 A story lesson declares how much of the story work the participant does:
 
 ```yaml
-story_stage: given             # new, MAY: given | options | self-cut; default given
+story_stage: given             # new, MAY: given | self-cut; default given
 use_cases: use-cases/          # new: required at self-cut, not allowed otherwise
 ```
 
 | `story_stage` | The trainer provides | The participant does first (step 0, section 3) |
 |---|---|---|
 | `given` | finished story files | nothing; intake starts from the trainer's stories |
-| `options` | story files that each carry a `## Options` section with two or three ways to cut the story | chooses one option for each story and says why |
 | `self-cut` | a use case file per module | cuts the use case into story files, in the format of section 2.1 |
 
 **A use case file** lives in the cohort repository, outside every bundle, like a story file:
@@ -128,8 +132,8 @@ its module; each one produces the stories the five steps then run on.
 in their own branch**, so they are the participant's work, not shared definitions. The
 trainer's review (belay#94) compares them across the cohort, as it compares the code.
 
-**The body of a lesson at `options` or `self-cut` MUST carry a non-empty `## Story criteria`
-section**: the checklist the tutor reviews a chosen option or a participant's story against
+**The body of a lesson at `self-cut` MUST carry a non-empty `## Story criteria`
+section**: the checklist the tutor reviews a participant's story against
 (section 3, step 0).
 
 The stages are per lesson, so a course fades them over its modules by declaring `given` in the
@@ -154,7 +158,7 @@ branch. Its shape is the course's `## Spec criteria`, not the runner's.
 
 - One row per story, **updated in place**, in the shape and dash rules of `## Levels`:
   `` - `<id>` — <state> — `` then free text that ends in a date, and an optional parenthesis.
-- **States:** `writing` (step 0, at `options` or `self-cut`), `specifying`, `handed-off`, `implemented`, `reviewed`, and `skipped`. A story with
+- **States:** `writing` (step 0, at `self-cut`), `specifying`, `handed-off`, `implemented`, `reviewed`, and `skipped`. A story with
   no row has not been started.
 - **The section belongs to the module.** A new module starts with no `## Stories` rows; the
   carry-forward (levels design, section 2.4) does not copy them. The trainer's review
@@ -166,17 +170,19 @@ branch. Its shape is the course's `## Spec criteria`, not the runner's.
 
 `one_task_at_a_time` holds: one story is active at a time.
 
-0. **Story writing** — only at `options` and `self-cut`. The tutor writes the row as `writing`.
-   - At `options`: the participant chooses one of the story's options and says why.
-   - At `self-cut`: the participant cuts the module's use case into story files. The tutor
-     guides by the participant's level for the story-writing objective (section 3.1) — at A
-     one story at a time, with an example; at B by offering ways to cut the use case; at C only
-     reviewing the result.
+0. **Story writing** — only at `self-cut`. The tutor writes the row as `writing`. The
+   participant cuts the module's use case into story files. The tutor guides by the
+   participant's level for the story-writing objective (section 3.1) — at A one story at a
+   time, with an example; at B by offering ways to cut the use case; at C only reviewing the
+   result.
 
-   At both stages the tutor then reviews the result against `## Story criteria`, names what is
-   not met, and records the result as evidence for the story-writing objective. **Nothing
-   blocks.** At `self-cut` each new story gets its own row, and intake (step 1) then runs over
-   them in the priority the participant gave.
+   The tutor then reviews the result against `## Story criteria`, names what is not met, and
+   records the result as evidence for the story-writing objective. **Nothing blocks.** Each
+   new story gets its own row, and intake (step 1) then runs over them in the priority the
+   participant gave.
+
+   **At `given` there is no step 0**: the tutor works from the trainer's story files and does
+   not offer story writing. The lesson that teaches story writing is where that starts.
 
 1. **Intake.** The tutor lists the open stories for this module in priority order and proposes
    the first. Taking a later one first, or skipping one, needs a reason the participant states;
@@ -231,7 +237,7 @@ silent when its key is absent.
 |---|---|---|
 | stories | both | `stories` not a string; an absolute path or a `..` segment; a lesson declaring `stories` without a non-empty `## Spec criteria` section |
 | specs | both | the same path rules for `specs`; `specs` without `stories` |
-| story stage | both | `story_stage` other than `given`, `options`, `self-cut`; `story_stage` without `stories`; `use_cases` missing at `self-cut`, present at another stage, or breaking the path rules; a lesson at `options` or `self-cut` without a non-empty `## Story criteria` section; a name in `## Objectives by step` that is not in `teaches` |
+| story stage | both | `story_stage` other than `given`, `self-cut`; `story_stage` without `stories`; `use_cases` missing at `self-cut`, present at another stage, or breaking the path rules; a lesson at `self-cut` without a non-empty `## Story criteria` section; a name in `## Objectives by step` that is not in `teaches` |
 | story rows | instance | a `## Stories` row that does not parse, an unknown state (`writing`, `specifying`, `handed-off`, `implemented`, `reviewed`, `skipped`), or two rows for one id |
 
 Story ids in `## Stories` are not checked against anything: the story files are outside the
@@ -244,8 +250,6 @@ before publishing stories. It reports:
 - an `id` that does not match `[a-z0-9-]+` or does not equal the filename stem;
 - two stories with one `id`;
 - a story without a non-empty `## Acceptance criteria` section;
-- with `--stage options`, a story without a `## Options` section that lists at least two
-  options;
 - with `--use-cases`, the same frontmatter rules for use case files, and a use case without a
   body;
 - and, informationally, how many stories carry `module: <id>` — zero is a warning, because a
@@ -288,8 +292,8 @@ An **older validator** ignores both keys: lesson frontmatter keys are read by na
 2. Each new check, and each story-file finding, has a fixture that trips it and a silent
    control.
 3. The `levelled-programme` fixture gains a story lesson at `given` in module 1, and one at
-   `options` and one at `self-cut` in module 2. Module 2's starting code gains a `stories/`
-   directory with three stories (one of them for another module, one with `## Options`) and a
+   `self-cut` in module 2. Module 2's starting code gains a `stories/` directory with three
+   stories (one of them for another module) and a
    `use-cases/` directory with one use case. An instance of module 2 has a `## Stories` row in
    each state, and validates clean.
 4. `belay-validate --stories` on that directory reports two stories for module 2 and none for
