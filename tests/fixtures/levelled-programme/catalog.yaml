@@ -2,8 +2,8 @@
 #
 #   module-1   Stockroom Basics. Levelled; has a placement lesson over every
 #              objective it covers.
-#   module-2   Stockroom Forecasting. Levelled; starts_from ref, so its entry
-#              carries start_from; names module 1 as a previous bundle; its
+#   module-2   Stockroom Forecasting. Levelled; starts_from ref, and its entry
+#              suggests a start_from; names module 1 as a previous bundle; its
 #              placement lesson assesses only what is new in it.
 #
 # The goal lists every objective of both modules. A goal LISTS its objectives

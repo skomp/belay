@@ -5417,7 +5417,8 @@ def check_starts_from(manifest: Any, report: Report) -> None:
     """Check 36 - both modes.
 
     `starts_from` is a MAY: the course's starting code is the code at a Git
-    ref the catalogue entry's `start_from` names. The only value the format
+    ref the tutor asks the participant for, the catalogue entry's `start_from`
+    being the suggested answer. The only value the format
     defines is the string `ref`; anything else, a
     mapping or a list included, is a finding. Absent means n/a and nothing
     warns.

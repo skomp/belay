@@ -192,6 +192,25 @@ def test_status_and_streams_pass_through() -> None:
                proc.stderr[:200])
 
 
+def test_check_start_through_the_wrapper() -> None:
+    """The way the tutor runs it: a bare name, `--`, from a directory with no config."""
+    with tempfile.TemporaryDirectory() as tmp:
+        cwd = Path(tmp)
+        good = run(["belay-catalogs", "check-start", "--", "git@github.com:o/r.git", "winner-m1"],
+                   cwd=cwd, path_prefix=BIN)
+        record(good.returncode == 0 and "Usable." in good.stdout,
+               "belay-catalogs check-start: a usable start exits 0, through the wrapper",
+               f"rc={good.returncode} {good.stdout[:200]!r} {good.stderr[:200]!r}")
+        bad = run(["belay-catalogs", "check-start", "--", "ssh://-oProxyCommand=id/x", "main"],
+                  cwd=cwd, path_prefix=BIN)
+        record(bad.returncode == 1 and "is not a Git URL" in bad.stdout,
+               "belay-catalogs check-start: an unusable start exits 1 naming it, through the wrapper",
+               f"rc={bad.returncode} {bad.stdout[:200]!r} {bad.stderr[:200]!r}")
+        listed = run(["belay-catalogs", "--help"], cwd=cwd, path_prefix=BIN)
+        record("check-start" in listed.stdout, "belay-catalogs --help lists check-start",
+               listed.stdout[:300])
+
+
 def test_controls_can_fail() -> None:
     """A wrapper with no plugin tree behind it fails, and every check above sees it."""
     with tempfile.TemporaryDirectory() as tmp:
@@ -249,6 +268,7 @@ def main() -> int:
         test_by_bare_name_on_path,
         test_through_a_symlink,
         test_status_and_streams_pass_through,
+        test_check_start_through_the_wrapper,
         test_controls_can_fail,
         test_runner_documents_name_the_wrappers,
     ):

@@ -1749,7 +1749,7 @@ real files. One repository cannot satisfy both without duplication.
 | Knowledge assessments (`assesses`, `## Assessments`, `kind: practice`) | **done** — 2026-10-16, belay#33; `runner-protocol.md` §15, `state-lifecycle.md` §11, checks 31-32. The question-and-answer loop is untested, as above |
 | Learning-evidence record (`tutorial/EVENTS.jsonl`, `skills/belay/scripts/evidence.py`) | **done** — 2026-10-16, belay#34; `state-lifecycle.md` §12, `runner-protocol.md` §16, check 33 (warning only); `tests/test_evidence.py`, 89 assertions. Whether the tutor writes the events in conversation is untested, as above |
 | Multi-catalogue support (`skills/belay/scripts/catalogs.py`) | **done** — 2026-09-12, §7 |
-| Catalogue test suite (`tests/test_catalogs.py`) | **done** — 565 assertions; every failure kind proven firing |
+| Catalogue test suite (`tests/test_catalogs.py`) | **done** — 583 assertions; every failure kind proven firing |
 | Instance update (`skills/belay/scripts/plan_update.py`, `state-lifecycle.md` §3.2) | **done** — 2026-10-14, belay#50, §15c; source from the stamp, `--diff`, `--apply`, `--check-version` 2026-10-28, belay#76; `tests/test_plan_update.py`, 129 assertions |
 | Materialization and supplies placement by command (`catalogs.py materialize`, `place-supplies`) | **done** — 2026-10-28, belay#76, §7.2; `tests/test_catalogs.py` |
 | Defect reports (`report` key, check 34, `catalogs.py report`, the `reported` event) | **done** — 2026-10-30, belay#86, §15e; `runner-protocol.md` §17. Whether the tutor offers, drafts and records in conversation is untested, as above |

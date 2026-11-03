@@ -109,6 +109,7 @@ for the other three commands. It needs Python 3 and the `git` command, and nothi
 | `belay-catalogs resolve <id>` | the learner has chosen, and wants to know where the course comes from | prints that entry and the bundle directory it resolves to, and checks the bundle is really there |
 | `belay-catalogs materialize <id>` | the learner has chosen | resolves the entry as `resolve` does and creates `tutorial/` in the current directory from it: copy, `STATE.md`, stamp (`state-lifecycle.md` section 3) |
 | `belay-catalogs place-supplies` | materialization, after validation; and after an update | places the manifest's `supplies` from the source the instance stamp names, never overwriting (`state-lifecycle.md` section 3 step 8) |
+| `belay-catalogs check-start -- '<repo>' '<ref>'` | a learner has named where a `starts_from: ref` module starts (`runner-protocol.md` section 18.6) | applies section 5.3's rules for `start_from` to the two values: exit 0 when usable, exit 1 with each problem. Reads no file and contacts nothing, so it cannot say the ref exists |
 | `belay-catalogs report` | the learner wants to send a defect report the tutor drafted in `tutorial/REPORT.md` | prints which target it chose and a link the learner opens to send it; `--runner` for a defect in the runner, `--context` for what goes in the draft. Sends nothing (`runner-protocol.md` section 17) |
 | `belay-catalogs covers <query>` | the learner asks who **teaches** a concept | prints every bundle whose `covers` answers, with the reason each one matched |
 | `belay-catalogs follow-ups <id>` | a course finished, or the learner asks what comes next | prints the author's follow-ups, then the bundles that name this one as a previous bundle |
@@ -196,7 +197,7 @@ tutorials:
 | `recommended_follow_ups` | MAY | Courses the author suggests **after** this one, each with a `because`. Author order is display order. |
 | `recommended_previous_bundles` | MAY | Courses the author suggests **before** this one, each with a `because`. This is how a course attaches itself to an earlier one. |
 | `report` | MAY | Where a learner's defect report about this course goes, when the bundle's own `tutorial.yaml` says nothing: a `url` starting `https://` or `mailto:`, and an optional `prefill` of `github`, `gitlab` or `none`. The same shape and rules as the manifest key (`bundle-format.md` section 2, **Defect reports**). |
-| `start_from` | MAY | For a module whose bundle declares `starts_from: ref`: the `repo` and `ref` its starting code comes from, set by whoever chooses that start. Section 5.3. |
+| `start_from` | MAY | For a module whose bundle declares `starts_from: ref`: the `repo` and `ref` the tutor suggests when it asks the learner where to start, set by whoever chooses that start. Section 5.3. |
 | `source` | MUST | Where the bundle is. See section 5.1. |
 
 The entry duplicates fields that also appear in the bundle's `tutorial.yaml`. That is
@@ -340,8 +341,8 @@ A **programme** is a catalogue whose entries are the modules a cohort takes in o
 a bundle (`bundle-format.md` section 2, **Levels and modules**, has the terms). It is built
 one module at a time, so it cannot be shipped as one course, and two things about it are
 known only to whoever runs it: which learning objectives belong to which learning goal, and
-where the next module's code starts. Both are said here, in the one file that person
-already maintains.
+where they suggest the next module's code starts. Both are said here, in the one file that
+person already maintains.
 
 ```yaml
 catalog_version: 1
@@ -386,7 +387,8 @@ the modules use:
 Nothing in the runner reads `goals` today. It is the programme's own map of what it
 teaches, for the people who run it and for the designs that build on this one.
 
-**`start_from`** is an entry field, a mapping of exactly two keys:
+**`start_from`** is an entry field, a suggestion: where the tutor proposes a module starts.
+It is a mapping of exactly two keys:
 
 | Field | Required | Meaning |
 |---|---|---|
@@ -395,15 +397,18 @@ teaches, for the people who run it and for the designs that build on this one.
 
 Both are refused so narrowly because the tutor builds a `git fetch` from them that the
 learner pastes into a shell: a dash-led host or ref would be read as an option, and a
-shell character would run something else.
+shell character would run something else. **What a learner types is held to the same
+rules**, by `belay-catalogs check-start`, which calls the one function the reader and check
+9 call.
 
 It belongs on the entry of a module whose bundle declares `starts_from: ref`, and it is set
-once the start has been chosen — after the previous module's review has picked a winning
-branch. **Until it is set, that module cannot start**, and the runner says so rather than
-starting it from anything else (`runner-protocol.md` section 18.6, where the runner's use of
-it is stated in full).
+once a start has been chosen — after the previous module's review has picked a winning
+branch. **It is not required.** The tutor asks the learner which repository and branch to
+start from whether or not it is set, and offers it as the suggested answer when it is
+usable; a module with none is asked about with no suggestion (`runner-protocol.md` section
+18.6, where the runner's use of it is stated in full).
 
-**`belay-catalogs resolve <id> --json` and `discover --json` always carry `start_from`**,
+**`belay-catalogs --json resolve <id>` and `--json discover` always carry `start_from`**,
 on every entry, so a consumer never has to ask whether the key was considered:
 
 | The entry's `start_from` | In the JSON |
@@ -413,8 +418,9 @@ on every entry, so a consumer never has to ask whether the key was considered:
 | absent | `null`, and no note |
 
 A malformed `start_from` is dropped whole, never passed on half-formed: it is a value the
-tutor builds a Git command from. The course is still offered, without a starting
-repository — and since its bundle needs one, it cannot start until the entry is corrected.
+tutor might suggest a Git command from. The course is still offered, without a suggestion:
+the tutor passes the note on and asks the learner, and whoever runs the catalogue should
+still correct the entry.
 
 **Checks 8 and 9 of `belay-validate --catalog` are where an author is told.** Check 8
 reports `goals` that is not a mapping, a goal id that does not match `[a-z0-9-]+`, a goal
@@ -916,7 +922,7 @@ which fires all five note kinds and asserts a sound concept beside them still ma
 by `test_optional_lesson_count_is_carried_by_the_entry`, whose third entry carries a count
 that is not a number and is still offered with every sound field it has.
 
-**A dropped count is dropped, not defaulted.** `discover --json` reports
+**A dropped count is dropped, not defaulted.** `--json discover` reports
 `optional_lesson_count: null` and puts the reason in that entry's `metadata_notes`, so no
 consumer can read an unusable value as a number and none can mistake it for zero. The
 rendered listing prints the same reason as a `metadata problem` line under the entry.

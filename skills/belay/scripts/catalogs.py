@@ -424,7 +424,7 @@ class MergedEntry:
         out[OPTIONAL_LESSON_COUNT] = count
         # start_from gets the same treatment, for the same reason: a
         # malformed one is null with a note, never a half-usable mapping the
-        # tutor might build a clone command from.
+        # tutor might suggest a fetch from.
         start_from, start_notes = read_start_from(self.entry, self.id)
         out[START_FROM] = start_from
         out["metadata_notes"] = notes + start_notes
@@ -1073,12 +1073,12 @@ def start_from_problems(value: Any) -> list[str]:
 def read_start_from(
     entry: dict, where: str
 ) -> tuple[dict | None, list[str]]:
-    """The repository an entry says its course starts from, or None.
+    """The repository an entry suggests its course starts from, or None.
 
     In the shape of `read_optional_lesson_count`: None when the entry does
     not say (no note), and None WITH notes when it says something unusable.
     The course is still offered; what is refused is handing the tutor a
-    `start_from` it might act on - a missing `ref` or a `repo` that is not a
+    `start_from` it might suggest - a missing `ref` or a `repo` that is not a
     Git URL is never returned half-formed. `validate_bundle.py --catalog`
     rejects the same values, because an author is asking to be told.
     """
@@ -1089,7 +1089,7 @@ def read_start_from(
     if problems:
         return None, [
             f"{where}: {problem}. The course is still offered, without a "
-            f"starting repository"
+            f"suggested starting repository"
             for problem in problems
         ]
     return {"repo": value["repo"], "ref": value["ref"]}, []
@@ -4030,6 +4030,57 @@ def command_prepare(args, stream) -> int:
 
 
 # --------------------------------------------------------------------------
+# Checking a start the participant typed: `check-start`
+# --------------------------------------------------------------------------
+#
+# runner-protocol.md section 18.6. The tutor asks which repository and branch a
+# `starts_from: ref` module starts from, and builds a `git fetch` from the
+# answer. This applies the rules a catalogue's `start_from` already has to what
+# was typed: one rule, so a typed value and a catalogue value cannot be held to
+# different standards. It reads no file and contacts no host, and takes no
+# path, so under permissions.blockReadsOutsideWorkingDirectories it starts
+# without a prompt, as `report` does (belay#76).
+
+EXIT_START_USABLE = 0
+EXIT_START_UNUSABLE = 1
+
+
+def command_check_start(args, stream) -> int:
+    problems = start_from_problems({"repo": args.repo, "ref": args.ref})
+    code = EXIT_START_UNUSABLE if problems else EXIT_START_USABLE
+    if args.json:
+        print(
+            json.dumps(
+                {
+                    "command": "check-start",
+                    "repo": args.repo,
+                    "ref": args.ref,
+                    "usable": not problems,
+                    "problems": problems,
+                    "exit_code": code,
+                },
+                indent=2,
+                sort_keys=True,
+            ),
+            file=stream,
+        )
+        return code
+
+    print("Belay catalogues - check-start", file=stream)
+    print("", file=stream)
+    print(f"  repo: {args.repo!r}", file=stream)
+    print(f"  ref:  {args.ref!r}", file=stream)
+    print("", file=stream)
+    if problems:
+        print("Not usable. Propose no Git command from these values:", file=stream)
+        for problem in problems:
+            print(f"  - {problem}", file=stream)
+    else:
+        print("Usable. Nothing was contacted, so this does not say the ref exists.", file=stream)
+    return code
+
+
+# --------------------------------------------------------------------------
 # Driver
 # --------------------------------------------------------------------------
 
@@ -4107,6 +4158,21 @@ def build_parser() -> argparse.ArgumentParser:
         "needs no draft",
     )
     report.set_defaults(run=command_report, offline=True)
+
+    # add_help=False is load-bearing: this command's arguments are typed by a
+    # participant, and with a help option a repo typed as `--help` would print
+    # help and exit 0, which reads as "usable". With no options at all, any
+    # dash-led value not protected by `--` is a usage error, and exit 2 is not
+    # exit 0.
+    check_start = sub.add_parser(
+        "check-start",
+        add_help=False,
+        help="check a repository and ref typed for a starts_from module; "
+        "exit 0 when usable, 1 with each problem; contacts nothing",
+    )
+    check_start.add_argument("repo", help="the Git URL the participant gave")
+    check_start.add_argument("ref", help="the branch or tag the participant gave")
+    check_start.set_defaults(run=command_check_start, offline=True)
 
     covers = sub.add_parser(
         "covers", help="which bundles TEACH a concept (never which assume it)"
