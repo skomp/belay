@@ -1803,8 +1803,9 @@ is read as part of that bullet, so the date and the parenthesis may sit on a lat
 - **The date** is the day of the last change to the row, `YYYY-MM-DD`.
 - **The parenthesis** holds the reason for a skip, or for taking a task out of order, and for a
   task the learner asked to add it also names the lesson it was taken in. It survives a state
-  change, so an out-of-order reason is not lost; only a reopening rewrites it
-  (`runner-protocol.md` section 19.2).
+  change, so an out-of-order reason is not lost; only a reopening rewrites it, or taking again a
+  task left open under an earlier lesson, which keeps the row's state rather than writing the
+  first state as moment 1 of 14.2 does (`runner-protocol.md` section 19).
 
 > **A task with no row has not been started.**
 
@@ -1847,7 +1848,6 @@ set (section 12.2), and none of them holds either.
   they are about that module's tasks and not about the learner.
 - **An update leaves the rows alone** (section 3.2), including a row naming a task file the new
   version removed. The offer lists only files that exist, so such a row is simply kept.
-- **The trainer's grading reads them** from each learner's branch.
 
 Validator check 46 checks the shape in an instance: a row that does not parse, an id or a state
 that is not `[a-z0-9-]+`, a date that is not a date, two rows for one id. It never compares a

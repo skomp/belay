@@ -2781,8 +2781,8 @@ These terms are used through this section:
   another lesson. There is at most one (`one_task_at_a_time` holds), and a row in a state the
   active lesson does not declare is never it. A request-written task left open under an earlier
   lesson is therefore not active: if this lesson's offer lists it and its state is declared
-  here, it is open, and when the learner takes it again its parenthesis is rewritten to name this lesson. The active task is not
-  one turn's task: section 2.2 still asks for one actionable step per turn.
+  here, it is open, and when the learner takes it again it keeps its state and its parenthesis is
+  rewritten to name this lesson. The active task is not one turn's task: section 2.2 still asks for one actionable step per turn.
 
 The rows' shape, and when each is written, is `state-lifecycle.md` section 14.
 
@@ -2815,6 +2815,12 @@ Offer when no task is active: when the lesson opens, and each time a task closes
 
 To leave the active task for another, the learner closes it first: by finishing it, or by
 skipping it for a stated reason.
+
+**When no task is open, follow any section of the body on writing tasks before section 6**, in a
+lesson that declares `own_tasks` (19.6 is why only there). Closing the last listed task does not
+end that phase: what the learner writes joins the next offer, and when they have nothing more to
+write, go on to section 6. Whether they must write any is the course's to say, in its completion
+conditions, and you check it there.
 
 ### 19.2 Work through the states
 
@@ -2849,7 +2855,8 @@ state. Rewrite the parenthesis as you do: drop any stale skip reason, and an ear
 which for a request-written task becomes this lesson's, so the task can be active here.
 
 **The lesson completes when every task is closed.** That means every task the offer can list,
-so a learner's own tasks count when the lesson declares `own_tasks`, except as 19.6 says.
+so a learner's own tasks count when the lesson declares `own_tasks`, except as 19.6 says. Before
+section 6, 19.1 sends you to any section of the body on writing tasks.
 Nothing else about completion changes: a task lesson may still declare validators and
 completion conditions, and section 6 applies to them as to any lesson.
 
@@ -2858,9 +2865,8 @@ completion conditions, and section 6 applies to them as to any lesson.
 Under `levels: true`, the learner's level on **the objective the body names for the state whose
 work is under way** decides how closely you guide them (section 18.2). When the body names
 none, section 18.3 decides as for any task. A lesson that caps help keeps its cap in a task
-lesson: inside an assessment the ladder stops at rung 3 as everywhere (section 15.5), and so
-does an exam lesson under the cohort-grading design (belay#94). Moving a row, and reviewing
-work (19.4), never set a level; only section 15.11 and section 18.5 do.
+lesson: inside an assessment the ladder stops at rung 3 as everywhere (section 15.5). Moving a
+row, and reviewing work (19.4), never set a level; only section 15.11 and section 18.5 do.
 
 ### 19.4 Review without blocking
 
@@ -2957,6 +2963,8 @@ up completion.
 
 - **Opening every task file to build the offer.** Section 19.1.
 - **Treating a stated reason as something to approve.** Section 19.1.
+- **Going to section 6 as soon as the last listed task closes**, past a section of the body on
+  writing tasks in a lesson that declares `own_tasks`. Section 19.1.
 - **Writing a row into the last state before its work is finished.** Section 19.2.
 - **Moving a row on your impression that the work is finished**, rather than on the body's
   condition. Section 19.2.

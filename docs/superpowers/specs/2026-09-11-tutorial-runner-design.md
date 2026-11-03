@@ -909,8 +909,12 @@ claim that replaced it:
 - an **author** runs it over a bundle or a catalogue before shipping;
 - a **runner** runs it over the instance it has just materialized, before the first task,
   and at the five further moments `references/runner-protocol.md` section 13.1 names;
-- **no teaching turn runs it**, which is the cost rule in `runner-protocol.md` section 1,
-  and **no learner invokes it by hand**.
+- **no teaching turn runs it over a bundle or an instance**, which is the cost rule in
+  `runner-protocol.md` section 1, and **no learner invokes it by hand for those**;
+- **`--tasks <dir>` is the one exception** (corrected 2026-11-03): a teaching turn runs it when the
+  tutor reviews a task file the learner wrote, and before each offer in a lesson that declares
+  `own_tasks`, and a learner may run it by hand over their own files (`runner-protocol.md` section
+  19.6). It reads that directory and never the instance.
 
 So the distinction is *when* it runs and *who* triggers it, never *whether* a learner's
 machine runs it. Both scripts do. `scripts/catalogs.py` (§7.2) runs at discovery;
@@ -941,6 +945,13 @@ repository must satisfy, and what a user's own catalogue must not be held to. Ca
 mode has its own seven checks and its own numbering, because a catalogue is not a bundle
 and a shared table in which most numbers never apply teaches nobody anything. The mode
 stays explicit on the command line for the same reason bundle and instance do.
+
+**Task-file mode** (added 2026-11-03): `--tasks <dir>` checks a directory of task files a learner
+wrote, directly inside it and nothing below. It has its own three checks and numbering, for the same
+reason: at least one `.md` file, which only warns; each file well-formed; no id twice. It never
+applies the rule that a lesson body lists each file, since no lesson is in view, and a missing
+directory exits 2, as in the other modes. `2026-11-03-user-stories-design.md` §4 and §10 hold the
+design.
 
 **Cheap checks** (free once the script exists):
 
@@ -1742,7 +1753,7 @@ real files. One repository cannot satisfy both without duplication.
 | `rust-automaton-db` bundle | **done** — imported, corrected, verified |
 | `automaton-db/tutorial/` instance + `STATE.md` | **done** — uncommitted |
 | Validator (`skills/belay/scripts/validate_bundle.py`) | **done** — 46 bundle checks + 9 catalogue checks + 3 for a directory of task files |
-| Validator test suite | **done** — 1123 assertions on a clean checkout, the same on any machine; every check proven firing or warning. `BELAY_SWEEP_SIBLING_REPOS=1` adds the published bundles, counted separately (belay#37) |
+| Validator test suite | **done** — 1140 assertions on a clean checkout, the same on any machine; every check proven firing or warning. `BELAY_SWEEP_SIBLING_REPOS=1` adds the published bundles, counted separately (belay#37) |
 | Optional lessons (`optional_lessons`, `failure_modes`) | **done** — 2026-09-12, §6; checks 18-21 |
 | First-load banner + `teaching_method` | **done** — 2026-09-13, released in 0.6.0; `state-lifecycle.md` §3 step 7, check 27; belay#23 |
 | Offer / defer / re-offer behaviour | **untested** — no harness exercises it; belay#22 |

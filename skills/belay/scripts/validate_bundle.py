@@ -163,7 +163,7 @@ CHECKS: dict[int, str] = {
     44: "task_states, where a lesson declares it, is a list of at least two "
         "distinct [a-z0-9-]+ names, never 'skipped', and needs tasks",
     45: "own_tasks, where a lesson declares it, is a relative workspace path "
-        "and needs tasks",
+        "of plain components, not under tutorial/, and needs tasks",
     46: "[instance] STATE.md's '## Tasks' rows are well-formed: an id, a "
         "state, text ending in a date, one row per task; states and ids are "
         "not looked up",
@@ -3152,9 +3152,12 @@ def check_own_tasks(lessons: list[Lesson], report: Report) -> None:
 
     `own_tasks` is a directory in the learner's workspace where they write
     task files of their own. It needs `tasks`, must be a string, and must be
-    relative with no `..` segment. It is not resolved against the bundle,
-    because it names a place in a workspace that does not exist yet.
-    A bundle with no `own_tasks` is silent and n/a.
+    relative, with the component rule of `resolve_exact`: no backslash, and no
+    empty, `.` or `..` component. A trailing '/' is the conventional spelling.
+    Its first segment may not be `tutorial`, in any case, because that is the
+    running instance and a tutor would treat the files as the learner's. It is
+    not resolved against the bundle, because it names a place in a workspace
+    that does not exist yet. A bundle with no `own_tasks` is silent and n/a.
     """
     declared = 0
     for lesson in lessons:
@@ -3185,13 +3188,37 @@ def check_own_tasks(lessons: list[Lesson], report: Report) -> None:
                 f"own_tasks {value!r} is absolute; it must be relative to the "
                 f"workspace root.",
             )
-        elif ".." in value.split("/"):
+        elif "\\" in value:
             report.add(
                 45,
                 lesson.rel,
-                f"own_tasks {value!r} has a '..' segment; it must stay inside "
-                f"the workspace.",
+                f"own_tasks {value!r} uses a backslash; use '/' in the path.",
             )
+        else:
+            parts = (value[:-1] if value.endswith("/") else value).split("/")
+            bad = [part for part in parts if part in ("", ".", "..")]
+            if ".." in bad:
+                report.add(
+                    45,
+                    lesson.rel,
+                    f"own_tasks {value!r} has a '..' segment; it must stay "
+                    f"inside the workspace.",
+                )
+            elif bad:
+                report.add(
+                    45,
+                    lesson.rel,
+                    f"own_tasks {value!r} has the path component {bad[0]!r}, "
+                    f"which is not allowed; name the directory plainly.",
+                )
+            elif parts[0].lower() == "tutorial":
+                report.add(
+                    45,
+                    lesson.rel,
+                    f"own_tasks {value!r} is under tutorial/, the running "
+                    f"instance. A tutor would treat files there as the "
+                    f"learner's task files; choose a directory outside it.",
+                )
     if not declared:
         report.na(45, "no lesson declares own_tasks")
     else:

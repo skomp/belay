@@ -73,4 +73,5 @@ Each story should be:
 
 ## Completion conditions
 
-Every story above is closed, and you can explain how the error of one forecast was chosen.
+Every story above is closed, you have written at least one story of your own and closed it,
+and you can explain how the error of one forecast was chosen.

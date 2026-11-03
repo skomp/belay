@@ -4314,6 +4314,38 @@ def m_own_dotdot(root: Path) -> None:
     _own(root, "../elsewhere")
 
 
+def m_own_dot(root: Path) -> None:
+    _own(root, ".")
+
+
+def m_own_empty_component(root: Path) -> None:
+    _own(root, "a//b")
+
+
+def m_own_backslash(root: Path) -> None:
+    _own(root, "..\\up")
+
+
+def m_own_tutorial(root: Path) -> None:
+    _own(root, "tutorial/")
+
+
+def m_own_under_tutorial(root: Path) -> None:
+    _own(root, "tutorial/mine")
+
+
+def m_own_tutorial_other_case(root: Path) -> None:
+    _own(root, "Tutorial/")
+
+
+def m_own_nested(root: Path) -> None:
+    _own(root, "work/stories/")
+
+
+def m_own_tutorial_lookalikes(root: Path) -> None:
+    _own(root, "tutorials/tutorial")
+
+
 @dataclass
 class Case:
     name: str
@@ -5399,6 +5431,22 @@ CASES: list[Case] = [
          m_own_absolute, "is absolute", where=CLI_LESSON_01),
     Case("45: own_tasks with '..' fires", 45, "cli", "bundle", m_own_dotdot,
          "has a '..' segment", where=CLI_LESSON_01),
+    Case("45: own_tasks of '.' fires", 45, "cli", "bundle", m_own_dot,
+         "path component '.'", where=CLI_LESSON_01),
+    Case("45: own_tasks with an empty component fires", 45, "cli", "bundle",
+         m_own_empty_component, "path component ''", where=CLI_LESSON_01),
+    Case("45: own_tasks with a backslash fires", 45, "cli", "bundle",
+         m_own_backslash, "uses a backslash", where=CLI_LESSON_01),
+    Case("45: own_tasks of tutorial/ fires", 45, "cli", "bundle",
+         m_own_tutorial, "is under tutorial/", where=CLI_LESSON_01),
+    Case("45: own_tasks inside tutorial/ fires", 45, "cli", "bundle",
+         m_own_under_tutorial, "is under tutorial/", where=CLI_LESSON_01),
+    Case("45: own_tasks of Tutorial/ fires", 45, "cli", "bundle",
+         m_own_tutorial_other_case, "is under tutorial/", where=CLI_LESSON_01),
+    Case("45: a nested own_tasks with a trailing slash is silent", 45, "cli",
+         "bundle", m_own_nested, kind="silent"),
+    Case("45: 'tutorial' other than as the whole first segment is silent", 45,
+         "cli", "bundle", m_own_tutorial_lookalikes, kind="silent"),
     # ---- check 46: STATE.md's '## Tasks' rows
     Case("46: an instance with no '## Tasks' section is silent", 46, "broker",
          "instance", m_assesses_valid, kind="silent"),
@@ -10115,8 +10163,9 @@ def test_tasks_mode() -> None:
             "---\nid: same\ntitle: T\npriority: 1\n---\n")
         (d / "dup2.md").write_text(
             "---\nid: same\ntitle: T\npriority: 1\n---\n")
-        (d / "unlisted.md").write_text(
-            "---\nid: unlisted\ntitle: T\npriority: 1\n---\n")
+        (d / "noid.md").write_text("---\ntitle: T\npriority: 1\n---\n")
+        (d / "badyaml.md").write_text("---\nid: [unclosed\n---\n")
+        (d / "notutf8.md").write_bytes(b"---\nid: notutf8\n---\n\xff\xfe\n")
         done = _tasks_cli("--tasks", str(d))
         out = done.stdout
         record(done.returncode == 1 and "FAIL" in out,
@@ -10127,12 +10176,26 @@ def test_tasks_mode() -> None:
             ("has no YAML frontmatter", "the frontmatter message"),
             ("filename stem", "an id that is not the filename stem"),
             ("priority is 'high'", "a non-integer priority"),
-            ("same", "two files with one id"),
+            ("also the id of", "two files with one id"),
+            ("has no 'id'", "a file with no id"),
+            ("frontmatter does not parse", "frontmatter that does not parse"),
+            ("cannot be read", "a file that is not UTF-8"),
         ):
-            record(needle in out, f"the report names {label}", out[-900:])
-        record("unlisted.md" not in out.split("findings")[-1],
-               "the listing rule is not applied to a bare directory",
-               out[-900:])
+            record(needle in out, f"the report names {label}", out)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        d = Path(tmpdir) / "bare"
+        d.mkdir()
+        (d / "unlisted.md").write_text(
+            "---\nid: unlisted\ntitle: T\npriority: 1\n---\n")
+        done = _tasks_cli("--tasks", str(d))
+        report = vb.validate_tasks_dir(d)
+        record(done.returncode == 0 and not report.findings
+               and not report.warnings,
+               "the listing rule is not applied: a bare directory exits 0 "
+               "with no finding",
+               f"rc={done.returncode} findings={report.findings} "
+               f"out={done.stdout[-300:]}")
 
     with tempfile.TemporaryDirectory() as tmpdir:
         d = Path(tmpdir) / "empty"
@@ -10430,16 +10493,61 @@ def test_levelled_programme_is_clean_end_to_end() -> None:
     )
     ids = task_order(first) + task_order(second)
     record(len(ids) == len(set(ids)) == 6, "the six task ids are distinct", repr(ids))
+    record(
+        task_order(second)
+        == ["110-forecast-one-item", "120-order-date-from-lead-time",
+            "130-flag-late-orders"],
+        "module 2's task lesson holds three stories, in this priority order",
+        repr(task_order(second)),
+    )
     rows = [
-        line for line in state.split("## Tasks", 1)[1].splitlines()
-        if line.startswith("- `")
+        record_ for _, record_ in vb.parse_task_records(
+            state.split("## Tasks", 1)[1].splitlines()
+        )
     ]
     record(
-        {r.split("`")[2].split("\u2014")[1].strip() for r in rows}
-        >= {"reviewed", "handed-off", "skipped", "specifying"}
-        and {r.split("`")[1] for r in rows} & set(task_order(second)),
-        "the instance has ## Tasks rows in several states, naming module 2's tasks",
+        all(r is not None for r in rows)
+        and [(r["id"], r["state"]) for r in rows] == [
+            ("110-forecast-one-item", "reviewed"),
+            ("120-order-date-from-lead-time", "handed-off"),
+            ("130-flag-late-orders", "skipped"),
+        ],
+        "the instance's ## Tasks rows are these three, in these states",
         repr(rows),
+    )
+    # The documents' terms, not only their shape: rows are written only while
+    # a task lesson is active, at most one task is active, a skip carries its
+    # reason in the parenthesis, and every row's id has a file.
+    state_front = frontmatter(instance / "STATE.md")
+    record(
+        state_front["active_lesson"] == "lessons/03-order-stories/LESSON.md"
+        and "tasks" in frontmatter(instance / state_front["active_lesson"]),
+        "the instance's active lesson is the task lesson its rows belong to",
+        repr(state_front),
+    )
+    open_states = f2["task_states"][:-1]
+    active = [r["id"] for r in rows if r and r["state"] in open_states]
+    record(
+        active == ["120-order-date-from-lead-time"],
+        "exactly one task is active, and it is 120",
+        repr(active),
+    )
+    record(
+        all((r["note"] is not None) == (r["state"] == "skipped") for r in rows if r),
+        "only the skipped row has a parenthesis, holding the skip's reason",
+        repr(rows),
+    )
+    record(
+        {r["id"] for r in rows if r}
+        == {f.stem for f in (instance / "lessons" / "03-order-stories" / "stories").glob("*.md")},
+        "every row's id has a task file in the instance's lesson, and every file a row",
+        repr(rows),
+    )
+    conditions = (second / "LESSON.md").read_text().split("## Completion conditions", 1)[1]
+    record(
+        "at least one story of your own" in conditions,
+        "module 2's completion conditions require a story of the learner's own",
+        conditions,
     )
     same = all(
         (instance / "lessons" / rel.relative_to(BASELINES["module2"] / "lessons")).read_bytes()

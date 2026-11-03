@@ -102,7 +102,7 @@ own_tasks: stories/                                           # new, MAY
 |---|---|
 | `tasks` | a directory inside this lesson's folder holding the task files; relative, no `..` segment |
 | `task_states` | the states a task passes through, in order; default `[in-progress, done]`. **The last state means done.** Each is `[a-z0-9-]+`; `skipped` is reserved and always available; at least two states (section 10, item 7) |
-| `own_tasks` | a directory in the **workspace** where the participant writes task files of their own; relative to the workspace root, no `..` segment |
+| `own_tasks` | a directory in the **workspace** where the participant writes task files of their own; relative to the workspace root, plain `/`-separated components with no `.` or `..`, first segment not `tutorial` |
 
 **The body lists every task file by path**, one line each with its title — for example
 `- stories/012-lead-scoring.md — Score incoming leads`. The list is what an older runner teaches
@@ -117,7 +117,8 @@ its work is finished, and that work happens while the row is in the state before
 item 1).
 
 **The lesson completes when every task is in its last state or `skipped`.** Nothing else about
-completion changes: a task lesson may still declare validators and completion conditions.
+completion changes: a task lesson may still declare validators and completion conditions. A course
+that requires the participant to write tasks says so in those conditions (section 10, item 20).
 
 ### 2.3 Progress: `## Tasks` in `STATE.md`
 
@@ -134,8 +135,7 @@ completion changes: a task lesson may still declare validators and completion co
 - The state is one of the active lesson's `task_states`, or `skipped`. A task with no row has not
   been started.
 - **The section belongs to the module.** A new module starts with no `## Tasks` rows; the
-  carry-forward (levels design, section 2.4) does not copy them. The trainer's grading reads them
-  from each participant's branch.
+  carry-forward (levels design, section 2.4) does not copy them.
 - Rows are not checked against the bundle's task files, because a row may name a task the
   participant wrote.
 
@@ -155,7 +155,6 @@ completion changes: a task lesson may still declare validators and completion co
    state differs: the row enters it once its work is finished (section 10, item 1).
 3. **Guide by level.** The participant's level for the objective the body names for the state
    whose work is under way decides how closely the tutor guides (`runner-protocol.md` section 18).
-   An exam lesson (cohort-grading design) caps help at rung 3 as everywhere.
 4. **Review without blocking.** Where the body gives a checklist for a state, the tutor reviews
    the participant's work against it, names what is not met, and records the result as evidence
    for that state's objective. It never refuses to move on because of it.
@@ -184,7 +183,7 @@ New checks take the next free numbers. Each is silent when its key is absent.
 | tasks | both | `tasks` on a single-file lesson; not a string; absolute or with a `..` segment; a directory that does not exist in the lesson's folder or holds no `.md` file |
 | task files | both | for each file in a `tasks` directory: frontmatter missing `id`, `title` or `priority`; `priority` not an integer; an `id` that does not match `[a-z0-9-]+` or does not equal the filename stem; two files with one `id`; a file the lesson body does not list; a listed path that does not exist |
 | task states | both | `task_states` without `tasks`; not a list of at least two; an entry not matching `[a-z0-9-]+`; a duplicate; `skipped` listed |
-| own tasks | both | `own_tasks` without `tasks`; not a string; absolute or with a `..` segment |
+| own tasks | both | `own_tasks` without `tasks`; not a string; absolute; a backslash; an empty, `.` or `..` component; `tutorial` as the first segment |
 | task rows | instance | a `## Tasks` row that does not parse; two rows for one id. The state is not checked against `task_states`, because a row may outlive the lesson that declared them |
 
 **`belay-validate --tasks <dir>`** applies the task-file rules (except the listing rule) to any
@@ -242,7 +241,8 @@ belongs in `bundle-format.md` as the worked example.
   back to handed-off.
 - A later lesson that has taught story writing declares `own_tasks: stories/` and gives a
   `## Writing a story` checklist; from then on participants cut a use case (listed in the body)
-  into stories of their own.
+  into stories of their own. Its completion conditions require at least one such story, written and
+  closed (section 10, item 20).
 
 ---
 
@@ -318,6 +318,22 @@ reader reads it. §2.1, §2.2, §3 item 2 and §7 are corrected in place to agre
    taking. This removes the special cases a one-state lesson needed, and "a task with no row has not
    been started" holds without exception.
 
+**Rulings of the final review:**
+
+20. **The own-tasks phase cannot be skipped by an empty offer.** "Every task closed" is met once the
+    last listed task closes if the participant has written none. So when no task is open, in a lesson
+    that declares `own_tasks`, the tutor follows any section of the body on writing tasks before
+    `runner-protocol.md` §6, and an author who requires own tasks puts that in the completion
+    conditions (§19.1, `bundle-format.md` §6). The scope to `own_tasks` keeps §19.6's rule that the
+    tutor never suggests writing a task otherwise.
+21. **Check 45 applies the component rule of `resolve_exact`**: a backslash, or an empty, `.` or `..`
+    component, is a finding, and a trailing `/` is the conventional spelling. **`tutorial` as the first
+    segment is refused** in any case, because a tutor would treat files in the running instance as the
+    participant's task files.
+22. **A retake rewrites the parenthesis and keeps the state.** A request-written task left open under
+    an earlier lesson, and taken again where its state is declared, keeps its row's state, and its
+    parenthesis comes to name this lesson (§19, `state-lifecycle.md` §14.1, §14.2).
+
 **Decisions taken while writing:**
 
 8. **`--tasks` has its own check table**, numbered like a catalogue's: at least one `.md` file,
@@ -353,4 +369,4 @@ reader reads it. §2.1, §2.2, §3 item 2 and §7 are corrected in place to agre
 18. **Ids should be distinct across a bundle's task lessons**, because rows belong to the module and
     check 46 reports two rows for one id. No check compares directories (`bundle-format.md` §6).
 19. **Moving a row keeps its earlier review results in the free text**, because the row is updated
-    in place and the trainer reads it (`state-lifecycle.md` §14.2).
+    in place (`state-lifecycle.md` §14.2).

@@ -1589,7 +1589,7 @@ An assessment only, and optional there: questions to ask verbatim.
 | `placement` | MAY | `true` on the one assessment that places a learner on the levels. It needs `assesses`, a bundle has at most one, and it is never an optional lesson (check 39). `false` says nothing. See **Writing a placement lesson** below. |
 | `tasks` | MAY | Folder lessons only. A directory inside this lesson's folder holding its task files; relative, no `..` segment (check 42). Declaring it is what makes the lesson a **task lesson**. See **Writing a task lesson** below. |
 | `task_states` | MAY | The states a task passes through, in order; default `[in-progress, done]`. **The last state means done.** At least two states, because a row is written in the first when a task is taken and the last closes it; each matches `[a-z0-9-]+` and is listed once. `skipped` is reserved and always available, so it is not listed (check 44). Needs `tasks`. |
-| `own_tasks` | MAY | A directory in the learner's **workspace** where the learner writes task files of their own; relative to the workspace root, no `..` segment (check 45). Needs `tasks`. |
+| `own_tasks` | MAY | A directory in the learner's **workspace** where the learner writes task files of their own; relative to the workspace root, plain `/`-separated components with no `.` or `..`, first segment not `tutorial` (check 45). Needs `tasks`. |
 
 `design_refs` is how a lesson stays cheap. A lesson about splitting a file into a
 library declares only the anchors it truly needs. It does not pull in storage,
@@ -1878,6 +1878,17 @@ stories/` in the lesson's folder. Nothing checks that the directory exists, beca
 the learner's to create, and it belongs under a `learner_owned` glob. Give the body a
 checklist for writing a task if you want the tutor to review against one.
 
+**If the learner must write tasks, say so in the completion conditions.** "Every task closed" is
+met the moment the last listed task closes when the learner has written none. The tutor follows
+a section of the body on writing tasks once no task is open, before it checks the conditions
+(`runner-protocol.md` section 19.1), but only a condition such as *you have written at least one
+story of your own and closed it* can hold the lesson open.
+
+The path has one form, and check 45 reports any other: `/`-separated components, none of them
+empty, `.` or `..`, an optional trailing `/`, and no backslash. Its first segment may not be
+`tutorial`, because that directory is the running instance, and a tutor would treat files under
+`tutorial/` as the learner's task files.
+
 #### Worked example: a user-story lesson
 
 A cohort programme hands each participant a prioritised list of user stories, worked through
@@ -1907,7 +1918,8 @@ hand-off and the review are what the programme writes into its lessons.
   to `handed-off`.
 - **A later lesson that has taught story writing** declares `own_tasks: stories/` and gives a
   `## Writing a story` checklist; from then on participants cut a use case, listed in the
-  body, into stories of their own.
+  body, into stories of their own. Its completion conditions require at least one such story,
+  written and closed.
 
 ### A lesson is not a script
 
@@ -2220,7 +2232,8 @@ Confirm each of these by looking, not by remembering:
       does not exist
 - [ ] `task_states` and `own_tasks` appear only beside `tasks`; `task_states` is a list of at
       least two distinct `[a-z0-9-]+` names without `skipped`; `own_tasks` is a relative
-      workspace path with no `..` segment
+      workspace path of plain `/`-separated components, whose first segment is not `tutorial`
+- [ ] a lesson whose learner must write tasks says so in its completion conditions
 - [ ] every task lesson's body says what each state but the last asks and when that work is
       done, and makes sense to a runner that has never heard of `tasks` (section 13)
 - [ ] every recommendation names a `bundle` id spelled as that bundle spells its own `id`,
