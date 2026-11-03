@@ -30,7 +30,7 @@ programme cannot be shipped as one course up front.
 |---|---|---|
 | **programme** | the whole curriculum a cohort takes | a **catalog** |
 | **learning goal** | a broad content area, taught across many modules rather than in one | a key in the catalog's `goals` |
-| **learning objective** | one thing a participant can do or explain; the unit that is assessed | a **`covers` concept**, with `goal:` |
+| **learning objective** | one thing a participant can do or explain; the unit that is assessed | a **`covers` concept**, listed under its goal in the catalog |
 | **module** | one stretch of the programme, ending in a checkpoint | a **bundle** |
 | **level** | how closely the tutor guides a participant on one learning objective | a row in `## Levels` |
 
@@ -97,6 +97,7 @@ goals:                                   # new, MAY
     summary: >
       Python and developer craft, how a language model produces text, prompting and
       context engineering.
+    objectives: [python-basics, how-llms-work, prompting, context-engineering]
 tutorials:
   - id: programme-m2
     title: Module 2 — Evals and error analysis
@@ -109,16 +110,8 @@ tutorials:
       ref: winner-m1
 ```
 
-**A learning objective points at its goal** from the bundle's `covers`:
-
-```yaml
-covers:
-  context-engineering:
-    summary: >
-      Choose what goes into a model's context, and in what order, so it can do the task
-      with the least irrelevant material.
-    goal: llm-foundations                # new, MAY
-```
+**A goal lists its learning objectives**, by the `covers` ids the modules use. The bundles
+carry nothing new for it.
 
 - **A goal groups learning objectives, never lessons or modules.** A learning goal is taught
   across modules, and a cross-cutting topic — data protection, say — is a goal whose
@@ -126,9 +119,15 @@ covers:
 - **Objective ids are shared across the programme's bundles.** That is what lets a level set
   in module 1 apply in module 3. The format already treats concept ids as stable,
   cross-bundle identifiers (`bundle-format.md` section 2, **Concept identifiers**).
-- **A bundle cannot see the catalog's `goals`**, so the bundle validator checks only the
-  shape of `goal`. The catalog validator checks that every `goal` in every entry's `covers`
-  resolves to a key in `goals`.
+- **The link lives in the catalog, not on the concept.** A `goal` key inside a `covers`
+  concept was considered and rejected: every released validator reports an unknown key
+  inside a concept as a check 23 **finding**, so a module using it would fail validation on
+  any participant whose installed Belay predates this design. Listing objectives under the
+  goal leaves every bundle readable by every released runner and validator, and keeps the
+  mapping in the one file the trainer already maintains.
+- **The catalog validator checks the list**: every listed objective is a `covers` key of
+  some entry in the same catalog, and an objective is listed under at most one goal. An
+  entry's objective listed under no goal is allowed, and silent.
 - An older reader warns about the unknown top-level key `goals` and keeps the catalog usable
   (`catalogue-format.md` section 5).
 
@@ -321,14 +320,14 @@ material:                                # new, MAY; folder lessons only
 ### 2.8 The format number does not move
 
 Every new key is additive and MAY: `goals` and `start_from` in a catalog; `levels` and
-`starts_from` in `tutorial.yaml`; `goal` on a `covers` concept; `teaches`, `material` and
+`starts_from` in `tutorial.yaml`; `teaches`, `material` and
 `placement` in a lesson's frontmatter. `bundle_format` and `catalog_version` stay `1`.
 
 | Reader | Sees a course using this design | Result |
 |---|---|---|
 | this runner, `levels` and `starts_from` absent | — | exactly today's behaviour |
 | an older runner | unknown keys, ignored | the body for everyone, guided as today; the placement lesson runs as an ordinary assessment and offers practice; a `starts_from: ref` module starts in whatever workspace it is given, without the winner's code |
-| an older validator | unknown top-level keys | check 28 and catalog checks 1 and 3 **warn** and never reject |
+| an older validator | unknown top-level keys and entry fields; unknown lesson frontmatter keys | check 28 and catalog checks 1 and 3 **warn** and never reject; lesson frontmatter keys are read by name, so the new ones are not seen at all. Measured on 2026-11-03: nothing this design adds is inside a structure an older validator checks key by key |
 
 `bundle-format.md` section 13 gains the row for the older runner, as it has for every
 additive key. The older runner's behaviour on `starts_from` is a real degradation, and the
@@ -344,7 +343,6 @@ declaration as a finding.
 
 | Check | Mode | Reports |
 |---|---|---|
-| goal shape | both | a `goal` on a `covers` concept that is not a `[a-z0-9-]+` string |
 | levels | both | `levels` not a boolean |
 | starts_from | both | `starts_from` with a value other than `ref` |
 | teaches | both | `teaches` not a non-empty list; an id that is not a key in `covers` |
@@ -360,7 +358,7 @@ set in an earlier module; that is not a finding.
 
 | Check | Reports |
 |---|---|
-| goals | `goals` not a map; a goal without a non-empty `title`; an unknown key inside a goal; an entry's `covers` concept whose `goal` is not a key in `goals` |
+| goals | `goals` not a map; a goal id not matching `[a-z0-9-]+`; a goal without a non-empty `title`; `objectives` not a non-empty list of strings; an unknown key inside a goal; an objective that no entry's `covers` declares; an objective listed under two goals |
 | start_from | `start_from` without both `repo` and `ref`; a `repo` that is not an `https://`, `ssh://` or scp-style Git URL; an unknown key inside it |
 
 Check 28's list of known top-level keys gains `levels` and `starts_from`; the catalog's
@@ -374,7 +372,7 @@ frontmatter has no list of known keys today — `assesses` is read by name — s
 
 | Document | Change |
 |---|---|
-| `bundle-format.md` | section 2: `levels`, `starts_from`, `goal` on a concept; section 6: `teaches`, `material`, `placement`, and writing a placement lesson; section 13: the older-runner rows; section 10's self-check |
+| `bundle-format.md` | section 2: `levels`, `starts_from`; section 6: `teaches`, `material`, `placement`, and writing a placement lesson; section 13: the older-runner rows; section 10's self-check |
 | `catalogue-format.md` | `goals` at the top level; `start_from` on an entry; the new checks |
 | `runner-protocol.md` | a new section, **Levels**: reading the ledger, the guidance table, which level applies, material selection; section 15: the placement lesson's differences and the outcome-to-level rule; starting a `starts_from: ref` module |
 | `state-lifecycle.md` | `## Levels` and `## Modules`: shape, when each is written, the absent-row rule, the carry-forward, repair |
