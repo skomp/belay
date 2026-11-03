@@ -4022,6 +4022,56 @@ m_levels_subsection = _ledger(
 )
 
 
+# -- check 46: STATE.md's '## Tasks' rows
+
+TASK_ROWS_VALID = (
+    f"- `012-lead-scoring` {D} reviewed {D} PR #14; 2027-03-04\n"
+    f"- `013-dedupe` {D} handed-off {D} 2027-03-05\n"
+    f"- `014-export` {D} skipped {D} 2027-03-05 (depends on 013, which is "
+    f"not merged)\n"
+)
+
+m_task_rows_valid = _ledger("Tasks", TASK_ROWS_VALID)
+m_task_rows_none = _ledger("Tasks", "- None\n")
+m_task_rows_wrapped = _ledger(
+    "Tasks", f"- `012-lead-scoring` {D} reviewed {D} PR #14;\n"
+    f"  checked with the participant 2027-03-04\n"
+    f"  (second pass)\n"
+)
+m_task_rows_en_dash = _ledger(
+    "Tasks", f"- `012-lead-scoring` {EN} reviewed {EN} 2027-03-04\n"
+)
+m_task_rows_hyphen = _ledger(
+    "Tasks", "- `012-lead-scoring` - handed-off - 2027-03-04\n"
+)
+# Review Focus 5: a state no current lesson declares, and an id no bundle
+# file has (a row may name a task the participant wrote).
+m_task_rows_foreign = _ledger(
+    "Tasks", f"- `my-own-task` {D} written-by-me {D} 2027-03-04\n"
+    f"- `012-lead-scoring` {D} state-of-an-earlier-lesson {D} 2027-03-04\n"
+)
+m_task_rows_subsection = _ledger(
+    "Decisions", "### Tasks\n\n- do the small ones first\n"
+)
+m_task_rows_unparsed = _ledger(
+    "Tasks", f"- `012-lead-scoring` {D} reviewed {D} yesterday\n"
+)
+m_task_rows_no_state = _ledger("Tasks", "- `012-lead-scoring` 2027-03-04\n")
+m_task_rows_bad_state = _ledger(
+    "Tasks", f"- `012-lead-scoring` {D} Handed_Off {D} 2027-03-04\n"
+)
+m_task_rows_bad_date = _ledger(
+    "Tasks", f"- `012-lead-scoring` {D} reviewed {D} 2027-02-30\n"
+)
+m_task_rows_bad_id = _ledger(
+    "Tasks", f"- `Lead_Scoring` {D} reviewed {D} 2027-03-04\n"
+)
+m_task_rows_duplicate = _ledger(
+    "Tasks", f"- `012-lead-scoring` {D} handed-off {D} 2027-03-04\n"
+    f"- `012-lead-scoring` {D} reviewed {D} 2027-03-05\n"
+)
+
+
 # -- checks 42-45: task lessons (a folder of task files)
 
 LESSON_DIR_STORIES = "lessons/01-subcommands/stories/"
@@ -5337,6 +5387,40 @@ CASES: list[Case] = [
          m_own_absolute, "is absolute", where=CLI_LESSON_01),
     Case("45: own_tasks with '..' fires", 45, "cli", "bundle", m_own_dotdot,
          "has a '..' segment", where=CLI_LESSON_01),
+    # ---- check 46: STATE.md's '## Tasks' rows
+    Case("46: an instance with no '## Tasks' section is silent", 46, "broker",
+         "instance", m_assesses_valid, kind="silent"),
+    Case("46: a '- None' bullet is skipped", 46, "broker", "instance",
+         m_task_rows_none, kind="silent"),
+    Case("46: the spec's three rows are silent", 46, "broker", "instance",
+         m_task_rows_valid, kind="silent"),
+    Case("46: a row wrapped over several lines is one row", 46, "broker",
+         "instance", m_task_rows_wrapped, kind="silent"),
+    Case("46: a row separated by en dashes is silent", 46, "broker",
+         "instance", m_task_rows_en_dash, kind="silent"),
+    Case("46: a row separated by hyphens is silent", 46, "broker", "instance",
+         m_task_rows_hyphen, kind="silent"),
+    Case("46: a state no lesson declares and an id no bundle has are NOT "
+         "findings (Review Focus 5)", 46, "broker", "instance",
+         m_task_rows_foreign, kind="silent"),
+    Case("46: a '### Tasks' under another section is not the section", 46,
+         "broker", "instance", m_task_rows_subsection, kind="silent"),
+    Case("46: a row with no state and no separators", 46, "broker",
+         "instance", m_task_rows_no_state, "is not a task row",
+         where="STATE.md (## Tasks)"),
+    Case("46: free text that does not end in a date", 46, "broker",
+         "instance", m_task_rows_unparsed, "is not a task row",
+         where="STATE.md (## Tasks)"),
+    Case("46: a state that does not match [a-z0-9-]+", 46, "broker",
+         "instance", m_task_rows_bad_state, "'Handed_Off'",
+         where="STATE.md (## Tasks)"),
+    Case("46: a date that is not a calendar date", 46, "broker", "instance",
+         m_task_rows_bad_date, "not a calendar date",
+         where="STATE.md (## Tasks)"),
+    Case("46: an id that does not match [a-z0-9-]+", 46, "broker", "instance",
+         m_task_rows_bad_id, "is not a task id", where="STATE.md (## Tasks)"),
+    Case("46: one task with two rows", 46, "broker", "instance",
+         m_task_rows_duplicate, "recorded twice", where="STATE.md (## Tasks)"),
     # ---- checks 35 and 36: levels and starts_from. Silent rows are the
     # positive control for the firing ones.
     Case("35: a bundle with no levels is silent", 35, "cli", "bundle",
@@ -9951,6 +10035,118 @@ def test_ledger_checks_status() -> None:
            f"{noisy!r}, status = {report.status.get(40)!r}")
 
 
+def test_task_rows_check_status() -> None:
+    """Check 46: n/a without the section, ran with it, instance only."""
+    print("\ncheck 46: the status line, bundle mode, and the row parser:")
+    for mutate, want, what in (
+        (m_assesses_valid, vb.NOT_APPLICABLE, "no section: n/a"),
+        (m_task_rows_valid, vb.RAN, "section present: ran"),
+    ):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = fresh("broker", Path(tmpdir))
+            to_instance(root)
+            mutate(root)
+            report = vb.validate(root, "instance")
+        got = report.status.get(46, ("missing", ""))[0]
+        record(got == want, f"check 46: {what}", f"status = {got!r}")
+        record(not [f for f in report.findings + report.warnings
+                    if f.check == 46] or want == vb.RAN,
+               "check 46 adds no finding or warning without the section",
+               f"{report.findings!r}")
+    record(46 in vb.INSTANCE_ONLY and 46 not in vb.WARNING_ONLY,
+           "check 46 is instance-only and a finding", "")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = fresh("broker", Path(tmpdir))
+        report = vb.validate(root, "bundle")
+    record(46 not in report.status,
+           "a bundle-mode run never reports check 46",
+           f"status = {report.status.get(46)!r}")
+    rows = vb.parse_task_records(
+        ["- `a-1` \u2014 reviewed \u2014 PR #14; 2027-03-04 (ok)",
+         "- None"])
+    record(len(rows) == 1 and rows[0][1] == {
+        "id": "a-1", "state": "reviewed", "date": "2027-03-04", "note": "ok"},
+        "parse_task_records yields id, state, date and note",
+        f"{rows!r}")
+
+
+def _tasks_cli(*args: str) -> subprocess.CompletedProcess:
+    return subprocess.run([sys.executable, str(SCRIPT), *args],
+                          capture_output=True, text=True)
+
+
+def test_tasks_mode() -> None:
+    """`--tasks <dir>`, through the real command line."""
+    print("\n--tasks <dir>:")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        d = Path(tmpdir) / "mine"
+        d.mkdir()
+        for name in ("a", "b"):
+            (d / f"{name}.md").write_text(
+                f"---\nid: {name}\ntitle: T\npriority: 1\n---\nbody\n")
+        (d / "notes.txt").write_text("not a task file\n")
+        done = _tasks_cli("--tasks", str(d))
+        record(done.returncode == 0 and "PASS" in done.stdout
+               and "mode: tasks" in done.stdout,
+               "a clean directory exits 0 and PASSes",
+               f"rc={done.returncode} out={done.stdout[-300:]}")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        d = Path(tmpdir) / "bad"
+        d.mkdir()
+        (d / "nofm.md").write_text("no frontmatter\n")
+        (d / "wrongid.md").write_text(
+            "---\nid: other\ntitle: T\npriority: 1\n---\n")
+        (d / "badprio.md").write_text(
+            "---\nid: badprio\ntitle: T\npriority: high\n---\n")
+        (d / "dup1.md").write_text(
+            "---\nid: same\ntitle: T\npriority: 1\n---\n")
+        (d / "dup2.md").write_text(
+            "---\nid: same\ntitle: T\npriority: 1\n---\n")
+        (d / "unlisted.md").write_text(
+            "---\nid: unlisted\ntitle: T\npriority: 1\n---\n")
+        done = _tasks_cli("--tasks", str(d))
+        out = done.stdout
+        record(done.returncode == 1 and "FAIL" in out,
+               "a bad directory exits 1 and FAILs",
+               f"rc={done.returncode} out={out[-600:]}")
+        for needle, label in (
+            ("nofm.md", "a file without frontmatter"),
+            ("has no YAML frontmatter", "the frontmatter message"),
+            ("filename stem", "an id that is not the filename stem"),
+            ("priority is 'high'", "a non-integer priority"),
+            ("same", "two files with one id"),
+        ):
+            record(needle in out, f"the report names {label}", out[-900:])
+        record("unlisted.md" not in out.split("findings")[-1],
+               "the listing rule is not applied to a bare directory",
+               out[-900:])
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        d = Path(tmpdir) / "empty"
+        d.mkdir()
+        done = _tasks_cli("--tasks", str(d))
+        record(done.returncode == 0 and "warning" in done.stdout.lower()
+               and "no .md" in done.stdout,
+               "an empty directory is a warning, exit 0",
+               f"rc={done.returncode} out={done.stdout[-400:]}")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        done = _tasks_cli("--tasks", str(Path(tmpdir) / "missing"))
+        record(done.returncode == 2 and "is not a directory" in done.stderr,
+               "a missing directory exits 2, as --instance and --catalog do",
+               f"rc={done.returncode} err={done.stderr[:200]}")
+        for combo in (("--tasks", "--instance"), ("--tasks", "--catalog")):
+            done = _tasks_cli(tmpdir, *combo)
+            record(done.returncode == 2 and "not allowed with" in done.stderr,
+                   f"{' with '.join(combo)} is refused",
+                   f"rc={done.returncode} err={done.stderr[:200]}")
+        done = _tasks_cli(tmpdir, "--tasks", "--portable")
+        record(done.returncode == 2 and "--portable" in done.stderr,
+               "--tasks with --portable is refused",
+               f"rc={done.returncode} err={done.stderr[:200]}")
+
+
 def test_learning_record_check_status() -> None:
     """Check 33 is n/a without a record, instance-only, and warning-only."""
     print("\nlearning record check reports n/a where there is no record:")
@@ -10269,6 +10465,8 @@ def main() -> int:
     test_levels_check_status()
     test_lesson_levels_check_status()
     test_ledger_checks_status()
+    test_task_rows_check_status()
+    test_tasks_mode()
     test_the_total_is_reproducible_from_this_commit()
     test_levelled_programme_is_clean_end_to_end()
     test_check_coverage()

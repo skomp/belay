@@ -160,10 +160,13 @@ CHECKS: dict[int, str] = {
         "distinct [a-z0-9-]+ names, never 'skipped', and needs tasks",
     45: "own_tasks, where a lesson declares it, is a relative workspace path "
         "and needs tasks",
+    46: "[instance] STATE.md's '## Tasks' rows are well-formed: an id, a "
+        "state, text ending in a date, one row per task; states and ids are "
+        "not looked up",
 }
 
 BUNDLE_ONLY = {12, 13, 26}
-INSTANCE_ONLY = {11, 14, 15, 17, 21, 32, 33, 40, 41}
+INSTANCE_ONLY = {11, 14, 15, 17, 21, 32, 33, 40, 41, 46}
 
 # Checks that can only ever WARN, never produce a finding.
 #
@@ -390,6 +393,14 @@ _DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 _LEVEL_RECORD_RE = re.compile(
     r"^[-*+][ \t]+`(?P<id>[^`]+)`[ \t]*[\u2014\u2013-][ \t]*(?P<level>\S+)[ \t]*"
     r"[\u2014\u2013-][ \t]*(?P<source>\S+)[ \t]+(?P<date>\d{4}-\d{2}-\d{2})"
+    r"(?:[ \t]+\((?P<note>.*)\))?[ \t]*$"
+)
+# STATE.md's `## Tasks` rows (check 46). The free text before the date is
+# lazy, so a date inside a trailing parenthesis is not taken for the row's.
+TASKS_SECTION = "Tasks"
+_TASK_RECORD_RE = re.compile(
+    r"^[-*+][ \t]+`(?P<id>[^`]+)`[ \t]*[\u2014\u2013-][ \t]*(?P<state>[^\s]+)[ \t]*"
+    r"[\u2014\u2013-][ \t]*(?:.*?[ \t])?(?P<date>\d{4}-\d{2}-\d{2})"
     r"(?:[ \t]+\((?P<note>.*)\))?[ \t]*$"
 )
 _MODULE_RECORD_RE = re.compile(
@@ -3242,6 +3253,22 @@ def parse_module_records(
     return out
 
 
+def parse_task_records(
+    lines: list[str],
+) -> list[tuple[str, dict[str, Any] | None]]:
+    """Parse the bullets of a '## Tasks' section.
+
+    Same pairing as `parse_level_records`. A record carries `id`, `state`,
+    `date` and `note` (the optional trailing parenthesis, else None). Whether
+    the id, state and date are VALID is check 46's job.
+    """
+    out: list[tuple[str, dict[str, Any] | None]] = []
+    for entry in join_bullets(lines):
+        match = _TASK_RECORD_RE.match(entry)
+        out.append((entry, match.groupdict() if match else None))
+    return out
+
+
 def _ledger_lines(
     root: Path, section: str, num: int, report: Report
 ) -> list[str] | None:
@@ -3385,6 +3412,64 @@ def check_modules_ledger(root: Path, report: Report) -> None:
                 f"calendar date.",
             )
     report.ran(41, f"{rows} module row(s)")
+
+
+def check_task_rows(root: Path, report: Report) -> None:
+    """Check 46 - instance mode. Mirrors check 40.
+
+    STATE.md's `## Tasks` records one row per task id, updated in place: the
+    state and a date. SHAPE only. The state is NOT looked up in any lesson's
+    `task_states`, because a row may outlive the lesson that declared the
+    state, and the id is not looked up in the bundle, because a row may name
+    a task the participant wrote.
+
+    No section is normal and reports n/a.
+    """
+    where = f"STATE.md (## {TASKS_SECTION})"
+    lines = _ledger_lines(root, TASKS_SECTION, 46, report)
+    if lines is None:
+        return
+    seen: set[str] = set()
+    rows = 0
+    for entry, record in parse_task_records(lines):
+        if record is None:
+            report.add(
+                46,
+                where,
+                f"the entry {entry[:70]!r} is not a task row. Each one is the "
+                f"task id in backticks, a dash (an em dash, an en dash or "
+                f"'-'), a state, a dash, and text ending in a YYYY-MM-DD "
+                f"date, with an optional trailing '(text)'.",
+            )
+            continue
+        rows += 1
+        tid, state = record["id"], record["state"]
+        if not _TASK_ID_RE.fullmatch(tid):
+            report.add(
+                46, where,
+                f"{tid!r} is not a task id (lowercase letters, digits and "
+                f"hyphens).",
+            )
+        if not _TASK_ID_RE.fullmatch(state):
+            report.add(
+                46, where,
+                f"{tid!r} has the state {state!r}, which is not lowercase "
+                f"letters, digits and hyphens.",
+            )
+        if tid in seen:
+            report.add(
+                46, where,
+                f"{tid!r} is recorded twice. One task has one row, updated "
+                f"in place.",
+            )
+        seen.add(tid)
+        if not _real_date(record["date"]):
+            report.add(
+                46, where,
+                f"{tid!r} has the date {record['date']!r}, which is not a "
+                f"calendar date.",
+            )
+    report.ran(46, f"{rows} task row(s)")
 
 
 def check_assessment_state(
@@ -6099,8 +6184,71 @@ def validate(target: Path, mode: str) -> Report:
         )
         check_levels_ledger(target, report)
         check_modules_ledger(target, report)
+        check_task_rows(target, report)  # 46
         check_learning_record(target, report)
 
+    return report
+
+
+# --------------------------------------------------------------------------
+# Task-directory mode
+# --------------------------------------------------------------------------
+#
+# `--tasks <dir>` applies the task-file rules to any directory, so a
+# participant can check the task files they wrote. It has its own numbering,
+# like a catalogue: the bundle checks mostly cannot apply to a bare folder.
+# The listing rule is not applied; there is no lesson body to list the files.
+
+TASKS_CHECKS: dict[int, str] = {
+    1: "the directory holds at least one .md file; an empty one WARNS",
+    2: "every task file is well-formed: id, title and priority, the id "
+    "equal to the filename",
+    3: "no two task files share an id",
+}
+
+TASKS_LIMITATIONS = """What a pass does and does not mean
+  Green means every .md file here has an id, a title and an integer
+  priority, and that the ids are unique. It does not say that a lesson
+  lists these files (a lesson's own check does that) or that the tasks are
+  any good."""
+
+
+def validate_tasks_dir(target: Path) -> Report:
+    report = Report(
+        mode="tasks",
+        target=target,
+        checks=TASKS_CHECKS,
+        limitations=TASKS_LIMITATIONS,
+    )
+    names = _task_file_names(target)
+    if not names:
+        report.warn(1, target.name, "no .md file directly inside this directory")
+    report.ran(1, f"{len(names)} file(s)")
+    ids: dict[str, str] = {}
+    for name in names:
+        path = target / name
+        for problem in task_file_problems(path):
+            report.add(2, name, problem)
+        text = read_text(path) if not path.is_symlink() else None
+        fm_text = split_frontmatter(text)[0] if text is not None else None
+        if fm_text is None:
+            continue
+        try:
+            fm = load_yaml(fm_text, name + " frontmatter")
+        except YamlError:
+            continue
+        task_id = fm.get("id") if isinstance(fm, dict) else None
+        if isinstance(task_id, str):
+            if task_id in ids:
+                report.add(
+                    3, name,
+                    f"id {task_id!r} is also the id of {ids[task_id]!r}; "
+                    f"every task has its own id",
+                )
+            else:
+                ids[task_id] = name
+    report.ran(2)
+    report.ran(3, f"{len(ids)} id(s)")
     return report
 
 
@@ -7029,6 +7177,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="check the path as a catalogue file instead of a bundle",
     )
+    group.add_argument(
+        "--tasks",
+        action="store_true",
+        help="check the path as a directory of task files instead of a bundle",
+    )
     parser.add_argument(
         "--portable",
         action="store_true",
@@ -7051,6 +7204,10 @@ def main(argv: list[str] | None = None) -> int:
     if not target.is_dir():
         print(f"error: {target} is not a directory", file=sys.stderr)
         return 2
+    if args.tasks:
+        report = validate_tasks_dir(target)
+        render(report)
+        return report.exit_code()
     mode = "instance" if args.instance else "bundle"
     report = validate(target, mode)
     render(report)
