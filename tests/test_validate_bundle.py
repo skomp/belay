@@ -3206,6 +3206,201 @@ def m_no_levels_keys(root: Path) -> None:
     )
 
 
+# -- checks 37, 38, 39: teaches, material and placement
+
+CLI_CONCEPTS = (
+    "covers:\n"
+    "  argument-parsing:\n"
+    "    summary: Read the command line into a command and its operands.\n"
+    "  error-handling:\n"
+    "    summary: Turn failure into a Result the caller can act on.\n"
+    "assumes:\n"
+    "  rust-installed:\n"
+    "    level: working\n"
+    "    summary: A working Rust toolchain on the learner's machine.\n"
+)
+CLI_LESSON_00 = "lessons/00-hello-args.md"
+CLI_LESSON_01 = "lessons/01-subcommands/LESSON.md"
+CLI_LESSON_02 = "lessons/02-errors-and-tests.md"
+CLI_OPTIONAL = "lessons/pure-core-and-edges.md"
+
+
+def _cli_concepts(root: Path) -> None:
+    """Declare covers and assumes on the cli baseline, which carries neither."""
+    manifest = vb.load_yaml((root / "tutorial.yaml").read_text(), "tutorial.yaml")
+    assert "covers" not in manifest and "assumes" not in manifest
+    append(root / "tutorial.yaml", "\n" + CLI_CONCEPTS)
+    parsed = vb.load_yaml((root / "tutorial.yaml").read_text(), "tutorial.yaml")
+    assert set(parsed["covers"]) == {"argument-parsing", "error-handling"}
+
+
+def _add_fm(root: Path, rel: str, lines: str) -> None:
+    """Append frontmatter lines to a cli lesson, proving the reader saw them."""
+    path = root / rel
+    text = path.read_text()
+    head, sep, rest = text[4:].partition("\n---\n")
+    assert text.startswith("---\n") and sep, f"{rel} has no frontmatter fence"
+    path.write_text("---\n" + head + "\n" + lines + "---\n" + rest)
+    fm = vb.load_yaml(head + "\n" + lines, rel)
+    assert isinstance(fm, dict)
+
+
+def m_teaches_absent(root: Path) -> None:
+    for rel in (CLI_LESSON_00, CLI_LESSON_01, CLI_LESSON_02, CLI_OPTIONAL):
+        assert "teaches:" not in (root / rel).read_text()
+
+
+def m_teaches_valid(root: Path) -> None:
+    _cli_concepts(root)
+    _add_fm(root, CLI_LESSON_01, "teaches: [argument-parsing, error-handling]\n")
+
+
+def m_teaches_string(root: Path) -> None:
+    _cli_concepts(root)
+    _add_fm(root, CLI_LESSON_01, "teaches: argument-parsing\n")
+
+
+def m_teaches_empty(root: Path) -> None:
+    _cli_concepts(root)
+    _add_fm(root, CLI_LESSON_01, "teaches: []\n")
+
+
+def m_teaches_unknown(root: Path) -> None:
+    _cli_concepts(root)
+    _add_fm(root, CLI_LESSON_01, "teaches: [argument-parsing, arg-parsing]\n")
+
+
+def m_teaches_assumed(root: Path) -> None:
+    _cli_concepts(root)
+    _add_fm(root, CLI_LESSON_01, "teaches: [rust-installed]\n")
+
+
+def m_teaches_no_covers(root: Path) -> None:
+    _add_fm(root, CLI_LESSON_01, "teaches: [argument-parsing]\n")
+
+
+MATERIAL_AC = (
+    "teaches: [argument-parsing]\n"
+    "material:\n"
+    "  argument-parsing:\n"
+    "    A: level-a.txt\n"
+    "    C: level-c.txt\n"
+)
+
+
+def _material_files(root: Path) -> None:
+    folder = root / "lessons" / "01-subcommands"
+    (folder / "level-a.txt").write_text("level A\n")
+    (folder / "level-c.txt").write_text("level C\n")
+
+
+def m_material_declared(root: Path) -> None:
+    _cli_concepts(root)
+    _material_files(root)
+    _add_fm(root, CLI_LESSON_01, MATERIAL_AC)
+
+
+def m_material_undeclared_file(root: Path) -> None:
+    """A material file no key declares and LESSON.md never names."""
+    _material_files(root)
+
+
+def m_material_on_single_file(root: Path) -> None:
+    _cli_concepts(root)
+    _add_fm(
+        root, CLI_LESSON_00,
+        "teaches: [argument-parsing]\nmaterial:\n  argument-parsing:\n"
+        "    A: level-a.txt\n",
+    )
+
+
+def m_material_unknown_objective(root: Path) -> None:
+    _cli_concepts(root)
+    _material_files(root)
+    _add_fm(
+        root, CLI_LESSON_01,
+        "teaches: [argument-parsing]\nmaterial:\n  error-handling:\n"
+        "    A: level-a.txt\n",
+    )
+
+
+def _material_one(root: Path, level: str, path: str) -> None:
+    _cli_concepts(root)
+    _material_files(root)
+    _add_fm(
+        root, CLI_LESSON_01,
+        "teaches: [argument-parsing]\nmaterial:\n  argument-parsing:\n"
+        f"    {level}: {path}\n",
+    )
+
+
+def m_material_level_d(root: Path) -> None:
+    _material_one(root, "D", "level-a.txt")
+
+
+def m_material_missing_file(root: Path) -> None:
+    _material_one(root, "A", "no-such-file.txt")
+
+
+def m_material_dotdot(root: Path) -> None:
+    _material_one(root, "A", "../00-hello-args.md")
+
+
+def m_material_absolute(root: Path) -> None:
+    _material_one(root, "A", "/etc/passwd")
+
+
+def m_material_symlink_out(root: Path) -> None:
+    """A link inside the folder that points out of it must not count."""
+    link = root / "lessons" / "01-subcommands" / "level-a.txt"
+    link.symlink_to(root / "lessons" / "00-hello-args.md")
+    _cli_concepts(root)
+    _add_fm(
+        root, CLI_LESSON_01,
+        "teaches: [argument-parsing]\nmaterial:\n  argument-parsing:\n"
+        "    A: level-a.txt\n",
+    )
+
+
+def m_material_not_mapping(root: Path) -> None:
+    _cli_concepts(root)
+    _add_fm(root, CLI_LESSON_01, "teaches: [argument-parsing]\nmaterial: level-a.txt\n")
+
+
+def m_placement_absent(root: Path) -> None:
+    for rel in (CLI_LESSON_00, CLI_LESSON_01, CLI_LESSON_02):
+        assert "placement:" not in (root / rel).read_text()
+
+
+def m_placement_one(root: Path) -> None:
+    _cli_concepts(root)
+    _add_fm(root, CLI_LESSON_00, "assesses: [argument-parsing]\nplacement: true\n")
+
+
+def m_placement_false_without_assesses(root: Path) -> None:
+    _add_fm(root, CLI_LESSON_00, "placement: false\n")
+
+
+def m_placement_without_assesses(root: Path) -> None:
+    _add_fm(root, CLI_LESSON_00, "placement: true\n")
+
+
+def m_placement_two(root: Path) -> None:
+    _cli_concepts(root)
+    _add_fm(root, CLI_LESSON_00, "assesses: [argument-parsing]\nplacement: true\n")
+    _add_fm(root, CLI_LESSON_02, "assesses: [error-handling]\nplacement: true\n")
+
+
+def m_placement_optional(root: Path) -> None:
+    _cli_concepts(root)
+    _add_fm(root, CLI_OPTIONAL, "assesses: [argument-parsing]\nplacement: true\n")
+
+
+def m_placement_string(root: Path) -> None:
+    _cli_concepts(root)
+    _add_fm(root, CLI_LESSON_00, 'assesses: [argument-parsing]\nplacement: "yes"\n')
+
+
 def m_no_report(root: Path) -> None:
     """The backward-compatibility control: the key is a MAY."""
     assert "report" not in vb.load_yaml(
@@ -4610,6 +4805,79 @@ CASES: list[Case] = [
          where="tutorial.yaml"),
     Case("28: 'report' spelled correctly is silent", 28, "cli", "bundle",
          m_report_https_github, kind="silent"),
+    # ---- checks 37, 38, 39: teaches, material and placement
+    Case("37: a bundle with no teaches is silent", 37, "cli", "bundle",
+         m_teaches_absent, kind="silent"),
+    Case("37: and so is an INSTANCE with none", 37, "cli", "instance",
+         m_teaches_absent, kind="silent"),
+    Case("37: a valid teaches list is silent", 37, "cli", "bundle",
+         m_teaches_valid, kind="silent"),
+    Case("37: a valid teaches list in an INSTANCE is silent", 37, "cli",
+         "instance", m_teaches_valid, kind="silent"),
+    Case("37: teaches as a string fires", 37, "cli", "bundle",
+         m_teaches_string, "teaches is 'argument-parsing'; it must be a non-empty list",
+         where=CLI_LESSON_01),
+    Case("37: teaches: [] fires", 37, "cli", "bundle", m_teaches_empty,
+         "teaches is []; it must be a non-empty list", where=CLI_LESSON_01),
+    Case("37: an id not in covers fires, naming the id", 37, "cli", "bundle",
+         m_teaches_unknown, "teaches names 'arg-parsing', which does not resolve: "
+         "no 'covers' concept has that id", where=CLI_LESSON_01),
+    Case("37: an assumed id fires with the assumes wording", 37, "cli",
+         "bundle", m_teaches_assumed, "it is in 'assumes', which the course "
+         "does not teach", where=CLI_LESSON_01),
+    Case("37: a bundle with no covers at all says so", 37, "cli", "bundle",
+         m_teaches_no_covers, "the manifest declares no 'covers' concepts",
+         where=CLI_LESSON_01),
+    Case("38: a bundle with no material is silent", 38, "cli", "bundle",
+         m_teaches_absent, kind="silent"),
+    Case("38: and so is an INSTANCE with none", 38, "cli", "instance",
+         m_teaches_absent, kind="silent"),
+    Case("38: levels A and C declared, files present, is silent", 38, "cli",
+         "bundle", m_material_declared, kind="silent"),
+    Case("38: the same in an INSTANCE is silent", 38, "cli", "instance",
+         m_material_declared, kind="silent"),
+    Case("38: material on a single-file lesson fires", 38, "cli", "bundle",
+         m_material_on_single_file, "material needs a folder lesson",
+         where=CLI_LESSON_00),
+    Case("38: an objective not in teaches fires", 38, "cli", "bundle",
+         m_material_unknown_objective, "'error-handling', which is not in this "
+         "lesson's teaches", where=CLI_LESSON_01),
+    Case("38: level D fires", 38, "cli", "bundle", m_material_level_d,
+         "level 'D'", where=CLI_LESSON_01),
+    Case("38: a missing file fires", 38, "cli", "bundle", m_material_missing_file,
+         "'no-such-file.txt'", where=CLI_LESSON_01),
+    Case("38: a .. path fires", 38, "cli", "bundle", m_material_dotdot,
+         "'../00-hello-args.md'", where=CLI_LESSON_01),
+    Case("38: an absolute path fires", 38, "cli", "bundle", m_material_absolute,
+         "'/etc/passwd'", where=CLI_LESSON_01),
+    Case("38: a symlink pointing out of the folder fires", 38, "cli", "bundle",
+         m_material_symlink_out, "symbolic link", where=CLI_LESSON_01),
+    Case("38: material that is not a mapping fires", 38, "cli", "bundle",
+         m_material_not_mapping, "material must be a mapping",
+         where=CLI_LESSON_01),
+    Case("6: a material file check 38 declares does not fire check 6", 6,
+         "cli", "bundle", m_material_declared, kind="silent"),
+    Case("6: the same files undeclared still fire check 6", 6, "cli", "bundle",
+         m_material_undeclared_file, "'level-a.txt' is never named",
+         where="lessons/01-subcommands/LESSON.md -> level-a.txt"),
+    Case("39: a bundle with no placement is silent", 39, "cli", "bundle",
+         m_placement_absent, kind="silent"),
+    Case("39: and so is an INSTANCE with none", 39, "cli", "instance",
+         m_placement_absent, kind="silent"),
+    Case("39: one valid placement lesson is silent", 39, "cli", "bundle",
+         m_placement_one, kind="silent"),
+    Case("39: and in an INSTANCE", 39, "cli", "instance", m_placement_one,
+         kind="silent"),
+    Case("39: placement: false needs no assesses", 39, "cli", "bundle",
+         m_placement_false_without_assesses, kind="silent"),
+    Case("39: placement without assesses fires", 39, "cli", "bundle",
+         m_placement_without_assesses, "without 'assesses'", where=CLI_LESSON_00),
+    Case("39: two placement lessons fire once, naming both", 39, "cli", "bundle",
+         m_placement_two, f"{CLI_LESSON_00}, {CLI_LESSON_02}"),
+    Case("39: a placement optional lesson fires", 39, "cli", "bundle",
+         m_placement_optional, "optional lesson", where=CLI_OPTIONAL),
+    Case('39: placement: "yes" fires', 39, "cli", "bundle", m_placement_string,
+         "must be true or false", where=CLI_LESSON_00),
     # ---- checks 35 and 36: levels and starts_from. Silent rows are the
     # positive control for the firing ones.
     Case("35: a bundle with no levels is silent", 35, "cli", "bundle",
@@ -9089,6 +9357,36 @@ def test_levels_check_status() -> None:
         )
 
 
+def test_lesson_levels_check_status() -> None:
+    """Checks 37-39: n/a with the key absent, ran with it declared."""
+    print("\nchecks 37, 38 and 39: the status line, both modes:")
+    for mode in ("bundle", "instance"):
+        for num, mutate, want, label in (
+            (37, m_teaches_absent, vb.NOT_APPLICABLE, "no teaches: n/a"),
+            (37, m_teaches_valid, vb.RAN, "teaches: ran"),
+            (38, m_teaches_absent, vb.NOT_APPLICABLE, "no material: n/a"),
+            (38, m_material_declared, vb.RAN, "material: ran"),
+            (39, m_placement_absent, vb.NOT_APPLICABLE, "no placement: n/a"),
+            (39, m_placement_one, vb.RAN, "placement: ran"),
+        ):
+            with tempfile.TemporaryDirectory() as tmpdir:
+                root = fresh("cli", Path(tmpdir))
+                if mode == "instance":
+                    to_instance(root)
+                mutate(root)
+                report = vb.validate(root, mode)
+            got = report.status.get(num, ("missing", ""))[0]
+            record(got == want, f"check {num}, {mode}: {label}",
+                   f"status = {got!r}")
+    for num in (37, 38, 39):
+        record(
+            num not in vb.BUNDLE_ONLY and num not in vb.INSTANCE_ONLY
+            and num not in vb.WARNING_ONLY,
+            f"check {num} is a FINDING in BOTH modes",
+            f"BUNDLE_ONLY = {vb.BUNDLE_ONLY}, INSTANCE_ONLY = {vb.INSTANCE_ONLY}",
+        )
+
+
 def test_learning_record_check_status() -> None:
     """Check 33 is n/a without a record, instance-only, and warning-only."""
     print("\nlearning record check reports n/a where there is no record:")
@@ -9256,6 +9554,7 @@ def main() -> int:
     test_learning_record_check_status()
     test_report_check_status()
     test_levels_check_status()
+    test_lesson_levels_check_status()
     test_the_total_is_reproducible_from_this_commit()
     test_check_coverage()
 

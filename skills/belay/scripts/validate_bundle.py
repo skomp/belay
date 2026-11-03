@@ -140,6 +140,12 @@ CHECKS: dict[int, str] = {
         "a known prefill",
     35: "levels, when declared, is true or false",
     36: "starts_from, when declared, is 'ref'",
+    37: "teaches, where a lesson declares it, is a non-empty list of concept "
+        "ids, and every id resolves in covers",
+    38: "material, where a lesson declares it, maps objectives the lesson "
+        "teaches to files that exist in its own folder, by level A, B or C",
+    39: "placement, where a lesson declares it, is a boolean on an "
+        "assessment, on at most one lesson, and not on an optional lesson",
 }
 
 BUNDLE_ONLY = {12, 13, 26}
@@ -1668,7 +1674,11 @@ def names_file(text: str, rel_in_folder: str) -> bool:
 
 
 def check_material_reachable(
-    root: Path, manifest: Any, lessons: list[Lesson], report: Report
+    root: Path,
+    manifest: Any,
+    lessons: list[Lesson],
+    report: Report,
+    declared_material: frozenset[str] | set[str] = frozenset(),
 ) -> None:
     """Check 6 - forward direction only.
 
@@ -1684,6 +1694,10 @@ def check_material_reachable(
     tutor already knows it exists without LESSON.md repeating that. This is
     an EXEMPTION, not a loosening - a file no supplies entry covers must
     still be named, exactly as before.
+
+    A path in `declared_material` - a file a lesson's `material` key declared
+    and check 38 accepted - is exempt for the same reason, and counts in the
+    same "cleared by a declaration" tally.
     """
     foldered = [lesson for lesson in lessons if lesson.folder is not None]
     if not foldered:
@@ -1709,7 +1723,9 @@ def check_material_reachable(
                 continue
             checked += 1
             bundle_rel = f"{folder_rel}/{rel_in_folder}"
-            if supplies_covers(supplies_entries, bundle_rel):
+            if bundle_rel in declared_material or supplies_covers(
+                supplies_entries, bundle_rel
+            ):
                 supplied += 1
                 continue
             if not names_file(text, rel_in_folder):
@@ -2454,6 +2470,271 @@ def check_assesses(
             f"against {len(covers)} covers concepts",
         )
     return declared
+
+
+# Lesson frontmatter for levels (checks 37, 38, 39).
+TEACHES_KEY = "teaches"
+MATERIAL_KEY = "material"
+PLACEMENT_KEY = "placement"
+MATERIAL_LEVELS = ("A", "B", "C")
+
+
+def check_teaches(lessons: list[Lesson], manifest: Any, report: Report) -> None:
+    """Check 37 - both modes.
+
+    `teaches` is the objectives a lesson is about: a non-empty list of
+    concept ids, each a key in `covers`. It is check 31's rule for the same
+    reason - the concept's `summary` is the one definition of the objective -
+    and it takes the same wording when the id is assumed or `covers` is empty.
+
+    Runs over generated lessons too: a lesson is what its frontmatter says,
+    wherever it lives. A bundle in which no lesson declares `teaches` is
+    silent and reports n/a.
+    """
+    covers_raw = manifest.get("covers") if isinstance(manifest, dict) else None
+    covers_malformed = covers_raw is not None and not isinstance(covers_raw, dict)
+    decls = concept_declarations(manifest)
+    covers = set(decls.get("covers", {}))
+    assumes = set(decls.get("assumes", {}))
+    declared = 0
+    checked = 0
+    for lesson in lessons:
+        fm = _lesson_frontmatter(lesson)
+        if fm is None or TEACHES_KEY not in fm:
+            continue
+        declared += 1
+        value = fm[TEACHES_KEY]
+        if not isinstance(value, list) or not value:
+            shown = "nothing" if value is None else repr(value)
+            report.add(
+                37,
+                lesson.rel,
+                f"teaches is {shown}; it must be a non-empty list of the "
+                f"concept ids this lesson teaches, each one a key in "
+                f"tutorial.yaml's 'covers'. Remove the field if the lesson "
+                f"teaches no declared concept.",
+            )
+            continue
+        for entry in value:
+            if not isinstance(entry, str) or not _CONCEPT_ID_RE.fullmatch(entry):
+                report.add(
+                    37,
+                    lesson.rel,
+                    f"teaches names {entry!r}, which is not a concept id. A "
+                    f"concept id is a string matching [a-z0-9-]+ and a key in "
+                    f"tutorial.yaml's 'covers'.",
+                )
+                continue
+            checked += 1
+            if covers_malformed or entry in covers:
+                continue
+            if entry in assumes:
+                why = (
+                    "it is in 'assumes', which the course does not teach, so "
+                    "a lesson cannot be about it"
+                )
+            elif not covers:
+                why = "the manifest declares no 'covers' concepts at all"
+            else:
+                why = "no 'covers' concept has that id"
+            report.add(
+                37,
+                lesson.rel,
+                f"teaches names {entry!r}, which does not resolve: {why}. "
+                f"Declare the concept under 'covers' or correct the id.",
+            )
+    if not declared:
+        report.na(37, "no lesson declares teaches")
+    elif covers_malformed:
+        report.blocked(
+            37, "covers is not a mapping (see check 23), so no id can be resolved"
+        )
+    else:
+        report.ran(
+            37,
+            f"{checked} concept ids in {declared} lesson(s), against "
+            f"{len(covers)} covers concepts",
+        )
+
+
+def _material_path_problem(folder: Path, rel: Any) -> str | None:
+    """Why `rel` is not a file inside `folder`, or None when it is.
+
+    The component rule is resolve_exact's: no '', '.', '..', no backslash, and
+    every component matched in exact case. A symbolic link anywhere on the way
+    is refused too, because following one could leave the folder and the
+    runner would hand that file to the learner.
+    """
+    if not isinstance(rel, str) or not rel:
+        return f"{rel!r} is not a path"
+    if rel.startswith("/"):
+        return f"{rel!r} is absolute; it must be relative to the lesson folder"
+    found, reason = resolve_exact(folder, rel)
+    if found is None:
+        return f"{rel!r}: {reason}"
+    current = folder
+    for part in rel.split("/"):
+        current = current / part
+        if current.is_symlink():
+            return f"{rel!r} passes through a symbolic link, which is not followed"
+    if not found.is_file():
+        return f"{rel!r} is not a file"
+    return None
+
+
+def check_lesson_material(
+    root: Path, lessons: list[Lesson], report: Report
+) -> set[str]:
+    """Check 38 - both modes.
+
+    `material` maps an objective id to a mapping of level (`A`, `B` or `C`) to
+    a file in the lesson's own folder: the file the tutor hands out at that
+    level. So it needs a folder lesson, every objective must be one the lesson
+    `teaches`, and every path must resolve inside the folder.
+
+    Returns the bundle-relative paths of the files it accepted, so check 6
+    can treat a declared file as named: a `material` entry tells the tutor
+    what the file is and when to use it, which is all check 6 asks of a
+    mention in LESSON.md. A file that is not declared keeps check 6's rule.
+    """
+    declared_paths: set[str] = set()
+    declared = 0
+    checked = 0
+    for lesson in lessons:
+        fm = _lesson_frontmatter(lesson)
+        if fm is None or MATERIAL_KEY not in fm:
+            continue
+        declared += 1
+        value = fm[MATERIAL_KEY]
+        if lesson.folder is None:
+            report.add(
+                38,
+                lesson.rel,
+                "material needs a folder lesson: the files live beside "
+                "LESSON.md, and a single-file lesson has no folder. Move the "
+                "lesson to <slug>/LESSON.md or remove material.",
+            )
+            continue
+        if not isinstance(value, dict) or not value:
+            report.add(
+                38,
+                lesson.rel,
+                f"material must be a mapping of objective id to a mapping of "
+                f"level to file, not {value!r}.",
+            )
+            continue
+        teaches_raw = fm.get(TEACHES_KEY)
+        teaches = (
+            {t for t in teaches_raw if isinstance(t, str)}
+            if isinstance(teaches_raw, list)
+            else set()
+        )
+        folder_rel = lesson.folder.relative_to(root).as_posix()
+        for objective, levels in value.items():
+            if str(objective) not in teaches:
+                report.add(
+                    38,
+                    lesson.rel,
+                    f"material names the objective {str(objective)!r}, which "
+                    f"is not in this lesson's teaches. Material is for an "
+                    f"objective the lesson teaches.",
+                )
+            if not isinstance(levels, dict) or not levels:
+                report.add(
+                    38,
+                    lesson.rel,
+                    f"material for {str(objective)!r} must be a mapping of "
+                    f"level (A, B or C) to file, not {levels!r}.",
+                )
+                continue
+            for level, rel in levels.items():
+                checked += 1
+                if level not in MATERIAL_LEVELS:
+                    report.add(
+                        38,
+                        lesson.rel,
+                        f"material for {str(objective)!r} has the level "
+                        f"{level!r}; the levels are A, B and C.",
+                    )
+                    continue
+                problem = _material_path_problem(lesson.folder, rel)
+                if problem is not None:
+                    report.add(
+                        38,
+                        lesson.rel,
+                        f"material for {str(objective)!r} at level {level}: "
+                        f"{problem}. A material path is relative to the "
+                        f"lesson's own folder and names a file in it.",
+                    )
+                    continue
+                declared_paths.add(f"{folder_rel}/{rel}")
+    if not declared:
+        report.na(38, "no lesson declares material")
+    else:
+        report.ran(
+            38, f"{checked} material file(s) declared in {declared} lesson(s)"
+        )
+    return declared_paths
+
+
+def check_placement(lessons: list[Lesson], manifest: Any, report: Report) -> None:
+    """Check 39 - both modes.
+
+    `placement: true` marks the one assessment that decides where a learner
+    starts. It is a boolean; it needs `assesses`, because a placement
+    without an assessment has nothing to ask; at most one lesson carries it;
+    and an optional lesson cannot, because placement runs before the learner
+    has been offered anything. `placement: false` is allowed and says nothing.
+
+    A bundle in which no lesson declares `placement` is silent and n/a.
+    """
+    optional_keys = optional_lesson_keys(manifest)
+    declared = 0
+    marked: list[str] = []
+    for lesson in lessons:
+        fm = _lesson_frontmatter(lesson)
+        if fm is None or PLACEMENT_KEY not in fm:
+            continue
+        declared += 1
+        value = fm[PLACEMENT_KEY]
+        if not isinstance(value, bool):
+            report.add(
+                39,
+                lesson.rel,
+                f"placement is {value!r}; it must be true or false.",
+            )
+            continue
+        if not value:
+            continue
+        marked.append(lesson.rel)
+        if ASSESSES_KEY not in fm:
+            report.add(
+                39,
+                lesson.rel,
+                "placement: true without 'assesses'. The placement lesson is "
+                "an assessment, so it must declare the concepts it assesses.",
+            )
+        if lesson.rel in optional_keys:
+            report.add(
+                39,
+                lesson.rel,
+                "placement: true on an optional lesson. Placement decides "
+                "where the learner starts, so it cannot be a lesson the "
+                "learner may skip.",
+            )
+    if len(marked) > 1:
+        report.add(
+            39,
+            ", ".join(marked),
+            f"{len(marked)} lessons declare placement: true. A course has one "
+            f"placement lesson; keep it on one and remove it from the others.",
+        )
+    if not declared:
+        report.na(39, "no lesson declares placement")
+    else:
+        report.ran(
+            39, f"{declared} declaration(s), {len(marked)} placement lesson(s)"
+        )
 
 
 def parse_assessment_records(
@@ -5120,7 +5401,13 @@ def validate(target: Path, mode: str) -> Report:
         report,
         ("lessons", GENERATED_DIR) if mode == "instance" else ("lessons",),
     )
-    check_material_reachable(target, manifest_dict, all_lessons, report)
+    # Check 38 runs HERE, ahead of the checks that follow check 31, because
+    # check 6 needs the files it accepted: a file a `material` key declares
+    # is named, exactly as a supplies-covered file is.
+    declared_material = check_lesson_material(target, all_lessons, report)
+    check_material_reachable(
+        target, manifest_dict, all_lessons, report, declared_material
+    )
     check_manifest_lists_no_generated(manifest_dict, report)
     # A lesson-scope supplies entry is legible only if its lesson is
     # reachable at all - through 'lessons' or 'optional_lessons', the same
@@ -5142,6 +5429,10 @@ def validate(target: Path, mode: str) -> Report:
     # Check 31, both modes, over all_lessons for check 22's reason: a lesson
     # is an assessment by its frontmatter, wherever it lives.
     assessments = check_assesses(all_lessons, manifest_dict, report)
+    # Checks 37 and 39, both modes, over all_lessons for check 31's reason.
+    # (Check 38 ran above, ahead of check 6, which consumes its result.)
+    check_teaches(all_lessons, manifest_dict, report)
+    check_placement(all_lessons, manifest_dict, report)
     # Disclosure, and NOT a check: no finding, no warning, no number, no
     # effect on the exit code. It is derived here rather than by the tutor so
     # that the banner's content is testable, and it is given the RAW manifest
