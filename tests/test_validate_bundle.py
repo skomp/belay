@@ -135,6 +135,14 @@ BASELINES = {
     "broker": FIXTURES / "durable-event-broker",
     "engine": FIXTURES / "streaming-query-engine",
     "recipes": FIXTURES / "event-stream-recipes",
+    # The two modules of a programme (levelled-programme/catalog.yaml), the
+    # positive control for the levels keys. `module1` is levelled, has a
+    # placement lesson assessing every objective, `teaches` on every lesson
+    # and a folder lesson whose `material` covers levels A and C but not B.
+    # `module2` is levelled, says `starts_from: ref`, names module 1 as a
+    # previous bundle, and its placement lesson assesses only what is new.
+    "module1": FIXTURES / "levelled-programme" / "module-1",
+    "module2": FIXTURES / "levelled-programme" / "module-2",
 }
 
 # Baselines that are already INSTANCES and must not be run through
@@ -145,6 +153,9 @@ INSTANCE_BASELINES = {
     # single-file side-lesson, which STATE.md is sitting on, and a foldered
     # main-path-draft with one material file.
     "generated": FIXTURES / "generated-instance",
+    # An instance of module 2 whose STATE.md carries a `## Levels` row for a
+    # module-1 objective and a `## Modules` row for module 1 (checks 40, 41).
+    "module2-instance": FIXTURES / "levelled-programme" / "instance-of-module-2",
 }
 
 ALL_BASELINES = {**BASELINES, **INSTANCE_BASELINES}
@@ -7622,9 +7633,15 @@ def test_real_catalogue_gains_no_warning() -> None:
         "; ".join(str(w) for w in report.warnings),
     )
     record(
-        sorted(document) == sorted(vb.CATALOG_KNOWN_TOP_LEVEL_FIELDS),
-        "its top-level keys are exactly the two this document defines, "
-        "which is why check 1 has nothing to say about it",
+        # `goals` is optional (check 8), and the published catalogue declares
+        # none, so its keys are the known ones minus `goals`. Before goals
+        # existed this compared against the whole tuple; the sibling sweep
+        # alone saw it stop holding, which is what the sweep is for.
+        sorted(document)
+        == sorted(set(vb.CATALOG_KNOWN_TOP_LEVEL_FIELDS) - {"goals"}),
+        "its top-level keys are exactly the two this document always "
+        "carries (goals is optional and it has none), which is why check 1 "
+        "has nothing to say about it",
         f"top-level keys = {sorted(document)}",
     )
 
@@ -9364,9 +9381,20 @@ def test_skipped_and_passed_are_distinguishable() -> None:
 def test_assessment_checks_status() -> None:
     """Checks 31 and 32 say n/a, not ran, where there is nothing to check."""
     print("\nassessment checks report n/a on a course with no assessment:")
+    # The module baselines are the only ones whose placement lesson assesses,
+    # so check 31 RUNS on them; it stays n/a on every other baseline.
+    assessing = ("module1", "module2")
     for name, path in BASELINES.items():
         report = vb.validate(path, "bundle")
         status = report.status.get(31, ("missing", ""))[0]
+        if name in assessing:
+            record(
+                status == vb.RAN,
+                f"{name}: check 31 RAN on a bundle whose placement lesson "
+                f"declares assesses",
+                f"status = {report.status.get(31)!r}",
+            )
+            continue
         record(
             status == vb.NOT_APPLICABLE,
             f"{name}: check 31 is n/a on a bundle that declares no assesses",
@@ -9594,6 +9622,155 @@ def test_the_total_is_reproducible_from_this_commit() -> None:
     )
 
 
+PROGRAMME = FIXTURES / "levelled-programme"
+
+
+def test_levelled_programme_is_clean_end_to_end() -> None:
+    """The fixture programme: a catalogue, two module bundles, one instance.
+
+    Spec 2026-11-03 section 5, items 3 and 4. Every new key is exercised
+    and each one's check is shown RUNNING rather than n/a, because a clean
+    result from a check that never ran proves nothing. The programme's own
+    shape is asserted too (goals cover every objective, module 2 assesses
+    only what is new), so a later edit that quietly weakens the fixture
+    fails here instead of passing by emptiness.
+    """
+    print("\nthe levelled programme validates clean, every new check running:")
+    catalogue = PROGRAMME / "catalog.yaml"
+    for portable in (False, True):
+        report = vb.validate_catalog(catalogue, portable)
+        record(
+            report.exit_code() == 0 and not report.warnings,
+            f"the programme catalogue validates clean"
+            f"{' --portable' if portable else ''}, with no warnings",
+            "; ".join(str(f) for f in [*report.findings, *report.warnings]),
+        )
+    cat_report = vb.validate_catalog(catalogue, False)
+    record(
+        cat_report.status.get(8, ("", ""))[0] == vb.RAN
+        and cat_report.status.get(9, ("", ""))[0] == vb.RAN,
+        "catalogue checks 8 (goals) and 9 (start_from) both RAN",
+        f"8 = {cat_report.status.get(8)!r}, 9 = {cat_report.status.get(9)!r}",
+    )
+
+    manifests = {}
+    for name in ("module1", "module2"):
+        report = vb.validate(BASELINES[name], "bundle")
+        record(
+            report.exit_code() == 0 and not report.warnings,
+            f"{name} validates clean as a bundle, with no warnings",
+            "; ".join(str(f) for f in [*report.findings, *report.warnings]),
+        )
+        ran = {n: report.status.get(n, ("missing", ""))[0] for n in (35, 37, 39)}
+        record(
+            all(s == vb.RAN for s in ran.values()),
+            f"{name}: checks 35 (levels), 37 (teaches) and 39 (placement) RAN",
+            f"states = {ran}",
+        )
+        manifests[name] = yamlite.load_yaml((BASELINES[name] / "tutorial.yaml").read_text(), "tutorial.yaml")
+    report = vb.validate(BASELINES["module1"], "bundle")
+    record(
+        report.status.get(38, ("", ""))[0] == vb.RAN
+        and report.status.get(36, ("", ""))[0] == vb.NOT_APPLICABLE,
+        "module1: check 38 (material) RAN and check 36 (starts_from) is n/a",
+        f"38 = {report.status.get(38)!r}, 36 = {report.status.get(36)!r}",
+    )
+    report = vb.validate(BASELINES["module2"], "bundle")
+    record(
+        report.status.get(36, ("", ""))[0] == vb.RAN,
+        "module2: check 36 (starts_from) RAN",
+        f"36 = {report.status.get(36)!r}",
+    )
+
+    # The shape of the programme, read from the files.
+    doc = yamlite.load_yaml(catalogue.read_text(), "catalog.yaml")
+    covered: set[str] = set()
+    for entry in doc["tutorials"]:
+        covered |= set(entry["covers"])
+    goal_objectives = {o for g in doc["goals"].values() for o in g["objectives"]}
+    record(
+        goal_objectives == covered
+        == set(manifests["module1"]["covers"]) | set(manifests["module2"]["covers"]),
+        "the goals list every objective of both modules, and nothing else",
+        f"goals = {sorted(goal_objectives)}, covers = {sorted(covered)}",
+    )
+    starts = {e["id"]: "start_from" in e for e in doc["tutorials"]}
+    record(
+        starts == {"stockroom-basics": False, "stockroom-forecasting": True}
+        and manifests["module2"].get("starts_from") == "ref"
+        and manifests["module1"].get("levels") is True
+        and manifests["module2"].get("levels") is True,
+        "module 2's entry carries start_from, module 1's does not; both are levelled",
+        f"entries with start_from = {starts}",
+    )
+    previous = [r["bundle"] for r in manifests["module2"]["recommended_previous_bundles"]]
+    record(
+        previous == [manifests["module1"]["id"]],
+        "module 2 names module 1 in recommended_previous_bundles",
+        f"previous = {previous}",
+    )
+
+    def frontmatter(path: Path) -> dict:
+        text, _ = vb.split_frontmatter(path.read_text())
+        return yamlite.load_yaml(text or "", path.name)
+
+    def placement_lesson(name: str) -> dict:
+        found = []
+        for rel in manifests[name]["lessons"]:
+            front = frontmatter(BASELINES[name] / rel)
+            if front.get("placement") is True:
+                found.append(front)
+        assert len(found) == 1, f"{name}: {len(found)} placement lessons"
+        return found[0]
+
+    record(
+        set(placement_lesson("module1")["assesses"]) == set(manifests["module1"]["covers"]),
+        "module 1's placement lesson assesses every objective it covers",
+        repr(placement_lesson("module1")["assesses"]),
+    )
+    record(
+        set(placement_lesson("module2")["assesses"]) == set(manifests["module2"]["covers"])
+        and not set(placement_lesson("module2")["assesses"])
+        & set(manifests["module1"]["covers"]),
+        "module 2's placement lesson assesses only objectives new in module 2",
+        repr(placement_lesson("module2")["assesses"]),
+    )
+    every = True
+    for name in ("module1", "module2"):
+        for rel in manifests[name]["lessons"]:
+            every = every and bool(frontmatter(BASELINES[name] / rel).get("teaches"))
+    record(every, "every lesson of both modules declares teaches", "")
+    front = frontmatter(BASELINES["module1"] / "lessons" / "02-counting" / "LESSON.md")
+    record(
+        {k: set(v) for k, v in front["material"].items()}
+        == {"stock-counting": {"A", "C"}},
+        "module 1's folder lesson has material for A and C but not B",
+        repr(front["material"]),
+    )
+
+    instance = INSTANCE_BASELINES["module2-instance"]
+    report = vb.validate(instance, "instance")
+    record(
+        report.exit_code() == 0 and not report.warnings,
+        "the module 2 instance validates clean, with no warnings",
+        "; ".join(str(f) for f in [*report.findings, *report.warnings]),
+    )
+    record(
+        report.status.get(40, ("", ""))[0] == vb.RAN
+        and report.status.get(41, ("", ""))[0] == vb.RAN,
+        "the instance's Levels and Modules ledgers (checks 40, 41) both RAN",
+        f"40 = {report.status.get(40)!r}, 41 = {report.status.get(41)!r}",
+    )
+    state = (instance / "STATE.md").read_text()
+    record(
+        "`stock-counting`" in state
+        and "stock-counting" in manifests["module1"]["covers"]
+        and "`stockroom-basics`" in state,
+        "the Levels row is for a module 1 objective and the Modules row for module 1",
+        "",
+    )
+
+
 def test_check_coverage() -> None:
     """Every check must be demonstrated REPORTING, not merely passing.
 
@@ -9693,6 +9870,7 @@ def main() -> int:
     test_lesson_levels_check_status()
     test_ledger_checks_status()
     test_the_total_is_reproducible_from_this_commit()
+    test_levelled_programme_is_clean_end_to_end()
     test_check_coverage()
 
     if _notes:

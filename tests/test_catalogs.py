@@ -3047,6 +3047,59 @@ def test_start_from_is_normalised_in_json() -> None:
         )
 
 
+PROGRAMME_CATALOG = HERE / "fixtures" / "levelled-programme" / "catalog.yaml"
+
+
+def test_levelled_programme_end_to_end() -> None:
+    """The fixture programme through the real commands, not just the parser.
+
+    Spec 2026-11-03 section 5, item 3. The catalogue declares `goals` over
+    both modules and gives module 2 a `start_from`; the validator must pass
+    it, and resolve/discover must carry the normalised key without a note and
+    without being confused by the `goals` mapping, which this script does not
+    read. Module 1 has no start_from and must say null, not be absent.
+    """
+    print("\nthe levelled programme, end to end:")
+    report = vb.validate_catalog(PROGRAMME_CATALOG, False)
+    record(
+        report.exit_code() == 0 and not report.warnings,
+        "the programme catalogue validates clean, with no warnings",
+        "; ".join(str(f) for f in [*report.findings, *report.warnings]),
+    )
+    record(
+        report.status.get(8, ("", ""))[0] == vb.RAN
+        and report.status.get(9, ("", ""))[0] == vb.RAN,
+        "catalogue checks 8 (goals) and 9 (start_from) both RAN on it",
+        f"8 = {report.status.get(8)!r}, 9 = {report.status.get(9)!r}",
+    )
+    with temp_env() as env:
+        env.write_config(file_config(("prog", PROGRAMME_CATALOG)))
+        code, payload = env.run_json("discover")
+        entries = {e["id"]: e for e in payload.get("tutorials", [])}
+        record(
+            code == 0 and set(entries) == {"stockroom-basics", "stockroom-forecasting"},
+            "discover --json offers both modules",
+            f"exit {code}, ids {sorted(entries)}",
+        )
+        code, payload = env.run_json("resolve", "stockroom-forecasting")
+        entry = payload.get("entry", payload)
+        record(
+            entry.get("start_from")
+            == {"repo": "https://github.com/example/stockroom-sheet.git", "ref": "main"}
+            and entry.get("metadata_notes") == [],
+            "module 2 resolves with its start_from mapping and no note",
+            repr((entry.get("start_from"), entry.get("metadata_notes"))),
+        )
+        code, payload = env.run_json("resolve", "stockroom-basics")
+        entry = payload.get("entry", payload)
+        record(
+            "start_from" in entry and entry["start_from"] is None
+            and entry.get("metadata_notes") == [],
+            "module 1 resolves with start_from null and no note",
+            repr((entry.get("start_from", "(absent)"), entry.get("metadata_notes"))),
+        )
+
+
 def test_read_start_from_value_by_value() -> None:
     print("\nread_start_from, value by value:")
     good = {"repo": "https://github.com/o/r.git", "ref": "main"}
@@ -4359,6 +4412,7 @@ def main() -> int:
         test_find_instance,
         test_start_from_is_normalised_in_json,
         test_read_start_from_value_by_value,
+        test_levelled_programme_end_to_end,
     ):
         try:
             test()
