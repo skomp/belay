@@ -54,7 +54,8 @@ YAML says `covers` concept. They are the same thing, and no alias key is added f
 
 ### 1.2 What this design does not cover
 
-The same programme needs further pieces. Each is a separate design, built on this one:
+The same programme needs further pieces. Each is a separate design, built on this one; items 1
+and 2 became the one design `2026-11-03-user-stories-design.md`:
 
 1. **Story scaffolding** (belay#92) — a module's user stories arrive pre-cut, cut with
    options, or uncut, fading over the programme regardless of the participant's levels.
