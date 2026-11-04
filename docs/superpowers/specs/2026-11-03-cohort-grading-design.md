@@ -2,7 +2,11 @@
 
 **Date:** 2026-11-03
 **Last amended:** 2026-11-04
-**Status:** designed, not implemented
+**Status:** implemented — `skills/belay/scripts/grade.py` and `bin/belay-grade`, validator
+checks 47-51, `bundle-format.md` §2 **Cohort grading** and §6 **Writing an exam lesson**,
+`runner-protocol.md` §15.14 and §20, `tests/test_grade.py`. **The manual run is outstanding:** the
+real container path has never run, because neither docker nor podman is on the development
+machine; `runner-protocol.md` §20.9 lists what to check.
 **Issue:** belay#94
 **Builds on:** the levels and modules-as-bundles design (2026-11-03, PR: belay#91); the
 task-lessons design (PR: belay#101), whose participant-written files can be graded here
@@ -48,7 +52,7 @@ grade: an assessment records outcomes, not points.
 
 ```yaml
 grading:
-  image: python:3.12-slim          # the container the validators run in
+  image: registry.example/programme/python-grading:3.12  # the validators run in it; holds their tools
   network: true                    # default false
   env: [ANTHROPIC_API_KEY]         # the only environment variables passed in
   timeout_minutes: 15              # per branch, for all validators together
@@ -78,10 +82,12 @@ grading:
   proportion so that every module and every cohort means the same thing by "hybrid".
 - **A rubric criterion's `standard` is one checkable sentence**, in the spirit of a `covers`
   summary. The grader judges a branch against it and quotes the evidence.
-- **`paths` says where the grader looks**: a list of workspace globs, in the dialect of
-  `learner_owned` (`bundle-format.md` section 2). A course that grades specifications or
-  participant-written task files points a criterion at them — for example `specs/**` or the
-  `own_tasks` directory of a task lesson. Without `paths` the grader looks at the whole branch.
+- **`paths` says where the grader looks**: a list of workspace globs. A course that grades
+  specifications or participant-written task files points a criterion at them — for example
+  `specs/**` or the `own_tasks` directory of a task lesson. Without `paths` the grader looks at the
+  whole branch. **This format has no glob dialect today**: the ownership dialect this bullet once
+  named exists only on unmerged PR: belay#69. So check 49 applies the path rules of `own_tasks` (check
+  45) and leaves wildcards unvalidated, and the tutor reads each entry as a Git `:(glob)` pathspec.
 - **Only `command`, `file-exists` and `file-contains` validators can earn points.** `manual` needs
   a learner to supply evidence, and no learner is present during grading; `git-diff` inspects
   uncommitted changes, and a fresh checkout has none. Only `command` runs in the container
@@ -153,8 +159,11 @@ result before the next.
 
 1. **Collect.** `belay-grade collect <repo> <module-id>` fetches the cohort repository into a
    local cache and lists the branches matching `*/<module-id>`: participant (the part before
-   the slash), branch, last commit and its date. The trainer confirms the list or removes
-   entries. Branches that match no convention are listed separately and never graded.
+   the slash), branch, last commit and its date. The trainer confirms the list. Removing an
+   entry is not supported through to `confirm` today: `run --only` narrows a run, but `confirm`
+   refuses while the cache holds a branch of the module that the proposal does not cover, so the
+   branch has to go from the repository first. Branches that match no convention are listed
+   separately and never graded.
 2. **Run.** For each confirmed branch, `belay-grade run` checks out a fresh temporary copy and
    runs the bundle's `grading.validators` in a container (section 4). It records, per
    validator, passed or failed, its output (truncated to a fixed size), and whether it is a gate
@@ -187,10 +196,15 @@ each participant their feedback, and setting the next module's start are the tra
 Grading executes code the trainer has not reviewed, much of it written by agents. Isolation
 therefore comes from what the code cannot reach on the trainer's machine:
 
-- **A container per branch**, from the bundle's `grading.image`, using docker or podman.
-  **Without a container runtime, step 2 stops and says so.** It never falls back to running the
-  code directly.
-- **Only the checkout is mounted**, at a fixed path. Nothing of the trainer's — no home
+- **A container per `command` validator**, from the bundle's `grading.image`, using docker or
+  podman, all sharing the branch's one mount. So a file written to the mount reaches the next
+  validator, and a `pip install` outside it does not. `file-exists` and `file-contains` run first and
+  need no container. **Without a container runtime, step 2 stops and says so.** It never falls back
+  to running the code directly.
+- **Limits on every container:** `--pids-limit 512`, `--memory 4g`, `--security-opt
+  no-new-privileges`, so that one branch cannot take the machine down or gain privileges. A mutation
+  validator may hit them, or need a larger `timeout_minutes`, and that reads as a failure.
+- **Only the checkout is mounted**, at a fixed path (`/workspace`). Nothing of the trainer's — no home
   directory, no `~/.ssh`, no Git or GitHub credentials, no Claude login — is mounted or copied.
 - **Network as declared**: on only when `grading.network` is true.
 - **Environment as declared**: only the variables named in `grading.env` are passed, taken from
@@ -205,12 +219,16 @@ therefore comes from what the code cannot reach on the trainer's machine:
 ## 5. Where grades live
 
 ```
-~/.local/share/belay/grading/<cohort>/<module-id>/
-├── proposal.json
-├── final.json
-├── final.<date>.json            # a previous confirmation, kept when re-graded
-├── review.md                    # the shared module review, draft
-└── feedback/<participant>.md    # private feedback, draft
+~/.local/share/belay/grading/<cohort>/
+├── .repo.git/                       # the cache of the repository: every branch, refreshed by collect
+└── <module-id>/
+    ├── run.json                     # the validator results, per branch
+    ├── judgement.json               # the tutor's points and evidence, the input to propose
+    ├── proposal.json
+    ├── final.json
+    ├── final.<date>.json            # a previous confirmation, kept when re-graded
+    ├── review.md                    # the shared module review, draft
+    └── feedback/<participant>.md    # private feedback, draft
 ```
 
 - `<cohort>` is derived from the repository URL. The base directory follows `XDG_DATA_HOME`.
@@ -218,7 +236,7 @@ therefore comes from what the code cannot reach on the trainer's machine:
   accident.
 - **Re-grading** writes a new proposal. `final.json` is replaced only by a new confirmation, and
   the previous one is kept beside it with its date.
-- **`belay-grade forget <cohort>`** deletes a cohort's grades. How long grades are kept is the
+- **`belay-grade forget <cohort>`** deletes a cohort's grades, its working files and the cache. How long grades are kept is the
   trainer's decision; the protocol says so, because it is a data-protection question.
 - The certificate (belay#95) reads the `final.json` of every module of a cohort from here.
 
@@ -249,7 +267,7 @@ New checks take the next free numbers. All are silent when the key is absent.
 |---|---|---|
 | grading shape | both | `grading` not a mapping; an unknown key; `image` not a non-empty string; `network` not a boolean; `env` not a list of valid variable names; `timeout_minutes` not a positive integer |
 | grading validators | both | a name that is not a declared validator; a validator of kind `manual` or `git-diff`; `points` not a positive integer; `gate` not a boolean |
-| grading rubric | both | a criterion without `id`, positive integer `points`, or a non-empty `standard`; a duplicate `id`; `paths` not a non-empty list of globs the ownership dialect accepts; `gate` not a boolean |
+| grading rubric | both | a criterion without `id`, positive integer `points`, or a non-empty `standard`; a duplicate `id`; `paths` not a non-empty list of entries that pass the path rules of check 45, wildcards unvalidated; `gate` not a boolean |
 | grading share | both | the validator points less than 60% of the total |
 | exam | both | `exam` not a boolean |
 
@@ -268,8 +286,9 @@ exam lesson is taught as an ordinary lesson; `bundle-format.md` section 13 says 
 
 | Document | Change |
 |---|---|
-| `bundle-format.md` | section 2: `grading`; section 6: `exam`, and **Writing an exam lesson**; section 13: the older-runner rows |
-| `runner-protocol.md` | a new section, **Grading a cohort**: the six steps, the never-publish rule, the separate grading key; section 15: exam lessons (rung 3, no solutions, levels not applied); the gate as the participant's tutor reports it |
+| `bundle-format.md` | section 2: `grading`, and the `file-contains` pattern; section 6: `exam`, and **Writing an exam lesson**; section 10: the self-check; section 13: the older-runner rows |
+| `runner-protocol.md` | a new section 20, **Grading a cohort**: the six steps, the never-publish rule, the separate grading key; section 15: exam lessons (rung 3, no solutions, levels not applied); section 19: a task lesson keeps an exam lesson's cap; section 3: the gate as the participant's tutor reports it; section 14: `belay-grade run` as the one script that starts a validator |
+| `SKILL.md` | the load conditions, and the exam lesson in the teaching contract |
 | `README.md` | `belay-grade` and the feature list |
 | `bin/` | a `belay-grade` wrapper, as for the other scripts |
 | the levels spec (2026-11-03) | section 1.2: exam mode is per lesson, replacing "a graded task runs in exam mode" |
