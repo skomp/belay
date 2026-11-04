@@ -272,8 +272,13 @@ def normalise_url(repo_url: str) -> str:
     https://Host/o/r.git, ssh://git@host/o/r and git@host:o/r all give host/o/r.
     Two forms that can reach different repositories stay different, because the
     cache and the grades are keyed on this: a port other than the scheme's default
-    can be another server, and an scp path is relative to the ssh user's home.
-    `git` is the shared ssh user of a forge, and equals none.
+    can be another server, and two ssh users are two accounts. `git` is the shared
+    ssh user of a forge, and equals none.
+
+    Paths are compared as written, with no leading '/'. So alice@h:srv/x (relative
+    to alice's home), alice@h:/srv/x and ssh://alice@h/srv/x share a cohort, though
+    the first can be another directory. One trainer collecting a cohort under two of
+    these forms is the case that would mix them.
 
     A credential never reaches it. All of an https userinfo is one (the part up to
     the last '@' of the authority), and so is an ssh password. So one repository
@@ -299,7 +304,10 @@ def normalise_url(repo_url: str) -> str:
     else:
         host, _, port = address.partition(":") if has_scheme else (address, "", "")
         path = tail
-        port = str(int(port)) if port.isdigit() else port
+        # ASCII digits only, and no int(): it refuses a very long number, and
+        # str.isdigit accepts characters that int() refuses.
+        if re.fullmatch(r"[0-9]+", port):
+            port = port.lstrip("0") or "0"
         if port == _DEFAULT_PORTS.get(scheme):
             port = ""
     path = path.strip("/")
@@ -431,7 +439,10 @@ def classify_branch(branch: str, module: str) -> tuple[str, str | None]:
 
 
 def checked_url(repo: str) -> str:
-    """The URL rule of `catalogs.start_from_problems`, which is `is_git_url`."""
+    """The URL rule of `catalogs.start_from_problems`, which is `is_git_url`, and more.
+
+    No refusal here prints the URL, because what it refuses can hold a credential.
+    """
     # `?` and `#` are refused on top of that rule: a token in a query or fragment
     # is not in the authority, so it would reach a directory name and the output.
     if not is_git_url(repo) or "?" in repo or "#" in repo:
@@ -440,6 +451,19 @@ def checked_url(repo: str) -> str:
             "user@host:path, whose host (and any user) begins with a letter or digit, "
             "and which holds no whitespace and none of ` $ ; | & < > ( ) ' \" \\ ? #"
         )
+    scheme, has_scheme, rest = repo.partition("://")
+    if has_scheme:
+        authority, _, path = rest.partition("/")
+        # A raw password can hold a '/', and then the authority ends inside it and
+        # the rest of the password reads as a path, which reaches names and output.
+        # Telling that from a real '@' in a path is not possible, so both are refused.
+        if "@" in path:
+            raise GradeError(
+                "the repository URL has an '@' after its first '/'. That can be a password "
+                "holding a '/', so it is refused and not shown; percent-encode the '/' or the '@'."
+            )
+        if not re.fullmatch(r"[0-9]{0,5}", authority.rpartition("@")[2].partition(":")[2]):
+            raise GradeError("the repository URL's port is not a number of up to five digits.")
     return repo
 
 
@@ -515,12 +539,14 @@ def fetch_cache(repo: str, cache: Path) -> None:
 
 
 def escape_name(name: str) -> str:
-    """A branch name a participant chose, with anything unprintable made visible.
+    """A branch name a participant chose, as printable ASCII.
 
     It is shown to the trainer's terminal and stored, so it can carry no control
-    sequence and no line end. Backslash cannot be in a ref name, so this is unambiguous.
+    sequence and no line end, and it must not crash a stream that is not UTF-8.
+    Backslash cannot be in a ref name, so this is unambiguous.
     """
-    return "".join(c if c.isprintable() else c.encode("unicode_escape").decode("ascii") for c in name)
+    return "".join(c if c.isascii() and c.isprintable() else c.encode("unicode_escape").decode("ascii")
+                   for c in name)
 
 
 def local_git(args: list[str], what: str) -> subprocess.CompletedProcess:
@@ -1225,7 +1251,9 @@ def cmd_run(args: argparse.Namespace) -> int:
             record["runtime"] = runtime
             record["image_digest"] = digest_of_image
             data["branches"][ref.participant] = record
-            write_json_private(path, data)  # after each branch: a stopped run keeps the rest
+            # After each branch, so a stopped run keeps what it finished. A stopped full
+            # run has already dropped the earlier results of branches it did not reach.
+            write_json_private(path, data)
             print(f"{ref.participant} ({ref.branch}, {ref.commit[:12]}):")
             for name, result in record["validators"].items():
                 gate = " (gate)" if result["gate"] else ""
@@ -1304,6 +1332,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # A stream that is not UTF-8 must not stop a run over a character in a bundle's name.
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(errors="backslashreplace")
     args = build_parser().parse_args(argv)
     try:
         return args.func(args)

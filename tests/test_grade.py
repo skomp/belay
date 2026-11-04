@@ -391,6 +391,7 @@ HOSTILE_BRANCHES = {
     "a\u2029b/m1": "a\\u2029b/m1",
     "a\u009bb/m1": "a\\x9bb/m1",
     "caf\udcff/m1": "caf\\xff/m1",
+    "caf\u00e9/m1": "caf\\xe9/m1",
 }
 HOSTILE_OTHER = {"x\u2028y": "x\\u2028y"}
 
@@ -661,8 +662,8 @@ def test_collect() -> None:
                "hostile participant names are listed apart as refused, escaped", str(refused_rows))
         record(sorted(other_rows) == sorted(["alice/m2", "main", *HOSTILE_OTHER.values()]),
                "branches outside the convention are listed apart, escaped", str(other_rows))
-        record(out.isascii() or all(c.isprintable() or c == "\n" for c in out),
-               "nothing but printable characters reaches the terminal", repr(out))
+        record(out.isascii() and all(c.isprintable() or c == "\n" for c in out),
+               "nothing but printable ASCII reaches the terminal", repr(out))
         participants_block = "\n".join(lines[:head_refused])
         record(not any(b in participants_block for b in HOSTILE_BRANCHES),
                "no hostile name is in the participants' block", participants_block)
@@ -1503,6 +1504,88 @@ def test_only_takes_positionals_after_it() -> None:
                "--only before the positionals does not swallow them; it repeats", f"{code} {err}")
 
 
+def test_password_holding_a_slash() -> None:
+    urls = ("https://user:pa/ss-SECRET@cohort.invalid/team-1", "ssh://user:pa/ss-SECRET@cohort.invalid/team-1")
+    for url in urls:
+        with tempfile.TemporaryDirectory() as tmp:
+            scene = Scene(tmp)
+            for command in (("collect", url, "m1"), ("run", "--bundle", str(scene.bundle), url, "m1")):
+                code, out, err = scene.cli(*command)
+                record(code == gr.EXIT_REFUSED and "SECRET" not in out + err and "'@'" in err,
+                       f"{command[0]} refuses an '@' after the first '/' of {url[:8]}..., printing no value",
+                       f"{code} {out}{err}")
+            record(not scene.data.exists(), "no directory exists for it")
+            record(scene.records() == [], "and nothing ran")
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = Scene(tmp)
+        code, out, err = scene.cli("collect", "https://host.invalid/o/a@b", "m1")
+        record(code == gr.EXIT_REFUSED and "'@'" in err and not scene.data.exists(),
+               "an '@' in a path is refused as well, to keep the rule simple", f"{code} {err}")
+        code, out, err = scene.cli("collect", TOKEN_URL, "m1")
+        record(code == 0, "control: an '@' in the authority is accepted", f"{code} {err}")
+
+
+def test_port_rule() -> None:
+    long_port = "1" * 5000
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = Scene(tmp)
+        for url, label in ((f"https://h.invalid:{long_port}/o/r", "5000 digits"),
+                           ("https://h.invalid:123456/o/r", "6 digits"),
+                           ("ssh://u@h.invalid:\u00b2/o/r", "a superscript digit"),
+                           ("https://h.invalid:abc/o/r", "letters")):
+            for command in (("collect", url, "m1"), ("run", "--bundle", str(scene.bundle), url, "m1")):
+                code, out, err = scene.cli(*command)
+                record(code == gr.EXIT_REFUSED and "port" in err and "Traceback" not in err,
+                       f"{command[0]} refuses a port of {label}", f"{code} {err[:200]}")
+        record(not scene.data.exists(), "a refused port created nothing")
+        code, out, err = scene.cli("run", "--bundle", str(scene.bundle), "https://h.invalid:65535/o/r", "m1")
+        record(code == gr.EXIT_REFUSED and "port" not in err and "collect" in err,
+               "control: five digits pass the URL rule", f"{code} {err}")
+    for url in (f"https://h:{long_port}/o/r", "https://h:\u00b2/o/r"):
+        record(bool(gr.cohort_name(url)), f"cohort_name does not raise on {url[:14]}...")
+    record(gr.cohort_name("https://h:08443/o/r") == gr.cohort_name("https://h:8443/o/r")
+           and gr.cohort_name("https://h:0443/o/r") == gr.cohort_name("https://h/o/r"),
+           "leading zeros do not make another port")
+    record(gr.cohort_name("alice@h:srv/x") == gr.cohort_name("alice@h:/srv/x") == gr.cohort_name("ssh://alice@h/srv/x"),
+           "as the docstring says: the same user's relative and absolute paths share a cohort")
+
+
+def test_ascii_stdout() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = Scene(tmp)
+        scene.add_hostile_branches()
+        env = dict(scene.env, PYTHONIOENCODING="ascii")
+        code, out, err = scene.cli("collect", COHORT_URL, "m1", env=env)
+        record(code == 0 and "caf\\xe9/m1" in out and "Traceback" not in err,
+               "collect survives an ASCII stream, with the name escaped", f"{code} {err[-200:]}")
+        code, out, err = scene.cli("run", "--bundle", str(scene.bundle), COHORT_URL, "m1", env=env)
+        record(code == 0 and "caf\\xe9/m1" in out and "Traceback" not in err,
+               "run survives an ASCII stream, with the name escaped", f"{code} {err[-200:]}")
+        (scene.bundle / "tutorial.yaml").write_text(
+            MODULE_YAML.replace("lint", "l\u00efnt").replace("sh, l\u00efnt.sh", "sh, lint.sh"), encoding="utf-8")
+        code, out, err = scene.cli("run", "--bundle", str(scene.bundle), COHORT_URL, "m1", "--only", "alice", env=env)
+        record(code == 0 and "l\\xefnt" in out and "Traceback" not in err,
+               "a bundle's non-ASCII validator name does not crash an ASCII stream either", f"{code} {out[-200:]} {err[-200:]}")
+
+
+def test_only_keeps_other_branches_provenance() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = Scene(tmp)
+        scene.cli("collect", COHORT_URL, "m1")
+        scene.run_all()
+        second = scene.tmp / "second-runtime"
+        scene.write_stub(second, digest_fails=True)
+        env = dict(scene.env, BELAY_CONTAINER_RUNTIME=str(second))
+        code, out, err = scene.cli("run", "--bundle", str(scene.bundle), COHORT_URL, "m1", "--only", "bob", env=env)
+        branches = scene.results()["branches"]
+        record(code == 0 and branches["bob"]["runtime"] == str(second) and branches["bob"]["image_digest"] == "unknown",
+               "the branch --only ran records this run's runtime and digest", f"{code} {branches['bob']}")
+        for who in ("alice", "carol"):
+            record(branches[who]["runtime"] == str(scene.stub)
+                   and branches[who]["image_digest"] == "sha256:stubdigest",
+                   f"{who} keeps the runtime and digest of the run that graded it", str(branches[who])[:160])
+
+
 def main() -> int:
     for test in (test_cohort_from_url_forms, test_store_dir_follows_xdg, test_work_tree_refusal,
                  test_forget, test_scheme, test_cli, test_classify_branch, test_collect,
@@ -1515,7 +1598,8 @@ def main() -> int:
                  test_cache_is_not_reused_for_another_url, test_run_with_a_token_url,
                  test_mounted_git_discloses_nothing, test_docker_proxies_warning, test_run_json_records,
                  test_real_checkout_failure, test_gitmodules_are_not_followed, test_local_git_timeout,
-                 test_only_takes_positionals_after_it):
+                 test_only_takes_positionals_after_it, test_password_holding_a_slash, test_port_rule,
+                 test_ascii_stdout, test_only_keeps_other_branches_provenance):
         try:
             test()
         except Exception:  # pragma: no cover
