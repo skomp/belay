@@ -6,14 +6,25 @@ Usage:
         fetch the cohort repository into the local cache and list the branches
     grade.py run --bundle <dir> <repo> <module-id> [--only <participant>]...
         run the bundle's validators on each collected branch, in a container
+    grade.py propose --bundle <dir> --judgement <file> <repo> <module-id>
+        merge the validator results with the tutor's judgement: proposal.json
+    grade.py confirm --bundle <dir> --by <name> [--change <p>:<criterion>=<points>:<reason>]...
+                     <repo> <module-id>
+        write final.json; the previous one is kept beside it as final.<date>.json
     grade.py forget <cohort>     delete one cohort's stored grades and cache
     grade.py --help
 
-Later subcommands (propose, confirm) are added to SUBCOMMANDS below; each is a
-function taking the parsed arguments and returning an exit code. The design is
+Each subcommand is a function in SUBCOMMANDS below, taking the parsed arguments
+and returning an exit code. The design is
 docs/superpowers/specs/2026-11-03-cohort-grading-design.md; section 2.1 is the
 `grading` key this reads, sections 3 and 4 are collect and run, section 5 is
 the store.
+
+propose and confirm compute every total, gate and rank themselves. The gate is
+passed when every gate validator passed and every gate criterion has its full
+points, from the CONFIRMED points; a module with no gate records null. Ties are
+shown as ties, never broken. confirm refuses a stale proposal, comparing the
+bundle's `grading` hash and each branch's commit in the LOCAL cache (no fetch).
 
 `run` executes code nobody has reviewed. Its isolation is what the code cannot
 reach, and the rules that keep it so are stated where they are enforced:
@@ -30,7 +41,7 @@ cannot be committed by accident, and `forget` accepts only a bare cohort name
 so it cannot delete anything outside the store.
 
 The store also holds, under <cohort>/, the cache of the repository (.repo.git)
-and, under <module-id>/, the working file of step 2 (run.json), so `forget`
+and, under <module-id>/, the working files (run.json, proposal.json), so `forget`
 leaves no participant's work behind.
 
 Exit codes:
@@ -165,6 +176,7 @@ class Criterion:
     points: int
     standard: str
     paths: tuple[str, ...] | None  # None: the whole branch
+    gate: bool = False  # must earn its full points for the gate to be passed
 
 
 @dataclass(frozen=True)
@@ -177,6 +189,7 @@ class Scheme:
     timeout_minutes: int | None
     validators: tuple[ValidatorShare, ...]
     rubric: tuple[Criterion, ...]
+    grading_hash: str = ""  # of the manifest's `grading` block as written
 
     @property
     def max_total(self) -> int:
@@ -239,6 +252,7 @@ def load_scheme(bundle: Path) -> Scheme:
                 points=item.get("points") if isinstance(item.get("points"), int) else 0,
                 standard=str(item.get("standard", "")),
                 paths=tuple(str(p) for p in paths) if isinstance(paths, list) else None,
+                gate=item.get("gate") is True,
             )
         )
     env = grading.get("env")
@@ -253,6 +267,8 @@ def load_scheme(bundle: Path) -> Scheme:
         timeout_minutes=timeout if isinstance(timeout, int) else None,
         validators=tuple(shares),
         rubric=tuple(criteria),
+        grading_hash=hashlib.sha256(
+            json.dumps(grading, sort_keys=True, default=str).encode("utf-8")).hexdigest(),
     )
 
 
@@ -1063,7 +1079,11 @@ def scheme_digest(scheme: Scheme) -> str:
 
 
 def write_json_private(path: Path, data: dict) -> None:
-    """Atomic, and readable by the trainer alone: mkstemp makes the file 0600."""
+    """Atomic, and readable by the trainer alone: mkstemp makes the file 0600.
+
+    Every write of the store comes through here, so the work-tree refusal is here too.
+    """
+    refuse_work_tree(path.parent)
     make_private(path.parent)
     handle, name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
     try:
@@ -1275,8 +1295,412 @@ def cmd_run(args: argparse.Namespace) -> int:
 
 
 # --------------------------------------------------------------------------
+# Propose and confirm (spec section 3, steps 3 to 5, and section 5)
+# --------------------------------------------------------------------------
+#
+# The judgement file is what the tutor writes (JSON, read strictly):
+#
+#   {"participants": {"<participant>": {"<criterion id>": {"points": 12, "evidence": "..."}}},
+#    "draft": {"why_best": "...", "gaps": {"<participant>": "..."}}}        <- draft optional
+#
+# Totals, gate results and the ranking are computed here from the validator
+# results in run.json and these points. A judgement that carries any key not
+# listed above (a "total", a "ranking") is REFUSED, not ignored, so a number the
+# tutor typed can never be mistaken for a computed one.
+
+PROPOSAL_FILE = "proposal.json"
+FINAL_FILE = "final.json"
+JUDGEMENT_MAX_BYTES = 4 * 1024 * 1024
+EVIDENCE_MAX_CHARS = 20000
+MAX_REPORTED_PROBLEMS = 25
+
+
+def _no_duplicates(pairs: list[tuple[str, Any]]) -> dict:
+    out: dict = {}
+    for key, value in pairs:
+        if key in out:
+            raise ValueError(f"the key {key!r} appears twice")
+        out[key] = value
+    return out
+
+
+def read_json_file(path: Path, what: str, limit: int) -> Any:
+    try:
+        raw = path.read_bytes() if path.stat().st_size <= limit else None
+    except OSError as exc:
+        raise GradeError(f"cannot read {what} {path}: {exc}", EXIT_USAGE) from exc
+    if raw is None:
+        raise GradeError(f"{what} {path} is larger than {limit} bytes", EXIT_USAGE)
+    try:
+        return json.loads(raw.decode("utf-8"), object_pairs_hook=_no_duplicates)
+    except (ValueError, UnicodeDecodeError) as exc:
+        raise GradeError(f"{what} {path} is not valid JSON: {exc}", EXIT_USAGE) from exc
+
+
+def _is_points(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def read_judgement(path: Path, scheme: Scheme, known: list[str]) -> tuple[dict, dict | None]:
+    """The rated points and the draft, or a refusal naming every defect found."""
+    data = read_json_file(path, "the judgement", JUDGEMENT_MAX_BYTES)
+    problems: list[str] = []
+
+    def bad(text: str) -> None:
+        problems.append(text)
+
+    if not isinstance(data, dict):
+        raise GradeError(f"the judgement {path} must be a JSON object with `participants`")
+    for key in data:
+        if key not in ("participants", "draft"):
+            bad(f"unknown top-level key {key!r}: totals and the ranking are computed here and "
+                "are never taken from the judgement (keys: participants, draft)")
+    people = data.get("participants")
+    ratings: dict[str, dict[str, dict]] = {}
+    if not isinstance(people, dict):
+        bad("`participants` must be an object of participant to criteria")
+        people = {}
+    for who in people:
+        if who not in known:
+            bad(f"{escape_name(str(who))} is in the judgement and is not in run.json, which holds "
+                f"{', '.join(known) or 'nobody'}; run `belay-grade run` for that branch first "
+                "(or remove it from the judgement)")
+    ids = [c.id for c in scheme.rubric]
+    for who in known:
+        entry = people.get(who)
+        if entry is None:
+            bad(f"{who} is in run.json and missing from the judgement")
+            continue
+        if not isinstance(entry, dict):
+            bad(f"{who}: must be an object of criterion id to {{points, evidence}}")
+            continue
+        for cid in entry:
+            if cid not in ids:
+                bad(f"{who}: {escape_name(str(cid))} is not a criterion of this module "
+                    f"(criteria: {', '.join(ids) or 'none'})")
+        rated: dict[str, dict] = {}
+        for crit in scheme.rubric:
+            item = entry.get(crit.id)
+            if item is None:
+                bad(f"{who}: criterion {crit.id} is missing")
+                continue
+            if not isinstance(item, dict):
+                bad(f"{who}: {crit.id} must be an object with `points` and `evidence`")
+                continue
+            for key in item:
+                if key not in ("points", "evidence"):
+                    bad(f"{who}: {crit.id} has the unknown key {escape_name(str(key))!r}; "
+                        "the keys are points and evidence")
+            pts, evidence = item.get("points"), item.get("evidence")
+            if not _is_points(pts) or not 0 <= pts <= crit.points:
+                bad(f"{who}: {crit.id} points is {pts!r}; it must be an integer from 0 to {crit.points}")
+                continue
+            if not isinstance(evidence, str) or not evidence.strip():
+                bad(f"{who}: {crit.id} has no evidence; quote code, specification text or "
+                    "validator output with file and line")
+                continue
+            if len(evidence) > EVIDENCE_MAX_CHARS:
+                bad(f"{who}: {crit.id} evidence is longer than {EVIDENCE_MAX_CHARS} characters")
+                continue
+            rated[crit.id] = {"points": pts, "evidence": evidence}
+        ratings[who] = rated
+    draft = data.get("draft")
+    if draft is not None:
+        if not isinstance(draft, dict):
+            bad("`draft` must be an object with why_best and gaps")
+        else:
+            for key in draft:
+                if key not in ("why_best", "gaps"):
+                    bad(f"draft has the unknown key {escape_name(str(key))!r} (keys: why_best, gaps)")
+            if not isinstance(draft.get("why_best"), str):
+                bad("draft.why_best must be a string")
+            gaps = draft.get("gaps", {})
+            if not isinstance(gaps, dict) or not all(
+                    isinstance(v, str) and k in known for k, v in gaps.items()):
+                bad("draft.gaps must map a graded participant to a string")
+    if problems:
+        shown = problems[:MAX_REPORTED_PROBLEMS]
+        more = len(problems) - len(shown)
+        raise GradeError(
+            f"the judgement {path} is refused, and no proposal was written:\n  "
+            + "\n  ".join(shown) + (f"\n  ... and {more} more" if more else ""))
+    return ratings, draft
+
+
+def rank(totals: dict[str, int]) -> list[dict]:
+    """Groups of equal totals, best first. A tie is one group; nothing breaks it.
+
+    `rank` is the place of the group's first member (1, 2, 2, 4 style).
+    """
+    out, ahead = [], 0
+    for total in sorted(set(totals.values()), reverse=True):
+        who = sorted(p for p, t in totals.items() if t == total)
+        out.append({"rank": ahead + 1, "total": total, "participants": who, "tied": len(who) > 1})
+        ahead += len(who)
+    return out
+
+
+def gate_result(validators: dict, criteria: dict) -> bool | None:
+    """None when the module has no gate at all (not applicable, never 'passed')."""
+    gate_v = [v for v in validators.values() if v["gate"]]
+    gate_c = [c for c in criteria.values() if c["gate"]]
+    if not gate_v and not gate_c:
+        return None
+    return all(v["passed"] for v in gate_v) and all(c["points"] == c["max"] for c in gate_c)
+
+
+def _summary_lines(participants: dict, ranking: list[dict], max_total: int) -> list[str]:
+    lines = []
+    for who, p in participants.items():
+        gate = {True: "passed", False: "NOT passed", None: "n/a"}[p["gate"]]
+        lines.append(f"{who}: validators {p['validator_points']}, rubric {p['rubric_points']}, "
+                     f"total {p['total']}/{max_total}, gate {gate}")
+    for group in ranking:
+        names = ", ".join(group["participants"])
+        mark = f"{group['rank']}= " if group["tied"] else f"{group['rank']}. "
+        lines.append(f"rank {mark}{names} ({group['total']})" + ("  TIE" if group["tied"] else ""))
+    return lines
+
+
+def cmd_propose(args: argparse.Namespace) -> int:
+    repo = checked_url(args.repo)
+    store = store_dir(repo, args.module)
+    scheme = load_scheme(Path(args.bundle))
+    if scheme.module != args.module:
+        raise GradeError(f"the bundle is module {scheme.module}, and the proposal asked for {args.module}")
+    run = read_json_file(store / RUN_FILE, "the run results", JUDGEMENT_MAX_BYTES * 8) \
+        if (store / RUN_FILE).exists() else None
+    if not isinstance(run, dict) or not isinstance(run.get("branches"), dict) or not run["branches"]:
+        raise GradeError("there are no run results for this module; run `belay-grade run` first")
+    if run.get("module") != scheme.module:
+        raise GradeError(f"run.json is for module {run.get('module')!r}, not {scheme.module}")
+    if run.get("scheme_digest") != scheme_digest(scheme):
+        raise GradeError("the module's grading scheme changed since the last run, so the validator "
+                         "results are not for this scheme; run `belay-grade run` again")
+    branches = run["branches"]
+    known = list(branches)
+    for who in known:
+        got = branches[who].get("validators") if isinstance(branches[who], dict) else None
+        if not isinstance(got, dict) or any(v.name not in got for v in scheme.validators):
+            raise GradeError(f"run.json holds no complete validator results for {who}; run again")
+    ratings, draft = read_judgement(Path(args.judgement), scheme, known)
+
+    warnings: list[str] = []
+    cache = cache_dir(repo)
+    if (cache / "HEAD").exists():
+        live = {r.participant for r in list_branches(cache, args.module).participants}
+        for who in known:
+            if who not in live:
+                warnings.append(f"{who} is in run.json and its branch is no longer in the cache "
+                                "(removed since a merged --only run?); it is graded from run.json")
+
+    participants: dict[str, dict] = {}
+    for who in known:
+        rec = branches[who]
+        validators = {}
+        for share in scheme.validators:
+            passed = rec["validators"][share.name].get("passed") is True
+            validators[share.name] = {"passed": passed, "points": share.points if passed else 0,
+                                      "gate": share.gate}
+        criteria = {}
+        for crit in scheme.rubric:
+            criteria[crit.id] = {**ratings[who][crit.id], "max": crit.points, "gate": crit.gate}
+        vpts = sum(v["points"] for v in validators.values())
+        rpts = sum(c["points"] for c in criteria.values())
+        participants[who] = {
+            "branch": rec.get("branch"), "commit": rec.get("commit"),
+            "validators": validators, "criteria": criteria,
+            "validator_points": vpts, "rubric_points": rpts,
+            "gate": gate_result(validators, criteria),
+            "total": vpts + rpts, "max_total": scheme.max_total,
+        }
+    ranking = rank({w: p["total"] for w, p in participants.items()})
+    proposal = {
+        "module": scheme.module,
+        "bundle_version": scheme.bundle_version,
+        "grading_hash": scheme.grading_hash,
+        "cohort": cohort_name(repo),
+        "repository": normalise_url(repo),
+        "proposed_at": now_iso(),
+        "max_total": scheme.max_total,
+        "participants": participants,
+        "ranking": ranking,
+        "draft": draft,
+        "warnings": warnings,
+    }
+    path = store / PROPOSAL_FILE
+    write_json_private(path, proposal)
+    print(f"cohort: {proposal['cohort']}")
+    for line in _summary_lines(participants, ranking, scheme.max_total):
+        print(line)
+    if any(g["tied"] for g in ranking):
+        print("a tie is shown as a tie; nothing here breaks it. The trainer picks.")
+    print(f"proposal: {path}")
+    for warning in warnings:
+        print(f"warning: {warning}", file=sys.stderr)
+    return EXIT_OK
+
+
+def parse_change(text: str) -> tuple[str, str, int, str]:
+    """<participant>:<criterion>=<points>:<reason>; the reason may hold ':'."""
+    # The criterion id ends at the LAST '=' before the first ':' that follows it.
+    who, sep, rest = text.partition(":")
+    head, sep2, reason = rest.partition(":")
+    cid, eq, pts = head.rpartition("=")
+    if not (sep and sep2 and eq and who and cid and re.fullmatch(r"-?[0-9]+", pts)):
+        raise GradeError(
+            f"--change {escape_name(text)!r} is not <participant>:<criterion>=<points>:<reason>")
+    if not reason.strip():
+        raise GradeError(f"--change for {escape_name(who)}:{escape_name(cid)} has no reason; "
+                         "a change needs one")
+    return who, cid, int(pts), reason.strip()
+
+
+def changes_since(proposal: dict, scheme: Scheme, cache: Path, module: str) -> list[str]:
+    """What moved since the proposal. Reads the local cache only; it never fetches."""
+    stale = []
+    if proposal.get("grading_hash") != scheme.grading_hash:
+        stale.append("the bundle's `grading` block differs from the one the proposal was made under")
+    if not (cache / "HEAD").exists():
+        stale.append("the local cache of the repository is gone, so the branches cannot be compared")
+        return stale
+    live = {r.participant: r.commit for r in list_branches(cache, module).participants}
+    for who, p in proposal["participants"].items():
+        if who not in live:
+            stale.append(f"{who}'s branch is no longer in the cache")
+        elif live[who] != p.get("commit"):
+            stale.append(f"{who}'s branch moved: {str(p.get('commit'))[:12]} -> {live[who][:12]}")
+    for who in sorted(set(live) - set(proposal["participants"])):
+        stale.append(f"{who} has a branch the proposal does not cover")
+    return stale
+
+
+def archive_previous(store: Path) -> Path | None:
+    """Keep the existing final.json beside the new one as final.<date>.json.
+
+    The date is the day it was confirmed. A hard link makes the archive atomic and
+    cannot overwrite: on a name already taken, the next suffix is used.
+    """
+    current = store / FINAL_FILE
+    if not current.exists():
+        return None
+    day = now_iso()[:10]
+    try:
+        stamp = json.loads(current.read_text(encoding="utf-8")).get("confirmed_at")
+        if isinstance(stamp, str) and re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T.*", stamp):
+            day = stamp[:10]
+    except (OSError, ValueError, AttributeError):
+        pass
+    for n in range(1, 10000):
+        target = store / (f"final.{day}.json" if n == 1 else f"final.{day}-{n}.json")
+        try:
+            os.link(current, target)
+        except FileExistsError:
+            continue
+        return target
+    raise GradeError("cannot find a free name for the previous final.json")
+
+
+def cmd_confirm(args: argparse.Namespace) -> int:
+    repo = checked_url(args.repo)
+    store = store_dir(repo, args.module)
+    by = args.by.strip()
+    if not by or len(by) > 200 or escape_name(by) != by:
+        raise GradeError("--by must name who confirms: one line of printable text")
+    scheme = load_scheme(Path(args.bundle))
+    if scheme.module != args.module:
+        raise GradeError(f"the bundle is module {scheme.module}, and the confirmation asked for {args.module}")
+    if not (store / PROPOSAL_FILE).exists():
+        raise GradeError("there is no proposal for this module; run `belay-grade propose` first")
+    proposal = read_json_file(store / PROPOSAL_FILE, "the proposal", JUDGEMENT_MAX_BYTES * 8)
+    if not isinstance(proposal, dict) or not isinstance(proposal.get("participants"), dict):
+        raise GradeError("proposal.json is not a proposal; run `belay-grade propose` again")
+    stale = changes_since(proposal, scheme, cache_dir(repo), args.module)
+    if stale:
+        raise GradeError(
+            "the proposal is stale, and nothing was confirmed (confirm reads the local cache and "
+            "does not fetch; run collect to update it, then run and propose again):\n  "
+            + "\n  ".join(stale))
+
+    people = proposal["participants"]
+    applied: dict[tuple[str, str], tuple[int, str]] = {}
+    for text in args.change or []:
+        who, cid, pts, reason = parse_change(text)
+        if who not in people:
+            raise GradeError(f"--change names {escape_name(who)}, who is not in the proposal "
+                             f"({', '.join(people)})")
+        crit = people[who]["criteria"].get(cid)
+        if crit is None:
+            raise GradeError(f"--change names criterion {escape_name(cid)}, which {who} has no "
+                             f"points for ({', '.join(people[who]['criteria']) or 'none'})")
+        if not 0 <= pts <= crit["max"]:
+            raise GradeError(f"--change {who}:{cid} gives {pts}; it must be from 0 to {crit['max']}")
+        if (who, cid) in applied:
+            raise GradeError(f"--change names {who}:{cid} twice")
+        if pts == crit["points"]:
+            raise GradeError(f"--change {who}:{cid}={pts} is not a change: the proposal has {pts}")
+        applied[(who, cid)] = (pts, reason)
+
+    final_people: dict[str, dict] = {}
+    for who, p in people.items():
+        validators = {n: {"passed": v["passed"], "points": v["points"]}
+                      for n, v in p["validators"].items()}
+        criteria, gating = {}, {}
+        for cid, c in p["criteria"].items():
+            pts, reason = applied.get((who, cid), (c["points"], None))
+            criteria[cid] = {"points": pts, "max": c["max"], "evidence": c["evidence"],
+                             "changed_by_trainer": reason is not None, "reason": reason}
+            gating[cid] = {"points": pts, "max": c["max"], "gate": c["gate"]}
+        # The gate is computed from the CONFIRMED points, so a change can flip it.
+        gate = gate_result({n: {"passed": v["passed"], "gate": p["validators"][n]["gate"]}
+                            for n, v in validators.items()}, gating)
+        total = sum(v["points"] for v in validators.values()) + sum(c["points"] for c in criteria.values())
+        final_people[who] = {"validators": validators, "criteria": criteria, "gate": gate,
+                             "total": total, "max_total": p["max_total"]}
+    final = {
+        "module": proposal["module"],
+        "bundle_version": proposal["bundle_version"],
+        "confirmed_by": by,
+        "confirmed_at": now_iso(),
+        "participants": final_people,
+    }
+    refuse_work_tree(store)
+    kept = archive_previous(store)
+    path = store / FINAL_FILE
+    write_json_private(path, final)
+    ranking = rank({w: p["total"] for w, p in final_people.items()})
+    print(f"confirmed by {escape_name(by)}; {len(applied)} change(s)")
+    for (who, cid), (pts, reason) in applied.items():
+        print(f"  changed {who}:{cid} {people[who]['criteria'][cid]['points']} -> {pts}: {escape_name(reason)}")
+    for line in _summary_lines({w: {**p, "validator_points": sum(v["points"] for v in p["validators"].values()),
+                                    "rubric_points": sum(c["points"] for c in p["criteria"].values())}
+                                for w, p in final_people.items()}, ranking, proposal["max_total"]):
+        print(line)
+    if ranking and ranking[0]["tied"]:
+        print("the top place is a tie: choosing the start branch is the trainer's; final.json stores no winner.")
+    if kept:
+        print(f"previous confirmation kept: {kept}")
+    print(f"final: {path}")
+    return EXIT_OK
+
+
+# --------------------------------------------------------------------------
 # Command line
 # --------------------------------------------------------------------------
+
+
+def _add_propose_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--bundle", required=True, help="the module's bundle directory")
+    parser.add_argument("--judgement", required=True, help="the tutor's judgement, a JSON file")
+    _add_collect_args(parser)
+
+
+def _add_confirm_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--bundle", required=True, help="the module's bundle directory")
+    parser.add_argument("--by", required=True, help="who confirms")
+    parser.add_argument("--change", action="append", metavar="participant:criterion=points:reason",
+                        help="change a criterion's points, with a reason; repeat for more")
+    _add_collect_args(parser)
 
 
 def cmd_forget(args: argparse.Namespace) -> int:
@@ -1296,7 +1720,7 @@ def _add_run_args(parser: argparse.ArgumentParser) -> None:
                         help="grade only this participant, repeat for more; others' results are kept")
 
 
-# name -> (function, help, argument-adder). Add propose/confirm here.
+# name -> (function, help, argument-adder).
 SUBCOMMANDS: dict[str, tuple[Callable[[argparse.Namespace], int], str,
                              Callable[[argparse.ArgumentParser], None]]] = {
     "collect": (
@@ -1308,6 +1732,16 @@ SUBCOMMANDS: dict[str, tuple[Callable[[argparse.Namespace], int], str,
         cmd_run,
         "run the module's validators on each collected branch, in a container",
         _add_run_args,
+    ),
+    "propose": (
+        cmd_propose,
+        "merge the validator results with the tutor's judgement into proposal.json",
+        _add_propose_args,
+    ),
+    "confirm": (
+        cmd_confirm,
+        "write final.json from the proposal, with the trainer's changes and reasons",
+        _add_confirm_args,
     ),
     "forget": (
         cmd_forget,

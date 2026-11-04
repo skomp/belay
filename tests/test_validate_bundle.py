@@ -4496,6 +4496,16 @@ def m_grading_rubric_unknown_key(root: Path) -> None:
         "    - id: a\n      points: 10\n      standard: One.\n      weight: 3\n")))
 
 
+def m_grading_rubric_gate_true(root: Path) -> None:
+    _grading(root, _grading_valid_with(rubric=(
+        "    - id: a\n      points: 10\n      standard: One.\n      gate: true\n")))
+
+
+def m_grading_rubric_gate_string(root: Path) -> None:
+    _grading(root, _grading_valid_with(rubric=(
+        '    - id: a\n      points: 10\n      standard: One.\n      gate: "yes"\n')))
+
+
 def m_grading_rubric_paths_empty(root: Path) -> None:
     _grading(root, _grading_valid_with(rubric=(
         "    - id: a\n      points: 10\n      standard: One.\n      paths: []\n")))
@@ -5761,6 +5771,12 @@ CASES: list[Case] = [
          'duplicate', where='tutorial.yaml (grading.rubric[a])'),
     Case("49: an unknown key in a criterion", 49, "cli", "bundle", m_grading_rubric_unknown_key,
          "unknown key 'weight'", where='tutorial.yaml (grading.rubric[a])'),
+    Case("49: gate: true on a criterion is silent", 49, "cli", "bundle",
+         m_grading_rubric_gate_true, kind="silent"),
+    Case("49: gate: true on a criterion in an INSTANCE is silent", 49, "cli", "instance",
+         m_grading_rubric_gate_true, kind="silent"),
+    Case("49: gate not a boolean on a criterion", 49, "cli", "bundle",
+         m_grading_rubric_gate_string, "gate is 'yes'", where='tutorial.yaml (grading.rubric[a])'),
     Case("49: paths: []", 49, "cli", "bundle", m_grading_rubric_paths_empty,
          'paths', where='tutorial.yaml (grading.rubric[a])'),
     Case("49: paths as a string", 49, "cli", "bundle", m_grading_rubric_paths_string,

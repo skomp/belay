@@ -174,8 +174,8 @@ CHECKS: dict[int, str] = {
     "command, file-exists or file-contains (never manual or git-diff), each "
     "with positive integer points and an optional boolean gate",
     49: "grading.rubric, where declared, holds criteria with a unique id, "
-    "positive integer points, a non-empty standard and optional paths that "
-    "are non-empty relative workspace globs",
+    "positive integer points, a non-empty standard, optional paths that "
+    "are non-empty relative workspace globs and an optional boolean gate",
     50: "grading: validator points are at least 60% of the total points",
     51: "exam, where a lesson declares it, is a boolean",
 }
@@ -5980,7 +5980,7 @@ def check_starts_from(manifest: Any, report: Report) -> None:
 GRADING_KEY = "grading"
 GRADING_KEYS = ("image", "network", "env", "timeout_minutes", "validators", "rubric")
 GRADING_VALIDATOR_KEYS = ("points", "gate")
-GRADING_RUBRIC_KEYS = ("id", "points", "standard", "paths")
+GRADING_RUBRIC_KEYS = ("id", "points", "standard", "paths", "gate")
 # Kinds that cannot earn points: `manual` needs a learner, `git-diff` needs
 # uncommitted changes that a fresh checkout does not have.
 GRADING_BARRED_KINDS = ("manual", "git-diff")
@@ -6180,6 +6180,8 @@ def check_grading_rubric(manifest: Any, report: Report) -> None:
         standard = entry.get("standard")
         if not isinstance(standard, str) or not standard.strip():
             report.add(49, where, f"standard is {standard!r}; it must be a non-empty string")
+        if "gate" in entry and not isinstance(entry["gate"], bool):
+            report.add(49, where, f"gate is {entry['gate']!r}; it must be true or false")
         if "paths" in entry:
             paths = entry["paths"]
             if not isinstance(paths, list) or not paths:

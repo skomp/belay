@@ -1586,6 +1586,356 @@ def test_only_keeps_other_branches_provenance() -> None:
                    f"{who} keeps the runtime and digest of the run that graded it", str(branches[who])[:160])
 
 
+# --------------------------------------------------------------------------
+# propose and confirm
+# --------------------------------------------------------------------------
+
+GATE_CRITERION_YAML = MODULE_YAML.replace(
+    "      points: 20\n      standard: The choice is justified.\n",
+    "      points: 20\n      standard: The choice is justified.\n      gate: true\n")
+NO_GATE_YAML = MODULE_YAML.replace("{ points: 30, gate: true }", "{ points: 30 }")
+
+
+def ratings(alice: int = 15, bob: int = 10, carol: int = 0) -> dict:
+    return {"participants": {
+        who: {"design": {"points": pts, "evidence": f"{who}: src/main.py:1 quoted"}}
+        for who, pts in (("alice", alice), ("bob", bob), ("carol", carol))}}
+
+
+def graded(scene: Scene, judged: dict | None = None) -> Path:
+    """collect, run and write the judgement file; returns the judgement path."""
+    scene.cli("collect", COHORT_URL, "m1")
+    code, out, err = scene.run_all()
+    assert code == 0, (out, err)
+    path = scene.tmp / "judgement.json"
+    path.write_text(json.dumps(judged if judged is not None else ratings()))
+    return path
+
+
+def propose(scene: Scene, judgement: Path) -> tuple[int, str, str]:
+    return scene.cli("propose", "--bundle", str(scene.bundle), "--judgement", str(judgement),
+                     COHORT_URL, "m1")
+
+
+def confirm(scene: Scene, *extra: str, by: str | None = "Trainer T") -> tuple[int, str, str]:
+    by_args = ["--by", by] if by is not None else []
+    return scene.cli("confirm", "--bundle", str(scene.bundle), *by_args, *extra, COHORT_URL, "m1")
+
+
+def load(scene: Scene, name: str) -> dict:
+    return json.loads((scene.store() / name).read_text())
+
+
+def test_propose_values() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = Scene(tmp)
+        path = graded(scene)
+        code, out, err = propose(scene, path)
+        record(code == 0, "propose succeeds", f"{code} {out} {err}")
+        prop = load(scene, "proposal.json")
+        totals = {w: p["total"] for w, p in prop["participants"].items()}
+        record(totals == {"alice": 75, "bob": 40, "carol": 40}, "totals of the three branches", str(totals))
+        record({w: (p["validator_points"], p["rubric_points"]) for w, p in prop["participants"].items()}
+               == {"alice": (60, 15), "bob": (30, 10), "carol": (40, 0)}, "validator and rubric points")
+        record({w: p["gate"] for w, p in prop["participants"].items()}
+               == {"alice": True, "bob": False, "carol": True}, "gate results")
+        record(prop["max_total"] == 80 and prop["participants"]["bob"]["max_total"] == 80, "max_total")
+        record(prop["ranking"] == [
+            {"rank": 1, "total": 75, "participants": ["alice"], "tied": False},
+            {"rank": 2, "total": 40, "participants": ["bob", "carol"], "tied": True}],
+            "the ranking shows bob and carol as a tie", str(prop["ranking"]))
+        record("TIE" in out and "rank 2= bob, carol (40)" in out, "the tie is printed as a tie", out)
+        record(prop["participants"]["alice"]["commit"] == scene.commits["alice/m1"]
+               and prop["grading_hash"], "the proposal records each commit and the grading hash")
+        record(prop["participants"]["bob"]["validators"]["scorer-tests"]
+               == {"passed": False, "points": 0, "gate": True}, "a failed validator earns 0")
+        record(stat.S_IMODE((scene.store() / "proposal.json").stat().st_mode) == 0o600,
+               "proposal.json is private")
+        # Totals are never taken from the judgement: a key carrying one is refused.
+        for extra in ({"totals": {"alice": 999}}, {"ranking": ["bob"]}):
+            bad = {**ratings(), **extra}
+            path.write_text(json.dumps(bad))
+            before = (scene.store() / "proposal.json").read_text()
+            code, out, err = propose(scene, path)
+            record(code == 1 and "unknown top-level key" in err
+                   and (scene.store() / "proposal.json").read_text() == before,
+                   f"a judgement carrying {list(extra)[0]!r} is refused and changes nothing", err)
+        path.write_text(json.dumps(ratings()))
+        record(propose(scene, path)[0] == 0, "control: the clean judgement is accepted again")
+
+
+def test_propose_refusals() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = Scene(tmp)
+        path = graded(scene)
+
+        def refused_with(data: str | dict, needle: str, name: str) -> None:
+            path.write_text(data if isinstance(data, str) else json.dumps(data))
+            code, out, err = propose(scene, path)
+            record(code != 0 and needle in err and not (scene.store() / "proposal.json").exists(),
+                   f"propose refuses {name}", f"{code} {err}")
+
+        missing_person = ratings()
+        del missing_person["participants"]["carol"]
+        refused_with(missing_person, "carol is in run.json and missing", "a missing participant")
+        missing_crit = ratings()
+        missing_crit["participants"]["bob"] = {}
+        refused_with(missing_crit, "bob: criterion design is missing", "a missing criterion")
+        for pts, name in ((21, "points above max"), (-1, "negative points"), (True, "boolean points"),
+                          (1.5, "fractional points"), ("5", "string points")):
+            bad = ratings()
+            bad["participants"]["bob"]["design"]["points"] = pts
+            refused_with(bad, "must be an integer from 0 to 20", name)
+        for ev in ("", "   ", None):
+            bad = ratings()
+            bad["participants"]["bob"]["design"]["evidence"] = ev
+            refused_with(bad, "has no evidence", f"evidence {ev!r}")
+        extra_person = ratings()
+        extra_person["participants"]["dave"] = extra_person["participants"]["bob"]
+        refused_with(extra_person, "dave is in the judgement and is not in run.json", "a participant absent from run.json")
+        extra_crit = ratings()
+        extra_crit["participants"]["bob"]["bonus"] = {"points": 1, "evidence": "x"}
+        refused_with(extra_crit, "bonus is not a criterion", "an unknown criterion")
+        extra_key = ratings()
+        extra_key["participants"]["bob"]["design"]["total"] = 5
+        refused_with(extra_key, "unknown key 'total'", "a total inside a rating")
+        refused_with('{"participants": {"alice": {}, "alice": {}}}', "not valid JSON", "a duplicate key")
+        refused_with("[1]", "must be a JSON object", "a judgement that is a list")
+        refused_with("{nope", "not valid JSON", "text that is not JSON")
+        path.write_text(json.dumps(ratings()))
+        code, out, err = scene.cli("propose", "--bundle", str(scene.bundle), "--judgement",
+                                   str(scene.tmp / "absent.json"), COHORT_URL, "m1")
+        record(code == 2 and "cannot read" in err, "a missing judgement file is a usage error", err)
+        record(propose(scene, path)[0] == 0, "control: the valid judgement is accepted")
+        # The scheme moved since the run: the validator results are not for it.
+        (scene.bundle / "tutorial.yaml").write_text(MODULE_YAML.replace("points: 10", "points: 11", 1))
+        code, out, err = propose(scene, path)
+        record(code == 1 and "changed since the last run" in err, "propose refuses results of another scheme", err)
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = Scene(tmp)
+        scene.cli("collect", COHORT_URL, "m1")
+        path = scene.tmp / "j.json"
+        path.write_text(json.dumps(ratings()))
+        code, out, err = propose(scene, path)
+        record(code == 1 and "run `belay-grade run` first" in err, "propose before run is refused", err)
+
+
+def test_confirm_values() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = Scene(tmp)
+        path = graded(scene, {**ratings(), "draft": {"why_best": "alice tests the failure path",
+                                                      "gaps": {"bob": "gate not met"}}})
+        record(propose(scene, path)[0] == 0, "propose with a draft")
+        record(load(scene, "proposal.json")["draft"]["gaps"] == {"bob": "gate not met"}, "the draft is stored")
+        code, out, err = confirm(scene, "--change", "bob:design=18:Better than it reads: it handles retries: see lines 4-9",
+                                 by="Rob")
+        record(code == 0, "confirm succeeds", f"{code} {out} {err}")
+        final = load(scene, "final.json")
+        record(sorted(final) == ["bundle_version", "confirmed_at", "confirmed_by", "module", "participants"]
+               and final["module"] == "m1" and final["bundle_version"] == "1.2.0"
+               and final["confirmed_by"] == "Rob" and final["confirmed_at"].endswith("Z"),
+               "final.json top level has exactly the contract's keys", str(sorted(final)))
+        bob = final["participants"]["bob"]
+        record(sorted(bob) == ["criteria", "gate", "max_total", "total", "validators"],
+               "a participant has exactly validators, criteria, gate, total, max_total", str(sorted(bob)))
+        record(bob["criteria"]["design"] == {
+            "points": 18, "max": 20, "evidence": "bob: src/main.py:1 quoted",
+            "changed_by_trainer": True,
+            "reason": "Better than it reads: it handles retries: see lines 4-9"},
+            "a change keeps its reason, colons included", str(bob["criteria"]))
+        record(bob["validators"]["lint"] == {"passed": True, "points": 10}, "validators are {passed, points}")
+        record((bob["total"], bob["gate"], bob["max_total"]) == (48, False, 80), "bob's total moves, the gate does not")
+        alice = final["participants"]["alice"]["criteria"]["design"]
+        record(alice["changed_by_trainer"] is False and alice["reason"] is None and alice["points"] == 15,
+               "an unchanged criterion is not marked changed", str(alice))
+        record({w: p["total"] for w, p in final["participants"].items()} == {"alice": 75, "bob": 48, "carol": 40},
+               "confirmed totals")
+        record(not any("winner" in k for k in final), "final.json stores no winner")
+        record("changed bob:design 10 -> 18" in out and "previous confirmation" not in out,
+               "confirm reports each change", out)
+        record(not list(scene.store().glob("final.*.json")), "the first confirmation has nothing to keep")
+        first = (scene.store() / "final.json").read_text()
+        # Re-grade: a second confirmation keeps the first beside it.
+        code, out, err = confirm(scene, by="Rob again")
+        kept = sorted(p.name for p in scene.store().glob("final.*.json"))
+        day = final["confirmed_at"][:10]
+        record(code == 0 and kept == [f"final.{day}.json"]
+               and (scene.store() / kept[0]).read_text() == first,
+               "a re-confirmation keeps the old file, with its date", f"{kept} {err}")
+        record(load(scene, "final.json")["confirmed_by"] == "Rob again"
+               and load(scene, "final.json")["participants"]["bob"]["total"] == 40,
+               "final.json is the new confirmation")
+        code, out, err = confirm(scene, "--change", "carol:design=2:fine", by="Rob third")
+        kept2 = sorted(p.name for p in scene.store().glob("final.*.json"))
+        record(code == 0 and kept2 == [f"final.{day}-2.json", f"final.{day}.json"]
+               and json.loads((scene.store() / f"final.{day}-2.json").read_text())["confirmed_by"] == "Rob again"
+               and json.loads((scene.store() / f"final.{day}.json").read_text())["confirmed_by"] == "Rob",
+               "two confirmations in one day do not overwrite each other", str(kept2))
+        record(load(scene, "final.json")["participants"]["carol"]["total"] == 42
+               and "changed carol:design 0 -> 2: fine" in out,
+               "the third confirmation is computed from its own change", out)
+        leftovers = [p.name for p in scene.store().iterdir() if p.name.startswith(".")]
+        record(leftovers == [], "no temp file is left in the store", str(leftovers))
+        # A re-grade writes a new proposal, and the next confirmation is made from it.
+        path.write_text(json.dumps(ratings(alice=0, bob=0, carol=0)))
+        record(propose(scene, path)[0] == 0, "propose again (re-grade)")
+        pr = load(scene, "proposal.json")
+        code, out, err = confirm(scene, "--change", "bob:design=20:full marks")
+        top = load(scene, "final.json")
+        record(code == 0 and sorted(pr["participants"]) == ["alice", "bob", "carol"]
+               and top["participants"]["alice"]["total"] == 60 and top["participants"]["bob"]["total"] == 50,
+               "confirm after a re-proposal uses the new proposal")
+
+
+def test_confirm_top_tie() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = Scene(tmp)
+        path = graded(scene, ratings(alice=0, bob=0, carol=0))
+        propose(scene, path)
+        # alice 60 + 0, carol 40 + 0: a change lifts carol to 60, a real tie at the top.
+        code, out, err = confirm(scene, "--change", "carol:design=20:full marks on review")
+        final = load(scene, "final.json")
+        record(code == 0 and final["participants"]["alice"]["total"] == 60
+               and final["participants"]["carol"]["total"] == 60, "alice and carol tie at 60", str(err))
+        record("the top place is a tie" in out and "rank 1= alice, carol (60)" in out,
+               "a tie at the top is shown and not broken", out)
+        record("winner" not in json.dumps(final), "the tie is not resolved in final.json")
+
+
+def test_confirm_refusals() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = Scene(tmp)
+        path = graded(scene)
+        code, out, err = confirm(scene)
+        record(code == 1 and "no proposal" in err, "confirm without a proposal is refused", err)
+        propose(scene, path)
+
+        def refused_with(needle: str, name: str, *extra: str, by: str | None = "T") -> None:
+            code, out, err = confirm(scene, *extra, by=by)
+            record(code != 0 and needle in err and not (scene.store() / "final.json").exists(),
+                   f"confirm refuses {name}", f"{code} {err}")
+
+        code, out, err = confirm(scene, by=None)
+        record(code == 2 and "--by" in err and not (scene.store() / "final.json").exists(),
+               "confirm without --by is refused", err)
+        refused_with("--by", "an empty --by", by="  ")
+        refused_with("has no reason", "a change with no reason", "--change", "bob:design=12:")
+        refused_with("has no reason", "a change with a blank reason", "--change", "bob:design=12:   ")
+        refused_with("is not <participant>", "a change with no reason separator", "--change", "bob:design=12")
+        refused_with("is not <participant>", "a change with no points", "--change", "bob:design:why")
+        refused_with("is not <participant>", "points that are not a number", "--change", "bob:design=x:why")
+        refused_with("not in the proposal", "an unknown participant", "--change", "dave:design=1:why")
+        refused_with("no points for", "an unknown criterion", "--change", "bob:style=1:why")
+        refused_with("must be from 0 to 20", "points above max", "--change", "bob:design=21:why")
+        refused_with("must be from 0 to 20", "negative points", "--change", "bob:design=-1:why")
+        refused_with("twice", "the same change twice", "--change", "bob:design=11:a", "--change", "bob:design=12:b")
+        refused_with("is not a change", "a change to the same points", "--change", "bob:design=10:why")
+        code, out, err = confirm(scene, "--change", "bob:design=12:why")
+        record(code == 0, "control: the same call with a valid change succeeds", err)
+        (scene.store() / "final.json").unlink()
+        for f in scene.store().glob("final.*.json"):
+            f.unlink()
+
+        # Staleness: confirm reads the local cache and does not fetch.
+        git_fixture("--git-dir", str(scene.bare), "update-ref", "refs/heads/bob/m1",
+                    scene.commits["alice/m1"], cwd=scene.tmp)
+        code, out, err = confirm(scene)
+        record(code == 0, "the remote moved and the cache did not: confirm does not fetch", err)
+        (scene.store() / "final.json").unlink()
+        scene.cli("collect", COHORT_URL, "m1")
+        code, out, err = confirm(scene)
+        record(code == 1 and "stale" in err and f"bob's branch moved: {scene.commits['bob/m1'][:12]} -> "
+               f"{scene.commits['alice/m1'][:12]}" in err and "carol" not in err,
+               "after collect, a moved branch makes the proposal stale and says which", err)
+        record(not (scene.store() / "final.json").exists(), "a stale proposal writes nothing")
+        # Back in place: control.
+        git_fixture("--git-dir", str(scene.bare), "update-ref", "refs/heads/bob/m1",
+                    scene.commits["bob/m1"], cwd=scene.tmp)
+        scene.cli("collect", COHORT_URL, "m1")
+        record(confirm(scene)[0] == 0, "control: the branch back where it was, confirm succeeds")
+        (scene.store() / "final.json").unlink()
+        git_fixture("--git-dir", str(scene.bare), "update-ref", "-d", "refs/heads/carol/m1", cwd=scene.tmp)
+        scene.cli("collect", COHORT_URL, "m1")
+        code, out, err = confirm(scene)
+        record(code == 1 and "carol's branch is no longer in the cache" in err, "a removed branch is stale", err)
+        git_fixture("--git-dir", str(scene.bare), "update-ref", "refs/heads/carol/m1",
+                    scene.commits["carol/m1"], cwd=scene.tmp)
+        scene.add_branch("dave/m1", {"README.md": "dave\n"})
+        scene.cli("collect", COHORT_URL, "m1")
+        code, out, err = confirm(scene)
+        record(code == 1 and "dave has a branch the proposal does not cover" in err, "a new branch is reported", err)
+        git_fixture("--git-dir", str(scene.bare), "update-ref", "-d", "refs/heads/dave/m1", cwd=scene.tmp)
+        scene.cli("collect", COHORT_URL, "m1")
+        record(confirm(scene)[0] == 0, "control: without the new branch, confirm succeeds")
+        (scene.store() / "final.json").unlink()
+        # The bundle's grading block changed since the proposal.
+        (scene.bundle / "tutorial.yaml").write_text(MODULE_YAML.replace("standard: The choice is justified.",
+                                                                       "standard: The choice is justified well."))
+        code, out, err = confirm(scene)
+        record(code == 1 and "`grading` block differs" in err, "a changed grading block makes the proposal stale", err)
+        record(not (scene.store() / "final.json").exists(), "and writes nothing")
+
+
+def test_gate_criterion() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = Scene(tmp, module_yaml=GATE_CRITERION_YAML)
+        path = graded(scene, ratings(alice=20, bob=20, carol=19))
+        code, out, err = propose(scene, path)
+        prop = load(scene, "proposal.json")
+        record(code == 0 and {w: p["gate"] for w, p in prop["participants"].items()}
+               == {"alice": True, "bob": False, "carol": False},
+               "a gate criterion short of full points fails the gate even when the validators pass",
+               f"{ {w: p['gate'] for w, p in prop['participants'].items()} } {err}")
+        code, out, err = confirm(scene, "--change", "carol:design=20:the 19 was a misreading")
+        final = load(scene, "final.json")["participants"]
+        record(code == 0 and final["carol"]["gate"] is True,
+               "the trainer's change to a gate criterion flips the gate to passed", f"{final['carol']['gate']} {err}")
+        record(final["bob"]["gate"] is False, "a failed gate validator still fails it after full rubric points")
+        code, out, err = confirm(scene, "--change", "alice:design=19:too generous")
+        final = load(scene, "final.json")["participants"]
+        record(code == 0 and final["alice"]["gate"] is False,
+               "a change that lowers a gate criterion flips the gate to not passed", err)
+        scheme = gr.load_scheme(scene.bundle)
+        record([c.gate for c in scheme.rubric] == [True], "load_scheme reads gate on a criterion")
+
+
+def test_no_gate_is_null() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = Scene(tmp, module_yaml=NO_GATE_YAML)
+        path = graded(scene)
+        code, out, err = propose(scene, path)
+        prop = load(scene, "proposal.json")
+        record(code == 0 and all(p["gate"] is None for p in prop["participants"].values()),
+               "a module with no gate records null, not passed", err)
+        record("gate n/a" in out and "gate passed" not in out, "and prints it as n/a", out)
+        code, out, err = confirm(scene)
+        raw = (scene.store() / "final.json").read_text()
+        final = json.loads(raw)["participants"]
+        record(code == 0 and all(p["gate"] is None for p in final.values()) and '"gate": null' in raw,
+               "final.json has gate null for every participant", err)
+        record(final["bob"]["total"] == 40 and final["alice"]["total"] == 75, "the totals do not depend on the gate")
+
+
+def test_writes_refuse_a_work_tree() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = Path(tmp) / "work"
+        repo.mkdir()
+        git_fixture("init", "-q", cwd=repo)
+        target = repo / "store" / "module"
+        msg = refused(gr.write_json_private, target / "proposal.json", {"x": 1})
+        record(msg is not None and "work tree" in msg and not (repo / "store").exists(),
+               "a write into a Git work tree is refused and creates nothing", str(msg))
+        outside = Path(tmp) / "out"
+        gr.write_json_private(outside / "ok.json", {"x": 1})
+        record(json.loads((outside / "ok.json").read_text()) == {"x": 1}, "control: a write outside succeeds")
+        with tempfile.TemporaryDirectory() as tmp2:
+            scene = Scene(tmp2)
+            path = graded(scene)
+            scene.env["XDG_DATA_HOME"] = str(repo)
+            code, out, err = propose(scene, path)
+            record(code == 1 and "work tree" in err, "propose with the store in a work tree is refused", err)
+
+
 def main() -> int:
     for test in (test_cohort_from_url_forms, test_store_dir_follows_xdg, test_work_tree_refusal,
                  test_forget, test_scheme, test_cli, test_classify_branch, test_collect,
@@ -1599,7 +1949,10 @@ def main() -> int:
                  test_mounted_git_discloses_nothing, test_docker_proxies_warning, test_run_json_records,
                  test_real_checkout_failure, test_gitmodules_are_not_followed, test_local_git_timeout,
                  test_only_takes_positionals_after_it, test_password_holding_a_slash, test_port_rule,
-                 test_ascii_stdout, test_only_keeps_other_branches_provenance):
+                 test_ascii_stdout, test_only_keeps_other_branches_provenance,
+                 test_propose_values, test_propose_refusals, test_confirm_values,
+                 test_confirm_top_tie, test_confirm_refusals, test_gate_criterion,
+                 test_no_gate_is_null, test_writes_refuse_a_work_tree):
         try:
             test()
         except Exception:  # pragma: no cover
