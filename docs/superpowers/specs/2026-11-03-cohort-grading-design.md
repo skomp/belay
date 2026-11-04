@@ -1,7 +1,7 @@
 # Grading a cohort's module, on the trainer's machine — Design
 
 **Date:** 2026-11-03
-**Last amended:** 2026-11-03
+**Last amended:** 2026-11-04
 **Status:** designed, not implemented
 **Issue:** belay#94
 **Builds on:** the levels and modules-as-bundles design (2026-11-03, PR: belay#91); the
@@ -53,9 +53,10 @@ grading:
   env: [ANTHROPIC_API_KEY]         # the only environment variables passed in
   timeout_minutes: 15              # per branch, for all validators together
   validators:                      # deterministic share: the points if the validator passes
-    scorer-tests: { points: 30, gate: true }
-    latency-nfr:  { points: 20 }
-    lint:         { points: 10 }
+    own-tests-pass: { points: 20, gate: true }  # the participant's own test suite
+    coverage-60:    { points: 10 }              # a coverage tool with a threshold
+    coverage-80:    { points: 10 }
+    mutation-60:    { points: 20 }              # mutation testing with a threshold
   rubric:                          # judged share
     - id: failure-handling
       points: 15
@@ -115,9 +116,30 @@ lessons are exam lessons; there is no separate final-project concept here.
 A validator with `gate: true` is a gate validator. The gate of a module is passed when all its
 gate validators pass.
 
+**The rubric can gate too.** `gate: true` is allowed on a rubric criterion, which then must earn its
+full points. A module uses this for the two things no validator can show: that every acceptance
+criterion has a passing test with an assertion, and a simple quality review ("a reader can follow
+this code, and nothing in it is a stub or a placeholder"). The gate is passed when every gate
+validator passes and every gate criterion earns full points. The AI proposes the criterion's points
+and the trainer confirms them, so a person decides.
+
+**A course ships no tests for grading.** Decided on 2026-11-04: shipped tests would fix the
+participant's interface, and a module's code base is not known when the module is written. The
+deterministic share measures the participant's own tests instead: that they pass, how much code
+they reach (a coverage tool with a threshold), and whether they detect a change (mutation testing
+with a threshold). Each is an ordinary `command` validator, so a course names its own tools; finer
+points come from several thresholds, because a validator has no partial credit. Whether the tests
+cover the specification is a rubric criterion.
+
+**The limit, stated plainly:** a participant owns the branch, so they can exclude files, add pragmas
+or fake a tool's result. Commands pass their settings explicitly, and a rubric criterion looks for
+exclusions. This raises the cost of cheating and does not remove it, which is one reason a person
+confirms every grade.
+
 - **The participant's tutor** runs gate validators like any other validator. When one fails it
   says the module's gate is not met yet. It never blocks.
-- **The grader** records gate passed or not passed for each participant at the checkpoint.
+- **The grader** records gate passed or not passed for each participant at the checkpoint, from the
+  confirmed points.
 - **Everyone continues from the winning branch either way.** "Not passed" is an input to the
   certificate (belay#95).
 
@@ -213,6 +235,7 @@ New checks take the next free numbers. All are silent when the key is absent.
 | Check | Mode | Reports |
 |---|---|---|
 | grading shape | both | `grading` not a mapping; an unknown key; `image` not a non-empty string; `network` not a boolean; `env` not a list of valid variable names; `timeout_minutes` not a positive integer |
+| grading gate | both | `gate` on a rubric criterion not a boolean |
 | grading validators | both | a name that is not a declared validator; a validator of kind `manual` or `git-diff`; `points` not a positive integer; `gate` not a boolean |
 | grading rubric | both | a criterion without `id`, positive integer `points`, or a non-empty `standard`; a duplicate `id`; `paths` not a non-empty list of globs the ownership dialect accepts |
 | grading share | both | the validator points less than 60% of the total |
