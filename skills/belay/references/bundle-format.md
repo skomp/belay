@@ -185,6 +185,7 @@ advance_on: validated-evidence-only
 | `report` | MAY | Where a learner's defect report goes: a `url` that starts `https://` or `mailto:`, and an optional `prefill` of `github`, `gitlab` or `none`. See **Defect reports** below. |
 | `levels` | MAY | `true` turns on per-objective levels: how closely the tutor guides a learner on each learning objective, and which `material` it loads. Default `false`; absent, the course runs exactly as it would without this key. Any value but `true` or `false` is check 35's finding. See **Levels and modules** below. |
 | `starts_from` | MAY | `ref`, the only value: the course's starting code is the code at a Git ref that the catalogue entry's `start_from` names, not anything in the bundle or the learner's workspace. Any other value is check 36's finding. See **Levels and modules** below. |
+| `grading` | MAY | How a trainer grades a cohort's work on this module: a container, validators that earn points and a judged rubric. Absent, the course is not graded. Malformed is the finding of checks 47-50. See **Cohort grading** below. |
 | `one_task_at_a_time` | SHOULD | Default `true`. |
 | `solution_code` | SHOULD | `on-request-only` or `freely`. |
 | `advance_on` | SHOULD | `validated-evidence-only` or `learner-assertion`. |
@@ -331,7 +332,7 @@ ships, and it is not something to author against — declare your supplies.)
 |---|---|---|
 | `command` | `command: [prog, arg, ...]` | Run it; exit zero is success. |
 | `file-exists` | `path:` | The path exists. |
-| `file-contains` | `path:`, `pattern:` | The file matches the pattern. |
+| `file-contains` | `path:`, `pattern:` | The file matches the pattern, a regular expression searched line-wise. See below. |
 | `git-diff` | — | Inspect the working-tree diff. |
 | `manual` | — | The learner supplies evidence; the tutor judges it. |
 
@@ -346,6 +347,11 @@ before it starts one (section 2, **Setup validators**, and `state-lifecycle.md` 
 This is a rule about shape and about nothing else. Nothing in this format, and nothing in
 the validator, says a declared command is safe to run — see **What a bundle may not claim**
 below.
+
+**A `file-contains` `pattern` is a line-wise regular expression.** The tutor checks it with Grep;
+the grader uses Python's `re.search` with `re.MULTILINE`, where `^` and `$` are line ends and `.`
+stops at one. The two differ at the edges: look-around, and a `\n` or `\s`, which can cross a line
+end only under `re.search`. Keep a pattern to what both read alike.
 
 Validator names are referenced by lessons. A lesson referencing an undeclared validator
 is invalid.
@@ -1231,6 +1237,185 @@ runner's, in `runner-protocol.md` section 18.6 and `state-lifecycle.md` section 
 **A `starts_from: ref` module needs a runner that knows the key** (section 13). A bundle
 without it starts exactly as any other.
 
+### Cohort grading — `grading`
+
+> A module bundle **MAY** say how a trainer grades a cohort's work on it, with a `grading` key.
+> `runner-protocol.md` section 20 is the procedure. This is what you write.
+
+Every participant builds the module on their own branch. At the checkpoint the trainer grades
+every branch on their own machine. Validators give a deterministic share and a rubric the AI
+judges gives the rest; the AI proposes and the trainer decides. `grading` is in `tutorial.yaml`,
+so **participants can read the criteria from the start**. They never see anyone's grades.
+
+| Key | Meaning |
+|---|---|
+| `image` | The container every `command` validator runs in. A non-empty string, needed when any validator in `grading.validators` is of kind `command` (check 48). |
+| `network` | `true` to give the container a network. Default `false`, and it then runs with `--network none`. |
+| `env` | Names of the trainer's environment variables passed in, and no others. A missing one is a warning. |
+| `timeout_minutes` | A positive integer: the limit per branch, for all its validators together. Default 15. |
+| `validators` | The deterministic share: a map from a name in the manifest's `validators` to `points` (a positive integer) and optional `gate` (a boolean). |
+| `rubric` | The judged share: a list of criteria, each with a unique `id`, positive integer `points`, a `standard`, optional `paths` and optional `gate`. An `id` matches `[a-z0-9-]+` and is not the name of a validator in `grading.validators`, because the trainer changes a criterion's points by naming it (check 49). |
+
+Unknown keys, wrong types and the rest are the findings of checks 47-50.
+
+- **A validator earns its points when it passes, and none when it does not.** There is no partial
+  credit, and no validator that earns nothing, so every name here carries points. For finer points,
+  use several validators, as several thresholds.
+- **Validator points MUST be at least 60% of the total** (check 50). The runner fixes the proportion
+  so that every module and cohort means the same by "hybrid".
+- **Only `command`, `file-exists` and `file-contains` can earn points** (check 48). `manual` needs a
+  learner, and none is present; `git-diff` inspects uncommitted changes, and a fresh checkout has none.
+  The two file kinds are checked directly on the checkout as committed, and run no code. `path` is
+  relative to the branch's root; a path that leaves it fails, and a file over 16 MiB fails unread.
+- **A criterion's `standard` is one checkable sentence**, in the spirit of a `covers` summary. The
+  grader judges a branch against it and quotes the evidence.
+- **`paths` says where the grader looks**: entries relative to the branch's root, as in `specs/**`
+  or a task lesson's `own_tasks` directory. Without it the grader looks at the whole branch. Check
+  49 applies path rules only, the ones check 45 applies to `own_tasks`: relative, `/`-separated, no
+  empty, `.` or `..` component, no backslash, one trailing `/` allowed. **Wildcards are not validated**,
+  because this format defines no glob dialect yet (PR: belay#69 proposes one and is not merged), and a
+  mistaken one surfaces when the trainer grades.
+  The grader reads each entry as a Git `:(glob)` pathspec: `*` within a segment, `**` across them.
+
+#### The gate
+
+A module's **gate** says whether its functional requirement is technically met, and it is
+recorded at the checkpoint without blocking anyone. `gate: true` on a validator makes it a gate
+validator. `gate: true` on a criterion means it must earn its **full points**, and it is for what no
+validator can show: that each acceptance criterion has a passing test with an assertion, and a simple
+quality review ("a reader can follow this code, and nothing in it is a stub or a placeholder"). The AI
+proposes those points and the trainer confirms them, so a person decides.
+
+**The gate is passed when every gate validator passes and every gate criterion has its full
+confirmed points.** A module with no gate records `null`, meaning not applicable. A participant's
+tutor says when a gate validator fails and never holds them back for that (`runner-protocol.md`
+section 3). Everyone continues from the winning branch either way; the result is an input to the
+certificate (belay#95).
+
+#### What the deterministic share measures
+
+**A course ships no tests for grading.** Shipped tests would fix the participant's interface, and
+a module's code base is not known when the module is written. The deterministic share measures the
+participant's **own** tests: that they pass, how much code they reach (a coverage tool with a
+threshold), and whether they detect a change (mutation testing with a threshold). Each is an ordinary
+`command` validator, so you name your own tools. Whether the tests cover the specification is a
+rubric criterion.
+
+**Commands pass their settings explicitly**, on the command line or from the image, so that a
+threshold or a file list in the branch does not decide the result.
+
+**The limit, stated plainly:** a participant owns the branch, so they can exclude files, add pragmas
+or fake a tool's result. Explicit settings and a rubric criterion that looks for exclusions raise the
+cost of that and do not remove it, which is one reason a person confirms every grade.
+
+#### What a command runs in
+
+- **One fresh container per `command` validator**, from `image`, removed afterwards. Only the branch's
+  checkout is shared between them, mounted at `/workspace`, which is the working directory.
+  **What a validator writes to the mount reaches the next one, and anything else does not, so a
+  `pip install` validator does not carry to the next validator.** Put dependencies in the image, or
+  install and use them in one command.
+- **Nothing of the bundle is mounted.** A command cannot run a file your bundle ships. Your tools and
+  their settings live in the image, which the branch cannot change.
+- **A validator a lesson names runs in two places.** A lesson's `validators` have the participant's
+  tutor run it in their own session, in the workspace root and outside the image; `grading` runs it in
+  the container. So its command has to work in both. Nothing it needs may come only from the image,
+  neither a variable nor a file, so it sets what it needs itself, as `[env, PYTHONPATH=src, python, -m,
+  pytest, ...]` does, and the participant's machine has to have the tool. A validator no lesson names
+  runs only in the container.
+- **A layout the commands do not expect fails as the participant's own result.** Tests that cannot
+  import the code, or a test folder that is not where the command looks, end with an ordinary non-zero
+  status, so nothing reports a fault. Fix the layout in your lessons, and say so in them.
+- **A command that cannot start is a fault and not a score.** Exit status 125, 126 or 127 makes the
+  participant ungradable until the trainer repairs it, so a tool missing from the image stops
+  every participant. Any other non-zero status is an ordinary failure.
+- **Order:** file checks first, before any code can change the checkout, then `command` validators in
+  the declared order. A failure does not stop the next one; running out of time does, and it fails all
+  that remain, as the participant's own result. A validator that rewrites files while it runs belongs last.
+- **Limits, on every container and not yours to change:** `--pids-limit 512`, `--memory 4g`,
+  `--security-opt no-new-privileges`. **A mutation validator may hit these limits, or need a larger
+  `timeout_minutes`.** All of those read as the participant's failure, with no fault reported, so a
+  limit that is too tight quietly costs every participant points. Run your validators on a reference
+  solution of your own, in your image, before a cohort does.
+- **Stored output** is the first 16384 characters per validator, with the values of `env` variables
+  masked.
+- **`network`, `env` and the key:** participant code can read and send what it is given
+  (`runner-protocol.md` section 20.1).
+
+#### Worked example: a Python module's scheme
+
+Everything named here is this example's own choice; the format names no tool. The image is
+built and published by the course, with Python, `pytest`, `pytest-cov`, `cosmic-ray`, the module's
+dependencies and `/opt/grading/cosmic-ray.toml`, which sets `module-path = "src"` and the same test
+command as `own-tests-pass`. Each command sets `PYTHONPATH=src` itself: `-c /dev/null` discards the
+participant's own `pythonpath` setting, so tests importing from `src/` otherwise stop at a collection
+error, exit 2, which fails every participant as their own result. The lessons therefore fix the `src/`
+and `tests/` layout: with the code elsewhere the same command exits 2, and with the tests elsewhere it
+exits 4. Tried on a small project with pytest 9.2.0, pytest-cov 7.1.0 and cosmic-ray 8.7.0, and none of
+it ran in a container.
+
+```yaml
+validators:
+  own-tests-pass:
+    kind: command
+    command: [env, PYTHONPATH=src, python, -m, pytest, -c, /dev/null, --rootdir=., tests]
+  coverage-60:
+    kind: command
+    command: [env, PYTHONPATH=src, python, -m, pytest, -c, /dev/null, --rootdir=., --cov=src, --cov-config=/dev/null, --cov-fail-under=60, tests]
+  coverage-80:
+    kind: command
+    command: [env, PYTHONPATH=src, python, -m, pytest, -c, /dev/null, --rootdir=., --cov=src, --cov-config=/dev/null, --cov-fail-under=80, tests]
+  mutation-60:
+    kind: command
+    command: [sh, -c, "cosmic-ray init /opt/grading/cosmic-ray.toml /tmp/mutants.sqlite && cosmic-ray exec /opt/grading/cosmic-ray.toml /tmp/mutants.sqlite && cr-rate --fail-over 40 /tmp/mutants.sqlite"]
+grading:
+  image: registry.example/programme/python-grading:3.12
+  network: true
+  env: [ANTHROPIC_API_KEY]
+  timeout_minutes: 45
+  validators:
+    own-tests-pass: { points: 20, gate: true }
+    coverage-60: { points: 10 }
+    coverage-80: { points: 10 }
+    mutation-60: { points: 20 }
+  rubric:
+    - id: tests-trace-the-spec
+      points: 10
+      gate: true
+      standard: Every acceptance criterion in specs/ has a passing test whose assertion would fail if the criterion were broken.
+      paths: [specs/**, tests/**]
+    - id: quality-review
+      points: 5
+      gate: true
+      standard: A reader can follow this code, and nothing in it is a stub or a placeholder.
+      paths: [src/**]
+    - id: nothing-excluded
+      points: 5
+      standard: No file, line or test is left out of measurement by a pragma, a skip marker, a plugin or a tool setting without a stated reason.
+    - id: failure-handling
+      points: 10
+      standard: Every external call has a timeout and a handled failure path.
+      paths: [src/**]
+    - id: exam-design
+      points: 10
+      standard: The design choice is justified against the stated non-functional requirement, with a measurement.
+      paths: [exam/07/**]
+```
+
+- **60 of 100 points are deterministic**, exactly the minimum. The gate rests on one validator and
+  two criteria.
+- **Each command says its settings**: `-c /dev/null` and `--cov-config=/dev/null` keep the branch's
+  own configuration out, and `--cov=src` keeps the file list out of its hands. A `conftest.py` and a
+  pragma still work, and that is what `nothing-excluded` is for: it has no `paths`, because it has to
+  read the whole branch.
+- **`cr-rate --fail-over 40` fails above 40% of mutants surviving**, so it asks for 60% detected. It
+  comes last because the tool rewrites source files while it runs, and `timeout_minutes` is three
+  times the default because it runs the tests once per mutant.
+- **`exam-design` points at the folder the exam lesson names** (section 6, **Writing an exam
+  lesson**), because a branch does not record which lesson produced which file.
+- **`own-tests-pass` is the validator that lesson names**, so it also runs in the participant's own
+  session. `mutation-60` reads a file only the image has, so no lesson can name it.
+
 ---
 
 ## 3. `COURSE.md`
@@ -1589,6 +1774,7 @@ An assessment only, and optional there: questions to ask verbatim.
 | `placement` | MAY | `true` on the one assessment that places a learner on the levels. It needs `assesses`, a bundle has at most one, and it is never an optional lesson (check 39). `false` says nothing. See **Writing a placement lesson** below. |
 | `tasks` | MAY | Folder lessons only. A directory inside this lesson's folder holding its task files; relative, no `..` segment (check 42). Declaring it is what makes the lesson a **task lesson**. See **Writing a task lesson** below. |
 | `task_states` | MAY | The states a task passes through, in order; default `[in-progress, done]`. **The last state means done.** At least two states, because a row is written in the first when a task is taken and the last closes it; each matches `[a-z0-9-]+` and is listed once. `skipped` is reserved and always available, so it is not listed (check 44). Needs `tasks`. |
+| `exam` | MAY | `true` makes this an **exam lesson**: help stops at rung 3, no solution is revealed and no level applies. `false` says nothing; any other value is check 51's finding. See **Writing an exam lesson** below. |
 | `own_tasks` | MAY | A directory in the learner's **workspace** where the learner writes task files of their own; relative to the workspace root, plain `/`-separated components with no `.` or `..`, first segment not `tutorial` (check 45). Needs `tasks`. |
 
 `design_refs` is how a lesson stays cheap. A lesson about splitting a file into a
@@ -1920,6 +2106,59 @@ hand-off and the review are what the programme writes into its lessons.
   `## Writing a story` checklist; from then on participants cut a use case, listed in the
   body, into stories of their own. Its completion conditions require at least one such story,
   written and closed.
+
+### Writing an exam lesson
+
+`exam: true` in a lesson's frontmatter makes it an **exam lesson**. Whatever the participant's
+level, the tutor says at the start that it is an exam, stops the help ladder at rung 3, reveals no
+solution whatever `solution_code` says, and applies no level (`runner-protocol.md` section 15.14).
+A bundle may have any number of them, or none. There is no separate final-project concept: a
+final-project bundle is a bundle whose lessons are exam lessons. Any value but `true` or `false`
+is check 51's finding.
+
+**Tell the participant which folder the work goes in.** A branch does not record which lesson
+produced which file, so a rubric criterion cannot name a lesson. The lesson names a folder and the
+criterion points there with `paths`. Put the folder under `learner_owned`. From the scheme above
+(section 2, **Cohort grading**), `exam-design` has `paths: [exam/07/**]`, and:
+
+```markdown
+---
+id: 07-exam
+title: Exam — design under a latency budget
+exam: true
+validators: [own-tests-pass]
+---
+
+## Purpose
+
+Show that you can choose a design under a stated latency budget, and defend it.
+
+## Constraints
+
+Put your design note and your measurements in `exam/07/`, on your module branch. The grading
+looks for them there and nowhere else.
+
+## Completion conditions
+
+- `own-tests-pass` passes.
+- `exam/07/` holds a design note naming the budget and a measurement against it.
+```
+
+- **A validator the lesson names also runs outside the image**, in the participant's own session
+  (section 2, **What a command runs in**).
+- **The body alone has to be enough.** No `material` file is loaded and no level guides anyone, and
+  the tutor presents what the body states and adds no explanation of its own. So teach what the exam
+  uses in an earlier lesson, or state it in the body. `teaches` changes nothing here.
+- **Do not name an exam lesson in `offer_at` or `required_for`.** No optional lesson is offered and
+  no `required_for` applies until the exam lesson has ended, so the offer waits and the gate never
+  binds on it (`runner-protocol.md` section 15.14).
+- **`exam` and `assesses` are independent.** `assesses` decides how answers are judged and `exam` how
+  far the tutor helps; a lesson may declare both.
+- **A task lesson can be an exam lesson.** `exam: true` then holds in every state and for every
+  task (`runner-protocol.md` section 19.3), so a checklist the tutor reviews against is the most
+  it will say about what is unmet. Word it for that.
+- **Do not write a solution into the lesson's folder.** The tutor reveals none, and the participant
+  can read the folder.
 
 ### A lesson is not a script
 
@@ -2253,6 +2492,9 @@ Confirm each of these by looking, not by remembering:
       what the tutor may create — naming the limit, not only the permission
 - [ ] `workspace_kind` is one of the three permitted values
 - [ ] no learner's source code appears anywhere in the bundle
+- [ ] if the bundle declares `grading`: each `command` has been run on a reference solution in the
+      image, and fails at a threshold it should fail; every tool it needs is in the image
+- [ ] an exam lesson names the folder its work goes in, and a criterion's `paths` points there
 
 A bundle that passes all of these is structurally valid. It does not mean the course is
 good — that is your judgement, not the format's.
@@ -2479,9 +2721,9 @@ genuinely cannot be finished with the failure in place.
 
 `bundle_format` stays `1`. `optional_lessons`, `failure_modes`, `supplies`, `covers`,
 `assumes`, `recommended_follow_ups`, `recommended_previous_bundles`,
-`teaching_method`, `setup_validators`, `version`, `report`, `levels`, `starts_from` and the
-lesson fields `assesses`, `teaches`, `material`, `placement`, `tasks`, `task_states` and
-`own_tasks` are all additive: a bundle
+`teaching_method`, `setup_validators`, `version`, `report`, `levels`, `starts_from`, `grading` and the
+lesson fields `assesses`, `teaches`, `material`, `placement`, `tasks`, `task_states`,
+`own_tasks` and `exam` are all additive: a bundle
 written before this section existed is valid exactly as it stands, nothing in this document
 changes what it means, and no edit is implied. Run the validator over it and see.
 
@@ -2553,6 +2795,14 @@ keys, and ignores them. The effect on a learner is precise, and worth stating pl
   does not see the keys, because lesson frontmatter fields are read by name, and accepts the
   task files because the body names each one. An older materializer copies them, because they
   are inside `lessons/`;
+- **`grading` is ignored, and a gate validator is an ordinary validator.** An older runner has no
+  `belay-grade`, and nothing changes for a learner except that a failed gate validator is not called
+  a gate. A trainer needs a runner that knows the key. An older validator warns about `grading` as
+  an unrecognised top-level field and accepts the bundle;
+- **an exam lesson is taught as an ordinary lesson.** An older runner ignores `exam`, so help is not
+  capped, a solution can be revealed as `solution_code` allows, and levels apply. **A programme that
+  relies on an exam's cap needs a runner that knows it.** An older validator does not see the key,
+  because lesson frontmatter fields are read by name;
 - **nothing is taught wrongly.** The main path is untouched by `optional_lessons`, because
   an optional lesson is never in it. An unplaced supply is not the same case — a
   manifest-scope entry IS on the main path — but it costs the learner the toil the key

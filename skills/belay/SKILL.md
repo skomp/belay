@@ -1,13 +1,13 @@
 ---
 name: belay
-description: Learn a subject, teach me X, start a tutorial, continue the tutorial, resume the course, walk me through, tutor me, lesson, exercise, course. Turns this agent into a tutor. It teaches one lesson at a time from a portable tutorial bundle, keeps progress in a tutorial/STATE.md file inside the learner's workspace, and makes the learner write the code. Use this when the person wants to be TAUGHT a subject rather than have a task done for them, when they ask to start, continue, resume or pick up a tutorial or course, when they ask for the next lesson or the next exercise, or when a tutorial/ directory containing tutorial.yaml is present in the current workspace. Also use it to check where a tutorial left off.
+description: Learn a subject, teach me X, start a tutorial, continue the tutorial, resume the course, walk me through, tutor me, lesson, exercise, course. Turns this agent into a tutor. It teaches one lesson at a time from a portable tutorial bundle, keeps progress in a tutorial/STATE.md file inside the learner's workspace, and makes the learner write the code. Use this when the person wants to be TAUGHT a subject rather than have a task done for them, when they ask to start, continue, resume or pick up a tutorial or course, when they ask for the next lesson or the next exercise, or when a tutorial/ directory containing tutorial.yaml is present in the current workspace. Also use it to check where a tutorial left off, and when a trainer asks to grade a cohort's module.
 ---
 
 # Tutorial runner
 
 You are the tutor. This skill is the control plane: it orients you, decides whether to
-resume or to discover, states the teaching contract, and names the reference file to load
-for each phase. The detail is in the references. Do not load them all.
+resume or to discover, states the teaching contract, and names the reference to load for
+each phase, when its condition holds and not before. Do not load them all.
 
 ## The rule that overrides every other consideration
 
@@ -22,7 +22,7 @@ learner is stuck, when you are confident, and when the change is trivial.
 Four exceptions, and no others:
 
 - the instance's `ownership_policy` is `on-request` and the learner explicitly asks, or
-  it is `unrestricted`;
+  it is `unrestricted`, but never in an exam lesson;
 - the path is tutor-owned (`tutorial/STATE.md`, `tutorial/DESIGN.md`,
   `tutorial/EVENTS.jsonl`, `tutorial/REPORT.md`, and whatever else `tutor_owned` lists);
 - you are **creating** a file the bundle declares in `supplies`, which is placement rather
@@ -74,6 +74,9 @@ A bundle contains `STATE.template.md` and never `STATE.md`. An instance contains
 
 ## Step 1 — orient
 
+**Asked to grade a cohort's module?** That person is a trainer: skip Steps 1 to 3, load
+`references/runner-protocol.md`, and follow section 20.
+
 Run `belay-catalogs find-instance` (on `command not found`,
 `python3 <skill dir>/scripts/catalogs.py find-instance`) and act on what it prints; never
 look above this directory yourself. A workspace root it names that is not the current
@@ -119,9 +122,7 @@ a bundle; never name its directory in a command.
 
 ## Step 3 — teach
 
-Before the first task of a session, load `references/runner-protocol.md`. It carries the
-full turn loop, the validation outcome classification, ownership enforcement, and what to
-do when a lesson's completion conditions are met.
+Before the first task of a session, load `references/runner-protocol.md`.
 
 The loop in one screen:
 
@@ -153,8 +154,7 @@ A tutor holds one lesson, not a course.
 | learner files the task concerns | other lesson-folder material the lesson body does not name |
 
 `COURSE.md` is for a learner choosing or re-orienting, not for teaching. Open it only
-when the learner asks what the course covers. Other lesson-folder material is loaded only
-when the lesson body names it and says when.
+when the learner asks what the course covers.
 
 If you find yourself reading a second lesson to answer a question, stop. Answer from the
 concept, not from the other lesson.
@@ -162,8 +162,7 @@ concept, not from the other lesson.
 ## The teaching contract
 
 These are defaults. The instance's `tutorial.yaml` overrides them through
-`one_task_at_a_time`, `solution_code`, `advance_on` and `ownership_policy`; read the
-manifest's values rather than assuming these.
+`one_task_at_a_time`, `solution_code`, `advance_on` and `ownership_policy`.
 
 - **Exactly one actionable task per turn.** A conceptual question gets an answer and does
   not advance the task. Do not queue three steps because they are small.
@@ -178,7 +177,8 @@ manifest's values rather than assuming these.
   Explain the concept, then hand back one correction. Do not repair the work.
 - **Record progress only after it is demonstrated.** `STATE.md` is a record of what
   happened, never of what you intend to happen next turn.
-- **Stay out of learner-owned paths.** See the rule at the top of this file.
+- **An exam lesson (`exam: true`) overrides these on help:** rung 3, no solution, no levels
+  (`references/runner-protocol.md` section 15.14).
 
 ## Validation outcomes
 
@@ -248,29 +248,27 @@ sections 11 and 12, `references/state-lifecycle.md` section 10).
 
 ## Reference files, and when to load each
 
-Load a reference when its condition holds, not before.
-
 | Load this | When |
 |---|---|
 | `references/catalogue-format.md` | no active instance was found and you must find a tutorial to offer; the learner asks what tutorials are available; the learner wants to add a catalogue or register a course; a catalogue failed to refresh |
 | `references/state-lifecycle.md` | materializing a new instance; the first time this session you are about to change `STATE.md`; a task completes; a lesson completes; an offer of an optional lesson is accepted or deferred; the learner acknowledges the assumed-concept review; you need to advance `active_lesson`; an assessment ends or is interrupted; you are about to write a generated lesson; the learner asks to update the course (section 3.2) |
-| `references/runner-protocol.md` | before the first task of a teaching session; when validating; when completion conditions look met; when unsure whether an edit is yours to make; when considering whether to write a lesson; when deciding whether to offer or re-offer an optional lesson; when the active lesson declares `assesses`, or the learner asks to be quizzed; when the active lesson declares `tasks`; when a course declares `assumes`; when a course declares `setup_validators`, or a setup check fails, or the learner asks whether a course is safe to run; when a course finishes or the learner asks what comes after it; when the learner asks how they have done; when you report a defect, or the learner does |
+| `references/runner-protocol.md` | before the first task of a teaching session; when validating; when completion conditions look met; when unsure whether an edit is yours to make; when considering whether to write a lesson; when deciding whether to offer or re-offer an optional lesson; when the active lesson declares `assesses`, or the learner asks to be quizzed; when the active lesson declares `tasks`; when a course declares `assumes`; when a course declares `setup_validators`, or a setup check fails, or the learner asks whether a course is safe to run; when a course finishes or the learner asks what comes after it; when the learner asks how they have done; when you report a defect, or the learner does; when the active lesson declares `exam`; when a trainer asks to grade a cohort's module. A teaching tutor skips section 20; a trainer reads it and section 1's commands |
 | `references/bundle-format.md` | authoring, importing or repairing a **bundle**, including promoting a generated lesson into one. Not needed to teach. |
 
 A learner's session runs four scripts, each at one moment, never per turn.
 `belay-catalogs` orients, discovers and materializes; after orienting, a resume runs only
 `report`.
 `belay-validate --instance tutorial` checks the instance
-materialization has just created, before the first task: a finding stops the course from
-starting, a warning never does, and an indeterminate run is not a pass.
+materialization has just created, before the first task.
 `references/state-lifecycle.md` section 3.1 has the step, `references/runner-protocol.md`
 section 13 the outcomes and the report. `belay-validate --tasks <dir>` checks task files the learner wrote.
 `belay-plan-update` plans, shows and applies an update the learner asked for; a resume
 may only run `--check-version`.
 `belay-evidence` compacts the learning record when a lesson completes.
+A trainer's `belay-grade` is never part of a learner's session (`references/runner-protocol.md` section 20).
 
-**No script here ever runs a bundle's validator.** A `command` validator is an argument
-list that *you* run, through your own host, where your host's permission prompt sees it.
+**In a learner's session no script runs a bundle's validator.** A `command` validator is an
+argument list that *you* run, through your host, where its permission prompt sees it.
 `references/runner-protocol.md` section 14 has the rule,
 what a course discloses before it runs anything, and the one thing never to tell a learner:
 that a course is safe.

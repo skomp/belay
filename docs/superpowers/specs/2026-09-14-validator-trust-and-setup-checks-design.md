@@ -1,7 +1,7 @@
 # Validator trust, and setup checks — Design
 
 **Date:** 2026-09-14
-**Last amended:** 2026-10-14
+**Last amended:** 2026-11-04
 **Status:** sections 4 to 7 implemented in `PR: belay#44`. Sections 5.4 and 5.5 — the
 validator deriving the disclosure block, and its harness — implemented for belay#45;
 section 7's failure path is conversational behaviour and stays open there. Section 2.2 -
@@ -26,8 +26,9 @@ stand without them.
 The first question asked was whether this is already handled by the agent host's
 permission mode. Largely yes — and the reason matters.
 
-**No code in this repository executes a validator.** `references/runner-protocol.md`
-section 2.5 tells the *tutor* to run the declared argument list. The tutor is the agent, so
+**In a learner's session no code in this repository executes a validator.** (A trainer's
+`belay-grade run` does, only in a container: `2026-11-03-cohort-grading-design.md` section 4.)
+`references/runner-protocol.md` section 2.5 tells the *tutor* to run the declared argument list. The tutor is the agent, so
 the call goes through the host's own tool layer, where the host's permission prompt sees
 it.
 
