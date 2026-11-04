@@ -1738,8 +1738,12 @@ def test_confirm_values() -> None:
                and final["confirmed_by"] == "Rob" and final["confirmed_at"].endswith("Z"),
                "final.json top level has exactly the contract's keys", str(sorted(final)))
         bob = final["participants"]["bob"]
-        record(sorted(bob) == ["criteria", "gate", "max_total", "total", "validators"],
-               "a participant has exactly validators, criteria, gate, total, max_total", str(sorted(bob)))
+        record(sorted(bob) == ["commit", "criteria", "gate", "max_total", "total", "validators"],
+               "a participant has exactly commit, validators, criteria, gate, total, max_total", str(sorted(bob)))
+        record(all(final["participants"][w]["commit"] == scene.commits[f"{w}/m1"]
+                   == load(scene, "proposal.json")["participants"][w]["commit"]
+                   for w in ("alice", "bob", "carol")),
+               "final.json records each participant's graded commit, as proposal.json does")
         record(bob["criteria"]["design"] == {
             "points": 18, "proposed_points": 10, "max": 20, "evidence": "bob: src/main.py:1 quoted",
             "changed_by_trainer": True,
@@ -1901,6 +1905,106 @@ def test_gate_criterion() -> None:
         record([c.gate for c in scheme.rubric] == [True], "load_scheme reads gate on a criterion")
 
 
+def test_reconfirm_names_the_changes_it_does_not_repeat() -> None:
+    header = "does not repeat them"
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = Scene(tmp, module_yaml=GATE_CRITERION_YAML)
+        path = graded(scene, ratings(alice=20, bob=10, carol=19))
+        record(propose(scene, path)[0] == 0, "reconfirm: propose")
+        code, out, err = confirm(scene, "--change", "carol:design=20:the 19 was a misreading",
+                                 "--change", "bob:design=12:handles: retries")
+        record(code == 0 and header not in out, "a first confirmation has nothing to name", f"{code} {out} {err}")
+        record(load(scene, "final.json")["participants"]["carol"]["gate"] is True, "carol's gate passes on the change")
+
+        code, out, err = confirm(scene, "--change", "bob:design=12:handles: retries")
+        carol = load(scene, "final.json")["participants"]["carol"]
+        record(code == 0 and "carol:design was 20, now 19: the 19 was a misreading" in out and header in out,
+               "a change not repeated is named: participant, criterion, points and reason", out)
+        record("bob:design was" not in out, "a repeated change is not named", out)
+        record(carol["criteria"]["design"]["points"] == 19 and carol["criteria"]["design"]["changed_by_trainer"] is False
+               and carol["gate"] is False, "the change is not carried over, and the gate goes back", str(carol))
+
+        code, out, err = confirm(scene, "--change", "bob:design=13:one more")
+        record(code == 0 and "bob:design was 12, now 13: handles: retries" in out,
+               "a change to other points does not repeat the earlier one", out)
+        code, out, err = confirm(scene, "--change", "bob:design=13:the same points, reworded")
+        record(code == 0 and header not in out, "the same points with another reason repeat the change", out)
+
+        # The proposal now gives the changed points, so --change would refuse them.
+        path.write_text(json.dumps(ratings(alice=20, bob=13, carol=19)))
+        record(propose(scene, path)[0] == 0, "reconfirm: propose again")
+        code, out, err = confirm(scene)
+        record(code == 0 and "bob:design was 13, now 13: the same points, reworded" in out,
+               "points the proposal now gives stand, and losing the reason is named", out)
+
+        final = scene.store() / "final.json"
+        for damaged in ("{ not json", '"a string"', '{"participants": {"bob": {"criteria": {"design": 3}}}}'):
+            final.write_text(damaged)
+            code, out, err = confirm(scene)
+            record(code == 0 and "Traceback" not in err and load(scene, "final.json")["confirmed_by"] == "Trainer T",
+                   f"a damaged previous final.json does not stop a confirmation: {damaged}", f"{code} {err}")
+            record(("could not be read" in out) == (damaged == "{ not json"),
+                   f"only an unreadable one is reported as unreadable: {damaged}", out)
+        data = load(scene, "final.json")
+        data["participants"]["hostile\u2028name"] = {"criteria": {"gone": {
+            "changed_by_trainer": True, "points": 1, "reason": "x\u2028y"}}}
+        final.write_text(json.dumps(data))
+        code, out, err = confirm(scene)
+        record(code == 0 and "hostile\\u2028name:gone was 1, not in this confirmation: x\\u2028y" in out,
+               "a change to what is no longer there is named, and escaped", out)
+
+
+def test_change_addresses_what_check_49_allows() -> None:
+    record(gr.parse_change("anna-2:q-1=3:why: this") == ("anna-2", "q-1", 3, "why: this"),
+           "--change takes a participant and a criterion id of [a-z0-9-]+")
+    record(refused(gr.parse_change, "anna:q:1=3:why") is not None, "--change cannot parse an id holding ':'")
+
+
+def test_output_arrives_while_the_run_goes_on() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = Scene(tmp)
+        scene.cli("collect", COHORT_URL, "m1")
+        conf = Path(scene.env["HOME"]) / ".docker" / "config.json"
+        conf.parent.mkdir(parents=True)
+        conf.write_text(json.dumps({"proxies": {"default": {"httpProxy": "http://proxy.corp:3128"}}}))
+        stub = scene.stub.read_text()
+        pull = 'if cmd == "pull":\n    sys.exit(0)'
+        assert pull in stub, "the stub's pull has moved"
+        scene.stub.write_text(stub.replace(pull, 'if cmd == "pull":\n    print("no such image", file=sys.stderr)\n    sys.exit(1)'))
+        # A file, as a background run's output is: fully buffered unless told otherwise.
+        # The spy copies what the file holds as each branch starts.
+        output, seen = scene.tmp / "output.txt", scene.tmp / "seen.jsonl"
+        prelude = (
+            "import json\nreal = grade.run_branch\n"
+            "def spy(plan, ref, warnings):\n"
+            f"    text = open({str(output)!r}).read()\n"
+            f"    open({str(seen)!r}, 'a').write(json.dumps([ref.participant, text]) + '\\n')\n"
+            "    return real(plan, ref, warnings)\n"
+            "grade.run_branch = spy\n")
+        argv = [sys.executable, "-B", "-c",
+                "import sys\nsys.path.insert(0, " + repr(str(SCRIPTS)) + ")\nimport grade\n"
+                + prelude + "\nsys.exit(grade.main(sys.argv[1:]))",
+                "run", "--bundle", str(scene.bundle), COHORT_URL, "m1"]
+        with output.open("w") as sink:
+            done = subprocess.run(argv, stdout=sink, stderr=subprocess.STDOUT, cwd=scene.cwd, env=scene.env)
+        rows = [json.loads(line) for line in seen.read_text().splitlines()]
+        record(done.returncode == 0 and [r[0] for r in rows] == ["alice", "bob", "carol"],
+               "the spy saw each branch start", str(done.returncode))
+        first = rows[0][1]
+        for needle, name in (("warning: GRADE_MISSING is declared", "a missing variable"),
+                             ("warning: could not pull", "a failed pull"),
+                             ("warning: " + str(conf), "docker's proxies")):
+            record(needle in first, f"{name} warns before the first branch starts", first)
+        record("alice (" not in first and "results: " in first and "cohort: " in first,
+               "control: no branch's output yet, and the results path is already there", first)
+        record("alice (" in rows[1][1] and "scorer-tests" in rows[1][1],
+               "the first branch's lines are readable while the next branch runs", rows[1][1])
+        text = output.read_text()
+        record(text.count("warning: GRADE_MISSING") == 1, "each warning is printed once", text)
+        record(text.rstrip().splitlines()[-1].startswith("results: "), "the results path closes the output too", text)
+        record(any("could not pull" in w for w in scene.results()["warnings"]), "the warnings stay in run.json")
+
+
 def test_no_gate_is_null() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         scene = Scene(tmp, module_yaml=NO_GATE_YAML)
@@ -1985,8 +2089,11 @@ def check_ungradable(scene: Scene, who: str, word: str, label: str) -> None:
     code, out, err = confirm(scene, "--exclude", who)
     final = load(scene, "final.json")
     record(code == 0 and sorted(final["participants"]) == sorted({"alice", "bob", "carol"} - {who})
-           and word in final["not_graded"][who] and list(final["not_graded"]) == [who],
+           and word in final["not_graded"][who]["reason"] and list(final["not_graded"]) == [who],
            f"{label}: --exclude leaves {who} out of final.json and lists it as not graded", f"{code} {err}")
+    record(final["not_graded"][who]["commit"] == scene.commits[f"{who}/m1"] == bob["commit"],
+           f"{label}: not_graded records the commit of an ungradable participant, as the proposal does",
+           str(final["not_graded"]))
     record(f"{who}: NOT GRADABLE" in out, f"{label}: the confirm summary says it too", out)
 
 
@@ -2185,8 +2292,11 @@ def test_exclude_a_branch_the_proposal_does_not_cover() -> None:
         record(code == 0 and sorted(data.get("participants", [])) == ["alice"]
                and sorted(data.get("not_graded", [])) == ["bob", "carol"],
                "excluded participants are in not_graded and not in participants", f"{code} {err}")
-        record("excluded by the trainer" in data.get("not_graded", {}).get("bob", ""),
+        record("excluded by the trainer" in data.get("not_graded", {}).get("bob", {}).get("reason", ""),
                "the reason says the trainer excluded them", str(data.get("not_graded")))
+        record(data.get("not_graded", {}).get("bob", {}).get("commit") == scene.commits["bob/m1"],
+               "not_graded records the commit of a branch the proposal does not cover",
+               str(data.get("not_graded")))
         record("bob" in out and "excluded by the trainer" in out, "the summary says so too", out)
 
     with tempfile.TemporaryDirectory() as tmp:
@@ -2235,6 +2345,9 @@ def main() -> int:
                  test_ascii_stdout, test_only_keeps_other_branches_provenance,
                  test_propose_values, test_propose_refusals, test_confirm_values,
                  test_confirm_top_tie, test_confirm_refusals, test_gate_criterion,
+                 test_reconfirm_names_the_changes_it_does_not_repeat,
+                 test_change_addresses_what_check_49_allows,
+                 test_output_arrives_while_the_run_goes_on,
                  test_no_gate_is_null, test_writes_refuse_a_work_tree,
                  test_runtime_faults_are_not_scores, test_proposed_points_and_validator_changes,
                  test_damaged_proposal_and_recursion, test_rubric_edit_needs_no_rerun,

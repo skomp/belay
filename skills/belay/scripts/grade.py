@@ -1246,12 +1246,23 @@ def cmd_run(args: argparse.Namespace) -> int:
     if ":" in tempfile.gettempdir():
         raise GradeError(f"the temporary directory {tempfile.gettempdir()} holds ':', so it cannot be mounted")
     warnings: list[str] = []
+    shown = 0
+
+    def announce() -> None:
+        # Printed as they arise: a warning that matters, a missing key above all, is
+        # no use after a run of several hours. Each is printed once.
+        nonlocal shown
+        for warning in warnings[shown:]:
+            print(f"warning: {warning}", file=sys.stderr, flush=True)
+        shown = len(warnings)
+
     plan = build_plan(repo, scheme, runtime, warnings)
     if not (plan.cache / "HEAD").exists():
         raise GradeError("nothing is collected for this repository; run collect with the same URL first")
     listing = list_branches(plan.cache, args.module)
     selected = select_branches(listing, args.only)
     probe_runtime(runtime, plan.runtime_env)
+    announce()
     digest_of_image = "unknown"
     if any(v.declared.get("kind") == "command" for v in scheme.validators):
         pull_image(plan, warnings)
@@ -1279,6 +1290,8 @@ def cmd_run(args: argparse.Namespace) -> int:
         "branches": earlier_results(path, digest, warnings) if args.only else {},
     }
     print(f"cohort: {data['cohort']}")
+    print(f"results: {path}")
+    announce()
     any_suspect = False
     signals = {s: signal.signal(s, _terminate) for s in (signal.SIGTERM, signal.SIGHUP)}
     try:
@@ -1296,14 +1309,13 @@ def cmd_run(args: argparse.Namespace) -> int:
                 gate = " (gate)" if result["gate"] else ""
                 word = "pass" if result["passed"] else f"FAIL: {result['reason']}"
                 print(f"  {name}{gate}  {word}")
+            announce()
     finally:
         for number, handler in signals.items():
             signal.signal(number, handler)
     write_json_private(path, data)
     render_not_graded(listing)
     print(f"results: {path}")
-    for warning in warnings:
-        print(f"warning: {warning}", file=sys.stderr)
     if any_suspect:
         print("error: a result above may not be a judgement of the code; look at it before grading",
               file=sys.stderr)
@@ -1668,6 +1680,36 @@ def archive_previous(store: Path) -> Path | None:
     raise GradeError("cannot find a free name for the previous final.json")
 
 
+def unrepeated_changes(store: Path, final_people: dict) -> list[str]:
+    """The trainer's changes in the current final.json that the new one does not repeat.
+
+    Every confirmation starts from proposal.json and nothing is carried over, so this
+    is how a trainer learns that a change, and perhaps a gate, went with the old file.
+    Call it before final.json is replaced. The old file is only read here, and a
+    damaged one does not stop a confirmation.
+    """
+    try:
+        previous = json.loads((store / FINAL_FILE).read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return []
+    except (OSError, ValueError, RecursionError):
+        return ["the previous final.json could not be read, so its changes cannot be listed"]
+    people = previous.get("participants") if isinstance(previous, dict) else None
+    lines = []
+    for who, entry in (people.items() if isinstance(people, dict) else ()):
+        criteria = entry.get("criteria") if isinstance(entry, dict) else None
+        for cid, old in (criteria.items() if isinstance(criteria, dict) else ()):
+            if not (isinstance(old, dict) and old.get("changed_by_trainer") is True):
+                continue
+            now = final_people.get(who, {}).get("criteria", {}).get(cid)
+            if now is not None and now["changed_by_trainer"] and now["points"] == old.get("points"):
+                continue
+            state = "not in this confirmation" if now is None else f"now {now['points']}"
+            lines.append(f"{short(who)}:{short(cid)} was {short(old.get('points'))}, {state}: "
+                         f"{short(old.get('reason'))}")
+    return lines
+
+
 def check_proposal(proposal: Any) -> None:
     """A proposal.json that parses but is not one is a message, not a KeyError."""
     def damaged(why: str) -> GradeError:
@@ -1722,7 +1764,7 @@ def cmd_confirm(args: argparse.Namespace) -> int:
             + "\n  ".join(stale))
 
     people = proposal["participants"]
-    live = {r.participant for r in list_branches(cache_dir(repo), args.module).participants}
+    live = {r.participant: r.commit for r in list_branches(cache_dir(repo), args.module).participants}
     for who in excluded:
         if who not in people:
             if who not in live:
@@ -1780,7 +1822,7 @@ def cmd_confirm(args: argparse.Namespace) -> int:
         gate = gate_result({n: {"passed": v["passed"], "gate": p["validators"][n]["gate"]}
                             for n, v in validators.items()}, gating)
         total = sum(v["points"] for v in validators.values()) + sum(c["points"] for c in criteria.values())
-        final_people[who] = {"validators": validators, "criteria": criteria, "gate": gate,
+        final_people[who] = {"commit": p["commit"], "validators": validators, "criteria": criteria, "gate": gate,
                              "total": total, "max_total": p["max_total"]}
     final = {
         "module": proposal["module"],
@@ -1788,11 +1830,13 @@ def cmd_confirm(args: argparse.Namespace) -> int:
         "confirmed_by": by,
         "confirmed_at": now_iso(),
         "participants": final_people,
-        "not_graded": {w: people[w]["reason"] if w in people else
-                       "excluded by the trainer; the proposal does not cover this branch"
+        "not_graded": {w: {"reason": people[w]["reason"], "commit": people[w]["commit"]} if w in people else
+                       {"reason": "excluded by the trainer; the proposal does not cover this branch",
+                        "commit": live.get(w)}
                        for w in excluded},
     }
     refuse_work_tree(store)
+    unrepeated = unrepeated_changes(store, final_people)
     kept = archive_previous(store)
     path = store / FINAL_FILE
     write_json_private(path, final)
@@ -1815,6 +1859,11 @@ def cmd_confirm(args: argparse.Namespace) -> int:
             print(f"{w}: excluded by the trainer, not graded")
     if ranking and ranking[0]["tied"]:
         print("the top place is a tie: choosing the start branch is the trainer's; final.json stores no winner.")
+    if unrepeated:
+        print("the previous confirmation changed these, and this one does not repeat them; nothing "
+              "is carried over, so to keep one, confirm again with its --change:")
+        for line in unrepeated:
+            print(f"  {line}")
     if kept:
         print(f"previous confirmation kept: {kept}")
     print(f"final: {path}")
@@ -1908,7 +1957,9 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     # A stream that is not UTF-8 must not stop a run over a character in a bundle's name.
     if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(errors="backslashreplace")
+        # Line by line even into a file or a pipe, because a run takes hours and whoever
+        # started it in the background reads this to follow it.
+        sys.stdout.reconfigure(errors="backslashreplace", line_buffering=True)
     args = build_parser().parse_args(argv)
     try:
         return args.func(args)

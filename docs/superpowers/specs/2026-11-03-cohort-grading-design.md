@@ -37,10 +37,11 @@ grade: an assessment records outcomes, not points.
   gives the rest, and the deterministic share is the larger.
 - **The AI proposes and the trainer decides.** Only grades the trainer confirms are final. This
   is also the human decision GDPR Art. 22 asks for.
-- **Participant code runs in a container**, with the network on, because the modules teach
-  agents that call external services.
+- **Participant code runs in a container**, with the network as declared: a module that teaches
+  agents calling external services turns it on.
 - **The module gate** (a module is passed when its functional requirement is technically met)
-  is a set of validators. It never blocks the participant; it is recorded at the checkpoint.
+  is its gate validators and any gate criteria of its rubric (section 2.3). It never blocks the
+  participant; it is recorded at the checkpoint.
 - **Exam mode is a per-lesson flag**, as many per bundle as a course needs. Outside an exam
   lesson the participant's levels decide how much the tutor helps.
 
@@ -171,7 +172,9 @@ result before the next.
 2. **Run.** For each confirmed branch, `belay-grade run` checks out a fresh temporary copy and
    runs the bundle's `grading.validators` in a container (section 4). It records, per
    validator, passed or failed, its output (truncated to a fixed size), and whether it is a gate
-   validator. This step has no AI judgement.
+   validator. This step has no AI judgement. A run takes far longer than a tutor's shell tool
+   allows, so its warnings come before the first branch starts, its output is line-buffered, and
+   `run.json` grows after each branch; the protocol has the tutor run it in the background.
 3. **Judge.** The tutor judges **every branch against every rubric criterion in one pass**,
    side by side, so the standard does not drift from one participant to the next. Per criterion
    and branch it records points (an integer from 0 to the criterion's points), and evidence:
@@ -239,16 +242,19 @@ therefore comes from what the code cannot reach on the trainer's machine:
 - **`belay-grade` refuses to write inside any Git work tree**, so grades cannot be committed by
   accident.
 - **Re-grading** writes a new proposal. `final.json` is replaced only by a new confirmation, and
-  the previous one is kept beside it with its date.
+  the previous one is kept beside it with its date. A confirmation starts from the proposal, so the
+  trainer's earlier changes are not carried over; `confirm` prints each one it does not repeat.
 - **`belay-grade forget <cohort>`** deletes a cohort's grades, its working files and the cache. How long grades are kept is the
   trainer's decision; the protocol says so, because it is a data-protection question.
 - The certificate (belay#95) reads the `final.json` of every module of a cohort from here.
 
-The `final.json` shape is the contract belay#95 builds on: per participant, per validator
+The `final.json` shape is the contract belay#95 builds on: per participant `commit`, per validator
 `{passed, points}`, per criterion `{points, proposed_points, max, evidence, changed_by_trainer, reason}`, `gate`,
 `total`, `max_total`; and at the top `module`, `bundle_version`, `confirmed_by`, `confirmed_at`,
 `not_graded`.
 
+- **`commit` is the commit that was graded**, the value `proposal.json` holds under the same key, so a
+  grade can be traced to the code it judged after the branch has moved.
 - **`proposed_points` is always the AI's proposed value**, whether or not the trainer changed the
   criterion, because `proposal.json` is overwritten by a later proposal and the record exists to
   audit a human decision. `points` is the confirmed value.
@@ -257,7 +263,7 @@ The `final.json` shape is the contract belay#95 builds on: per participant, per 
   proposal, with the reason: no total, no rank, gate `null`. A timeout is the participant's own
   result and stays gradable. `confirm` refuses while any participant is ungradable, unless the
   trainer passes `--exclude <participant>`; an excluded participant is absent from `participants`
-  and listed in `not_graded` as `{participant: reason}`. The usual fix is to repair the fault and run
+  and listed in `not_graded` as `{participant: {reason, commit}}`. The usual fix is to repair the fault and run
   again. `--exclude` also takes a participant with a branch the proposal does not cover, the entries
   removed at step 1, with a reason saying the trainer excluded them. It refuses a gradable participant
   the proposal covers.
@@ -272,8 +278,8 @@ New checks take the next free numbers. All are silent when the key is absent.
 | Check | Mode | Reports |
 |---|---|---|
 | grading shape | both | `grading` not a mapping; an unknown key; `image` not a non-empty string; `network` not a boolean; `env` not a list of valid variable names; `timeout_minutes` not a positive integer |
-| grading validators | both | a name that is not a declared validator; a validator of kind `manual` or `git-diff`; `points` not a positive integer; `gate` not a boolean |
-| grading rubric | both | a criterion without `id`, positive integer `points`, or a non-empty `standard`; a duplicate `id`; `paths` not a non-empty list of entries that pass the path rules of check 45, wildcards unvalidated; `gate` not a boolean |
+| grading validators | both | a name that is not a declared validator; a validator of kind `manual` or `git-diff`; `points` not a positive integer; `gate` not a boolean; a validator of kind `command` with no `image` |
+| grading rubric | both | a criterion without `id`, positive integer `points`, or a non-empty `standard`; a duplicate `id`; an `id` that is not `[a-z0-9-]+` or that equals the name of a validator in `grading.validators`, because `confirm --change` could not address it; `paths` not a non-empty list of entries that pass the path rules of check 45, wildcards unvalidated; `gate` not a boolean |
 | grading share | both | the validator points less than 60% of the total |
 | exam | both | `exam` not a boolean |
 

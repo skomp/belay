@@ -1249,12 +1249,12 @@ so **participants can read the criteria from the start**. They never see anyone'
 
 | Key | Meaning |
 |---|---|
-| `image` | The container every `command` validator runs in. A non-empty string, needed by a scheme with a `command`. |
+| `image` | The container every `command` validator runs in. A non-empty string, needed when any validator in `grading.validators` is of kind `command` (check 48). |
 | `network` | `true` to give the container a network. Default `false`, and it then runs with `--network none`. |
 | `env` | Names of the trainer's environment variables passed in, and no others. A missing one is a warning. |
 | `timeout_minutes` | A positive integer: the limit per branch, for all its validators together. Default 15. |
 | `validators` | The deterministic share: a map from a name in the manifest's `validators` to `points` (a positive integer) and optional `gate` (a boolean). |
-| `rubric` | The judged share: a list of criteria, each with a unique `id`, positive integer `points`, a `standard`, optional `paths` and optional `gate`. |
+| `rubric` | The judged share: a list of criteria, each with a unique `id`, positive integer `points`, a `standard`, optional `paths` and optional `gate`. An `id` matches `[a-z0-9-]+` and is not the name of a validator in `grading.validators`, because the trainer changes a criterion's points by naming it (check 49). |
 
 Unknown keys, wrong types and the rest are the findings of checks 47-50.
 
@@ -1317,6 +1317,15 @@ cost of that and do not remove it, which is one reason a person confirms every g
   install and use them in one command.
 - **Nothing of the bundle is mounted.** A command cannot run a file your bundle ships. Your tools and
   their settings live in the image, which the branch cannot change.
+- **A validator a lesson names runs in two places.** A lesson's `validators` have the participant's
+  tutor run it in their own session, in the workspace root and outside the image; `grading` runs it in
+  the container. So its command has to work in both. Nothing it needs may come only from the image,
+  neither a variable nor a file, so it sets what it needs itself, as `[env, PYTHONPATH=src, python, -m,
+  pytest, ...]` does, and the participant's machine has to have the tool. A validator no lesson names
+  runs only in the container.
+- **A layout the commands do not expect fails as the participant's own result.** Tests that cannot
+  import the code, or a test folder that is not where the command looks, end with an ordinary non-zero
+  status, so nothing reports a fault. Fix the layout in your lessons, and say so in them.
 - **A command that cannot start is a fault and not a score.** Exit status 125, 126 or 127 makes the
   participant ungradable until the trainer repairs it, so a tool missing from the image stops
   every participant. Any other non-zero status is an ordinary failure.
@@ -1337,24 +1346,25 @@ cost of that and do not remove it, which is one reason a person confirms every g
 
 Everything named here is this example's own choice; the format names no tool. The image is
 built and published by the course, with Python, `pytest`, `pytest-cov`, `cosmic-ray`, the module's
-dependencies, `/opt/grading/cosmic-ray.toml`, which sets `module-path = "src"` and the test command,
-and `PYTHONPATH=/workspace/src`. The last is needed: `-c /dev/null` discards the participant's own
-`pythonpath` setting, so tests importing from `src/` otherwise stop at a collection error, exit 2, which
-fails every participant as their own result. The lessons therefore fix the `src/` and `tests/` layout.
-Tried on a small project with pytest 9.2.0, pytest-cov 7.1.0 and cosmic-ray 8.7.0, and none of it ran
-in a container.
+dependencies and `/opt/grading/cosmic-ray.toml`, which sets `module-path = "src"` and the same test
+command as `own-tests-pass`. Each command sets `PYTHONPATH=src` itself: `-c /dev/null` discards the
+participant's own `pythonpath` setting, so tests importing from `src/` otherwise stop at a collection
+error, exit 2, which fails every participant as their own result. The lessons therefore fix the `src/`
+and `tests/` layout: with the code elsewhere the same command exits 2, and with the tests elsewhere it
+exits 4. Tried on a small project with pytest 9.2.0, pytest-cov 7.1.0 and cosmic-ray 8.7.0, and none of
+it ran in a container.
 
 ```yaml
 validators:
   own-tests-pass:
     kind: command
-    command: [python, -m, pytest, -c, /dev/null, --rootdir=., tests]
+    command: [env, PYTHONPATH=src, python, -m, pytest, -c, /dev/null, --rootdir=., tests]
   coverage-60:
     kind: command
-    command: [python, -m, pytest, -c, /dev/null, --rootdir=., --cov=src, --cov-config=/dev/null, --cov-fail-under=60, tests]
+    command: [env, PYTHONPATH=src, python, -m, pytest, -c, /dev/null, --rootdir=., --cov=src, --cov-config=/dev/null, --cov-fail-under=60, tests]
   coverage-80:
     kind: command
-    command: [python, -m, pytest, -c, /dev/null, --rootdir=., --cov=src, --cov-config=/dev/null, --cov-fail-under=80, tests]
+    command: [env, PYTHONPATH=src, python, -m, pytest, -c, /dev/null, --rootdir=., --cov=src, --cov-config=/dev/null, --cov-fail-under=80, tests]
   mutation-60:
     kind: command
     command: [sh, -c, "cosmic-ray init /opt/grading/cosmic-ray.toml /tmp/mutants.sqlite && cosmic-ray exec /opt/grading/cosmic-ray.toml /tmp/mutants.sqlite && cr-rate --fail-over 40 /tmp/mutants.sqlite"]
@@ -1403,6 +1413,8 @@ grading:
   times the default because it runs the tests once per mutant.
 - **`exam-design` points at the folder the exam lesson names** (section 6, **Writing an exam
   lesson**), because a branch does not record which lesson produced which file.
+- **`own-tests-pass` is the validator that lesson names**, so it also runs in the participant's own
+  session. `mutation-60` reads a file only the image has, so no lesson can name it.
 
 ---
 
@@ -2132,6 +2144,8 @@ looks for them there and nowhere else.
 - `exam/07/` holds a design note naming the budget and a measurement against it.
 ```
 
+- **A validator the lesson names also runs outside the image**, in the participant's own session
+  (section 2, **What a command runs in**).
 - **The body alone has to be enough.** No `material` file is loaded and no level guides anyone, and
   the tutor presents what the body states and adds no explanation of its own. So teach what the exam
   uses in an earlier lesson, or state it in the body. `teaches` changes nothing here.

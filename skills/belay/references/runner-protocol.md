@@ -3142,6 +3142,12 @@ what would go in unless they change it: ask. Setting a separate key means a sess
 which then runs on that key itself. The value comes from the environment this session was started in:
 never put one on a command line or in a file.
 
+**`network: true` reaches more than the internet.** It is the runtime's ordinary network, so
+participant code also reaches the trainer's local network and, on a cloud machine, its metadata
+service, which can hand out that machine's credentials. Say so whenever `grading.network` is true,
+so that the trainer picks where to grade accordingly: a machine with nothing to reach around it, and
+not one inside an office network or holding a cloud role.
+
 **Say before `run` that the real container path is not yet verified**, and point the trainer to
 20.9, for as long as that section stands.
 
@@ -3171,8 +3177,9 @@ because `propose` asks for their judgement. To remove one after a run, the train
 ### 20.3 Step 2: run
 
 `belay-grade run --bundle <dir> <repo> <module-id>` runs the scheme's validators on each listed
-branch and stores the results in `run.json`. It prints the path as `results:`; that file's
-directory is **the store** for the rest of this section. No judgement of yours enters this
+branch and stores the results in `run.json`. It prints the path as `results:`, before the first
+branch and again at the end; that file's directory is **the store** for the rest of this section.
+No judgement of yours enters this
 step. Participant code runs only in a container, and with no container runtime the step stops
 and nothing has run: help the trainer install one, and never run a validator yourself or
 offer to. `bundle-format.md` section 2, **What a command runs in**, has what a container gets.
@@ -3187,14 +3194,28 @@ in `--only`, or run in full again. Signals and Ctrl-C stop the container and rem
 checkout. `kill -9` of `belay-grade` leaves both: tell the trainer to look for a container named
 `belay-grade-<hex>` and a temporary directory `belay-grade-*`, which holds participant code.
 
-**Read what it says before going on:**
+**A run outlasts your shell tool, so never hold one in the foreground.** The time limit is per
+branch, up to 45 minutes each in the format's worked example, and a shell tool cuts off far sooner.
+Start the run in the background with its output kept, or run one `--only` at a time. Follow it by
+reading that output, which holds the warnings before any branch starts and each branch's lines when
+that branch finishes, and `run.json`, whose `branches` grows after each branch. Until the first
+branch finishes, `run.json` is still the previous run's.
+
+**Never retry a full run because a tool timed out.** The retry starts empty, so it discards what the
+first one finished, and if the first is still running the two overwrite each other. Find out
+whether it is still running, and wait for it if it is. If it stopped, run `--only` for each
+participant missing from `run.json`. If it stopped before any branch finished, nothing was replaced, and
+a full run loses nothing.
+
+**Read what it says before going on.** Warnings about the scheme come before the first branch starts,
+so read them as soon as the run is under way:
 
 | It says | What it is | What to do |
 |---|---|---|
 | `FAIL: exit status <n>` | the participant's result | nothing; it earns no points |
 | `stopped:` or `not run:` and the branch's time limit | the participant's result: the remaining validators failed, and the branch stays gradable. If every branch times out, the limit is too small | tell the trainer when it looks like the limit and not the code. Raising it is a change to the bundle |
 | exit status 125, 126 or 127, a runtime that could not start, or `checkout failed:` | **a runtime fault, and not a score** (below). `run` exits 1 | repair and run again |
-| `<variable> is declared in grading.env and is not set` | a run without the key, where every test needing it fails as though the participant's | stop; the trainer starts a session with it set (20.1), and you run again |
+| `<variable> is declared in grading.env and is not set` | a run without the key, where every test needing it fails as though the participant's | stop, with a plain `kill` if it is in the background; the trainer starts a session with it set (20.1), and you run again |
 | sets `proxies` | docker adds a proxy address, and any password in it, to every container, undeclared. The value is never shown | tell the trainer; they remove the key from that file for grading if it holds a credential |
 | `could not remove the checkout` | participant code left on disk | tell the trainer the path; they remove it |
 
@@ -3281,13 +3302,20 @@ the changes and the reasons they stated, in their words, and `--by` as the name 
 propose a reason, and do not argue for your points beyond showing the evidence.
 
 - **`--change <participant>:<criterion>=<points>:<reason>`**, repeated. A validator cannot be changed,
-  and that refusal is correct: it is deterministic. Every `confirm` starts from `proposal.json`, so
-  confirming again repeats every change that is to stay.
+  and that refusal is correct: it is deterministic.
+- **Before confirming again, read the previous `<store>/final.json`.** Every `confirm` starts from
+  `proposal.json` and nothing is carried over, so a change that is to stay has to be repeated, and a
+  dropped one can flip a gate. Show the trainer each criterion there with `changed_by_trainer: true`,
+  with its points and reason, and ask which stay. A change whose points the new proposal already gives
+  cannot be repeated, because `--change` refuses it as no change: the points stand and the reason goes,
+  so tell the trainer that too. Afterwards `confirm` prints each earlier change it did not repeat.
+  Show those to the trainer as well. If one surprises them, confirm again with it.
 - **`--exclude <participant>`**, repeated, is for two cases: an entry the trainer removed from the
   list, whose branch the proposal does not cover (20.2), and an ungradable participant, offered only
   after a repair and a new run have failed or the trainer has ruled them out. It stays refused for a
   gradable participant the proposal covers. An excluded participant is absent from `participants` and
-  listed in `not_graded`, with the fault's reason or one saying the trainer excluded them. An exclusion
+  listed in `not_graded`, with their commit and the fault's reason or one saying the trainer excluded
+  them. An exclusion
   does not become a score later without a new run, a new proposal and a new confirmation.
 - **The gate is computed from the confirmed points**, so a change can flip it. A module with no
   gate records `null`, which means not applicable, and never say it was passed.
@@ -3356,6 +3384,9 @@ small test repository of their own, and reports what they find at
 6. **`REGISTRY_AUTH_FILE` and `CONTAINERS_STORAGE_CONF`.** Neither reaches the runtime, which gets a
    short list of variables. A private registry login or a custom storage configuration named
    through them is not seen, so a `pull` can fail or use different storage.
+7. **`git` as container root on a mount the trainer owns.** A validator that runs git as root can
+   stop at git's `detected dubious ownership`, because the checkout belongs to another user. Git exits
+   128, which would read as the participant's failure and not as a fault.
 
 ### 20.10 Failure modes to refuse
 

@@ -4356,9 +4356,12 @@ def _grading(root: Path, body: str) -> None:
     assert isinstance(parsed, dict) and "grading" in parsed, "grading did not survive the reader"
 
 
-def _grading_valid_with(validators: str = "", rubric: str = "", head: str = "") -> str:
+def _grading_valid_with(validators: str = "", rubric: str = "", head: str = "",
+                        image: str = "python:3.12-slim") -> str:
+    """A valid block, plus one change. The default validators need an image (check 48)."""
     return (
         head
+        + (f"\n  image: {image}" if image and "image:" not in head else "")
         + "\n  validators:\n"
         + (validators or "    cargo-test: { points: 60, gate: true }\n    has-test: { points: 20 }\n")
         + "  rubric:\n"
@@ -4529,6 +4532,41 @@ def m_grading_rubric_paths_dotdot(root: Path) -> None:
 def m_grading_rubric_paths_backslash(root: Path) -> None:
     _grading(root, _grading_valid_with(rubric=(
         "    - id: a\n      points: 10\n      standard: One.\n      paths: ['src\\\\x']\n")))
+
+
+def m_grading_rubric_id_colon(root: Path) -> None:
+    _grading(root, _grading_valid_with(rubric=(
+        '    - id: "q:1"\n      points: 20\n      standard: One.\n')))
+
+
+def m_grading_rubric_id_upper(root: Path) -> None:
+    _grading(root, _grading_valid_with(rubric=(
+        "    - id: Design\n      points: 20\n      standard: One.\n")))
+
+
+def m_grading_rubric_id_is_validator(root: Path) -> None:
+    _grading(root, _grading_valid_with(rubric=(
+        "    - id: cargo-test\n      points: 20\n      standard: One.\n")))
+
+
+def m_grading_rubric_id_names_ungraded_validator(root: Path) -> None:
+    # `explains-choice` is declared in the manifest and not graded here, so
+    # --change has no such validator and takes the name as the criterion.
+    _grading(root, _grading_valid_with(rubric=(
+        "    - id: explains-choice\n      points: 20\n      standard: One.\n")))
+
+
+def m_grading_rubric_id_digits_and_hyphen(root: Path) -> None:
+    _grading(root, _grading_valid_with(rubric=(
+        "    - id: q-1\n      points: 20\n      standard: One.\n")))
+
+
+def m_grading_command_no_image(root: Path) -> None:
+    _grading(root, _grading_valid_with(image=""))
+
+
+def m_grading_file_kinds_no_image(root: Path) -> None:
+    _grading(root, _grading_valid_with(validators="    has-test: { points: 80 }\n", image=""))
 
 
 def _grading_split(root: Path, det: int, rubric: int) -> None:
@@ -5741,6 +5779,12 @@ CASES: list[Case] = [
          'grading.timeout_minutes', where='tutorial.yaml'),
     Case("47: an INSTANCE with an unknown key too", 47, "cli", "instance", m_grading_unknown_key,
          "unknown key 'timeout'", where='tutorial.yaml'),
+    Case("48: a command validator with no image", 48, "cli", "bundle", m_grading_command_no_image,
+         "grading has no 'image', and 'cargo-test'", where='tutorial.yaml'),
+    Case("48: an INSTANCE with a command validator and no image too", 48, "cli", "instance",
+         m_grading_command_no_image, "grading has no 'image'", where='tutorial.yaml'),
+    Case("48: only file validators need no image", 48, "cli", "bundle",
+         m_grading_file_kinds_no_image, kind="silent"),
     Case("48: an undeclared validator", 48, "cli", "bundle", m_grading_validator_undeclared,
          "'nonesuch' is not a declared validator", where='tutorial.yaml (grading.validators.nonesuch)'),
     Case("48: a manual validator", 48, "cli", "bundle", m_grading_validator_manual,
@@ -5771,6 +5815,18 @@ CASES: list[Case] = [
          'duplicate', where='tutorial.yaml (grading.rubric[a])'),
     Case("49: an unknown key in a criterion", 49, "cli", "bundle", m_grading_rubric_unknown_key,
          "unknown key 'weight'", where='tutorial.yaml (grading.rubric[a])'),
+    Case("49: an id --change cannot parse", 49, "cli", "bundle", m_grading_rubric_id_colon,
+         "'q:1' must match [a-z0-9-]+", where='tutorial.yaml (grading.rubric[q:1])'),
+    Case("49: an id with a capital letter", 49, "cli", "bundle", m_grading_rubric_id_upper,
+         "'Design' must match [a-z0-9-]+", where='tutorial.yaml (grading.rubric[Design])'),
+    Case("49: an id equal to a graded validator", 49, "cli", "bundle", m_grading_rubric_id_is_validator,
+         "'cargo-test' is also a validator", where='tutorial.yaml (grading.rubric[cargo-test])'),
+    Case("49: an INSTANCE with such an id too", 49, "cli", "instance", m_grading_rubric_id_is_validator,
+         "'cargo-test' is also a validator", where='tutorial.yaml (grading.rubric[cargo-test])'),
+    Case("49: an id equal to a validator that is not graded is silent", 49, "cli", "bundle",
+         m_grading_rubric_id_names_ungraded_validator, kind="silent"),
+    Case("49: an id of digits and hyphens is silent", 49, "cli", "bundle",
+         m_grading_rubric_id_digits_and_hyphen, kind="silent"),
     Case("49: gate: true on a criterion is silent", 49, "cli", "bundle",
          m_grading_rubric_gate_true, kind="silent"),
     Case("49: gate: true on a criterion in an INSTANCE is silent", 49, "cli", "instance",
@@ -10413,6 +10469,20 @@ def test_ledger_checks_status() -> None:
            f"{noisy!r}, status = {report.status.get(40)!r}")
 
 
+def test_grading_empty_image_is_one_finding() -> None:
+    """A present and malformed image is check 47's finding and not also check 48's."""
+    print("\ncheck 48: an image that is present and empty:")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = fresh("cli", Path(tmpdir))
+        m_grading_image_empty(root)
+        report = vb.validate(root, "bundle")
+    record([f for f in report.findings if f.check == 47],
+           "the empty image is check 47's finding (positive control)",
+           f"{report.findings!r}")
+    record(not [f for f in report.findings if f.check == 48],
+           "check 48 adds no finding", f"{report.findings!r}")
+
+
 def test_grading_with_malformed_manifest_validators() -> None:
     """Check 48 adds no false undeclared-name finding over a malformed manifest."""
     print("\ncheck 48: a malformed manifest 'validators' and a valid grading:")
@@ -10993,6 +11063,7 @@ def main() -> int:
     test_ledger_checks_status()
     test_task_rows_check_status()
     test_grading_with_malformed_manifest_validators()
+    test_grading_empty_image_is_one_finding()
     test_tasks_mode()
     test_the_total_is_reproducible_from_this_commit()
     test_levelled_programme_is_clean_end_to_end()

@@ -172,8 +172,10 @@ CHECKS: dict[int, str] = {
     "names, timeout_minutes a positive integer",
     48: "grading.validators, where declared, names declared validators of kind "
     "command, file-exists or file-contains (never manual or git-diff), each "
-    "with positive integer points and an optional boolean gate",
-    49: "grading.rubric, where declared, holds criteria with a unique id, "
+    "with positive integer points and an optional boolean gate, and any "
+    "command among them has a grading.image",
+    49: "grading.rubric, where declared, holds criteria with a unique id "
+    "of [a-z0-9-]+ that names no graded validator, "
     "positive integer points, a non-empty standard, optional paths that "
     "are non-empty relative workspace globs and an optional boolean gate",
     50: "grading: validator points are at least 60% of the total points",
@@ -5987,6 +5989,9 @@ GRADING_RUBRIC_KEYS = ("id", "points", "standard", "paths", "gate")
 # uncommitted changes that a fresh checkout does not have.
 GRADING_BARRED_KINDS = ("manual", "git-diff")
 GRADING_MIN_DETERMINISTIC_PERCENT = 60
+# A criterion id is what `belay-grade confirm --change` addresses, as
+# <participant>:<criterion>=<points>:<reason>.
+_GRADING_CRITERION_ID_RE = re.compile(r"[a-z0-9-]+")
 EXAM_KEY = "exam"
 ENV_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 
@@ -6006,9 +6011,9 @@ def _grading_mapping(manifest: Any) -> dict | None:
 def workspace_glob_problem(value: Any) -> str | None:
     """Why a workspace glob is unusable, or None.
 
-    The ownership dialect (bundle-format.md section 2): globs are relative to
-    the learner's workspace. This repository has no glob parser to reuse -
-    check 10 only tests that `learner_owned` is non-empty - so this applies
+    Globs are relative to the learner's workspace. The format defines no glob
+    dialect (bundle-format.md section 2) and this repository has no glob parser
+    to reuse - check 10 only tests that `learner_owned` is non-empty - so this applies
     the path rules check 45 applies to `own_tasks` (relative, '/' separated,
     no empty, '.' or '..' component; one trailing '/' tolerated) and leaves
     the wildcard syntax alone, because the document defines none.
@@ -6029,7 +6034,7 @@ def workspace_glob_problem(value: Any) -> str | None:
 
 
 def check_grading_shape(manifest: Any, report: Report) -> None:
-    """Check 47 - both modes (the grader reads the instance's copy too)."""
+    """Check 47 - both modes (an instance's manifest carries a copy of the key)."""
     if not isinstance(manifest, dict) or GRADING_KEY not in manifest:
         report.na(47, "the bundle declares no grading")
         return
@@ -6102,6 +6107,16 @@ def check_grading_validators(manifest: Any, report: Report) -> None:
     # one false "undeclared" per entry, so those tests are skipped.
     names_unchecked = declared is not None and not isinstance(declared, dict)
     declared = declared if isinstance(declared, dict) else {}
+    # An `image` that is present and malformed is check 47's finding.
+    if "image" not in grading:
+        commands = [n for n, d in declared.items()
+                    if n in entries and isinstance(d, dict) and d.get("kind") == "command"]
+        if commands:
+            report.add(
+                48, "tutorial.yaml",
+                f"grading has no 'image', and {', '.join(map(repr, commands))} of "
+                f"kind 'command' can run only in one; belay-grade run refuses this",
+            )
     for name, entry in entries.items():
         where = f"tutorial.yaml (grading.validators.{name})"
         definition = declared.get(name)
@@ -6156,6 +6171,8 @@ def check_grading_rubric(manifest: Any, report: Report) -> None:
         report.ran(49, "declared, malformed")
         return
     seen: set[str] = set()
+    graded = grading.get("validators")
+    graded = graded if isinstance(graded, dict) else {}
     for index, entry in enumerate(rubric):
         label = f"[{index}]"
         if isinstance(entry, dict) and isinstance(entry.get("id"), str) and entry["id"].strip():
@@ -6177,6 +6194,20 @@ def check_grading_rubric(manifest: Any, report: Report) -> None:
             report.add(49, where, f"duplicate criterion id {cid!r}")
         else:
             seen.add(cid)
+        if isinstance(cid, str) and cid.strip():
+            if not _GRADING_CRITERION_ID_RE.fullmatch(cid):
+                report.add(
+                    49, where,
+                    f"the criterion id {cid!r} must match [a-z0-9-]+, or a trainer's "
+                    f"`belay-grade confirm --change` cannot address it",
+                )
+            if cid in graded:
+                report.add(
+                    49, where,
+                    f"the criterion id {cid!r} is also a validator in "
+                    f"grading.validators, and `belay-grade confirm --change` refuses "
+                    f"that name as a validator, so a trainer could never change it",
+                )
         if not _positive_int(entry.get("points")):
             report.add(49, where, f"points is {entry.get('points')!r}; it must be a positive integer")
         standard = entry.get("standard")
@@ -6516,8 +6547,9 @@ def validate(target: Path, mode: str) -> Report:
     # read from the instance's copy of tutorial.yaml too.
     check_levels_key(manifest_dict, report)
     check_starts_from(manifest_dict, report)
-    # Checks 47-50, both modes, for check 34's reason: the grader reads the
-    # instance's copy of tutorial.yaml.
+    # Checks 47-50, both modes. The grader reads a trusted bundle and no instance
+    # (runner-protocol.md 20.1); an instance is checked because its tutorial.yaml
+    # carries a copy of the key, so the same defect gets the same finding there.
     check_grading_shape(manifest_dict, report)
     check_grading_validators(manifest_dict, report)
     check_grading_rubric(manifest_dict, report)
