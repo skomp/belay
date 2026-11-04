@@ -652,10 +652,12 @@ LIMITATIONS = """What a pass does and does not mean
       (docs/superpowers/specs/2026-09-14-validator-trust-and-setup-checks-design.md
       section 2.1) makes "these commands have been checked" a defect in its
       own right.
-    nothing here executes a validator, and nothing in this repository does.
-      The tutor runs the declared argument list through its own host, where
-      that host's permission layer sees it. That is the only boundary there
-      is, and moving execution into a script here would destroy it.
+    nothing here executes a validator, and in a learner's session nothing in
+      this repository does. The tutor runs the declared argument list through
+      its own host, where that host's permission layer sees it. That is the
+      only boundary there is, and moving execution into a script here would
+      destroy it. The one script that starts a validator is a trainer's
+      `belay-grade run`, only in a container.
 
   The `disclosure:` section:
     it is NOT A CHECK. It produces no finding and no warning, it takes no

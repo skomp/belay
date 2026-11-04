@@ -112,7 +112,12 @@ In an exam lesson, whatever the participant's level:
 
 - the help ladder stops at rung 3, and the tutor reveals no solution;
 - the tutor says at the start that the lesson is an exam, and what that means for help;
-- levelled material and level-dependent guidance do not apply.
+- levelled material and level-dependent guidance do not apply; the tutor presents what the lesson
+  body states and adds no explanation of its own;
+- `ownership_policy` is narrowed: the tutor does not write the work under `on-request` or
+  `unrestricted`, because that hands over a solution. Placing `supplies` stays;
+- no generated or side lesson on what the exam's work uses, no optional lesson offered or re-offered,
+  and no `required_for`, until the exam lesson has ended.
 
 A bundle may have any number of exam lessons, or none. A final-project bundle is a bundle whose
 lessons are exam lessons; there is no separate final-project concept here.
@@ -159,11 +164,10 @@ result before the next.
 
 1. **Collect.** `belay-grade collect <repo> <module-id>` fetches the cohort repository into a
    local cache and lists the branches matching `*/<module-id>`: participant (the part before
-   the slash), branch, last commit and its date. The trainer confirms the list. Removing an
-   entry is not supported through to `confirm` today: `run --only` narrows a run, but `confirm`
-   refuses while the cache holds a branch of the module that the proposal does not cover, so the
-   branch has to go from the repository first. Branches that match no convention are listed
-   separately and never graded.
+   the slash), branch, last commit and its date. The trainer confirms the list or removes
+   entries: `run --only` names those kept, and `confirm --exclude` names those removed, because
+   `confirm` otherwise refuses while the cache holds a branch of the module that the proposal does
+   not cover. Branches that match no convention are listed separately and never graded.
 2. **Run.** For each confirmed branch, `belay-grade run` checks out a fresh temporary copy and
    runs the bundle's `grading.validators` in a container (section 4). It records, per
    validator, passed or failed, its output (truncated to a fixed size), and whether it is a gate
@@ -172,7 +176,7 @@ result before the next.
    side by side, so the standard does not drift from one participant to the next. Per criterion
    and branch it records points (an integer from 0 to the criterion's points), and evidence:
    quoted code, specification text or validator output, with file and line.
-4. **Propose.** `belay-grade propose` writes the proposal: per participant the validator
+4. **Propose.** The tutor writes the draft into the judgement, and `belay-grade propose` writes the proposal: per participant the validator
    points, the rubric points with evidence, the gate result and the total; the ranking; and a
    draft of why the best solution is best and what the others lack. Nothing is final.
 5. **Confirm.** The trainer goes through the proposal and may change any criterion's points,
@@ -254,7 +258,9 @@ The `final.json` shape is the contract belay#95 builds on: per participant, per 
   result and stays gradable. `confirm` refuses while any participant is ungradable, unless the
   trainer passes `--exclude <participant>`; an excluded participant is absent from `participants`
   and listed in `not_graded` as `{participant: reason}`. The usual fix is to repair the fault and run
-  again.
+  again. `--exclude` also takes a participant with a branch the proposal does not cover, the entries
+  removed at step 1, with a reason saying the trainer excluded them. It refuses a gradable participant
+  the proposal covers.
 - **Gate** is `true`, `false`, or `null` when the module has no gate validator and no gate criterion.
 
 ---

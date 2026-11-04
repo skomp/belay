@@ -9,7 +9,7 @@ Usage:
     grade.py propose --bundle <dir> --judgement <file> <repo> <module-id>
         merge the validator results with the tutor's judgement: proposal.json
     grade.py confirm --bundle <dir> --by <name> [--change <p>:<criterion>=<points>:<reason>]...
-                     <repo> <module-id>
+                     [--exclude <p>]... <repo> <module-id>
         write final.json; the previous one is kept beside it as final.<date>.json
     grade.py forget <cohort>     delete one cohort's stored grades and cache
     grade.py --help
@@ -1604,8 +1604,13 @@ def parse_change(text: str) -> tuple[str, str, int, str]:
     return who, cid, int(pts), reason.strip()
 
 
-def changes_since(proposal: dict, scheme: Scheme, cache: Path, module: str) -> list[str]:
-    """What moved since the proposal. Reads the local cache only; it never fetches."""
+def changes_since(proposal: dict, scheme: Scheme, cache: Path, module: str,
+                  excluded: list[str]) -> list[str]:
+    """What moved since the proposal. Reads the local cache only; it never fetches.
+
+    A branch the proposal does not cover counts, so nobody is dropped by accident,
+    unless the trainer leaves it out by name with --exclude.
+    """
     stale = []
     if proposal.get("grading_hash") != scheme.grading_hash:
         stale.append("the bundle's `grading` block differs from the one the proposal was made under")
@@ -1618,8 +1623,9 @@ def changes_since(proposal: dict, scheme: Scheme, cache: Path, module: str) -> l
             stale.append(f"{who}'s branch is no longer in the cache")
         elif live[who] != p.get("commit"):
             stale.append(f"{who}'s branch moved: {str(p.get('commit'))[:12]} -> {live[who][:12]}")
-    for who in sorted(set(live) - set(proposal["participants"])):
-        stale.append(f"{who} has a branch the proposal does not cover")
+    for who in sorted(set(live) - set(proposal["participants"]) - set(excluded)):
+        stale.append(f"{who} has a branch the proposal does not cover; "
+                     "to leave it out on purpose, pass --exclude with that name")
     return stale
 
 
@@ -1698,7 +1704,7 @@ def cmd_confirm(args: argparse.Namespace) -> int:
     repo = checked_url(args.repo)
     store = store_dir(repo, args.module)
     by = args.by.strip()
-    if not by or len(by) > 200 or escape_name(by) != by:
+    if not by or len(by) > 200 or not by.isprintable():
         raise GradeError("--by must name who confirms: one line of printable text")
     scheme = load_scheme(Path(args.bundle))
     if scheme.module != args.module:
@@ -1707,7 +1713,8 @@ def cmd_confirm(args: argparse.Namespace) -> int:
         raise GradeError("there is no proposal for this module; run `belay-grade propose` first")
     proposal = read_json_file(store / PROPOSAL_FILE, "the proposal", JUDGEMENT_MAX_BYTES * 8)
     check_proposal(proposal)
-    stale = changes_since(proposal, scheme, cache_dir(repo), args.module)
+    excluded = list(dict.fromkeys(args.exclude or []))
+    stale = changes_since(proposal, scheme, cache_dir(repo), args.module, excluded)
     if stale:
         raise GradeError(
             "the proposal is stale, and nothing was confirmed (confirm reads the local cache and "
@@ -1715,14 +1722,16 @@ def cmd_confirm(args: argparse.Namespace) -> int:
             + "\n  ".join(stale))
 
     people = proposal["participants"]
-    excluded = list(dict.fromkeys(args.exclude or []))
+    live = {r.participant for r in list_branches(cache_dir(repo), args.module).participants}
     for who in excluded:
         if who not in people:
-            raise GradeError(f"--exclude names {escape_name(who)}, who is not in the proposal "
-                             f"({', '.join(people)})")
+            if who not in live:
+                raise GradeError(f"--exclude names {escape_name(who)}, who is not in the proposal "
+                                 f"({', '.join(people)}) and has no branch of this module in the cache")
+            continue
         if not people[who]["ungradable"]:
             raise GradeError(f"--exclude names {who}, who is gradable; only a participant with a "
-                             "runtime fault can be excluded")
+                             "runtime fault, or a branch the proposal does not cover, can be excluded")
     open_faults = [w for w, p in people.items() if p["ungradable"] and w not in excluded]
     if open_faults:
         raise GradeError(
@@ -1779,14 +1788,16 @@ def cmd_confirm(args: argparse.Namespace) -> int:
         "confirmed_by": by,
         "confirmed_at": now_iso(),
         "participants": final_people,
-        "not_graded": {w: people[w]["reason"] for w in excluded},
+        "not_graded": {w: people[w]["reason"] if w in people else
+                       "excluded by the trainer; the proposal does not cover this branch"
+                       for w in excluded},
     }
     refuse_work_tree(store)
     kept = archive_previous(store)
     path = store / FINAL_FILE
     write_json_private(path, final)
     ranking = rank({w: p["total"] for w, p in final_people.items()})
-    print(f"confirmed by {escape_name(by)}; {len(applied)} change(s)")
+    print(f"confirmed by {by}; {len(applied)} change(s)")
     for (who, cid), (pts, reason) in applied.items():
         print(f"  changed {who}:{cid} {people[who]['criteria'][cid]['points']} -> {pts}: {escape_name(reason)}")
     shown = {w: {**p, "validator_points": sum(v["points"] for v in p["validators"].values()),
@@ -1795,9 +1806,13 @@ def cmd_confirm(args: argparse.Namespace) -> int:
                  "validators": people[w]["validators"]}
              for w, p in final_people.items()}
     for w in excluded:
-        shown[w] = people[w]
+        if w in people:
+            shown[w] = people[w]
     for line in _summary_lines(shown, ranking, proposal["max_total"]):
         print(line)
+    for w in excluded:
+        if w not in people:
+            print(f"{w}: excluded by the trainer, not graded")
     if ranking and ranking[0]["tied"]:
         print("the top place is a tie: choosing the start branch is the trainer's; final.json stores no winner.")
     if kept:
@@ -1822,7 +1837,7 @@ def _add_confirm_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--by", required=True, help="who confirms")
     parser.add_argument("--exclude", action="append", metavar="participant",
                         help="leave out a participant who could not be graded because of a runtime "
-                             "fault; repeat for more")
+                             "fault, or whose branch the proposal does not cover; repeat for more")
     parser.add_argument("--change", action="append", metavar="participant:criterion=points:reason",
                         help="change a criterion's points, with a reason; repeat for more")
     _add_collect_args(parser)

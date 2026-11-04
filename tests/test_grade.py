@@ -2149,6 +2149,76 @@ def test_archive_without_hard_links() -> None:
                "and no temp file is left")
 
 
+def test_exclude_a_branch_the_proposal_does_not_cover() -> None:
+    """The list `collect` shows can be narrowed through to `confirm`, and only on purpose."""
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = Scene(tmp)
+        scene.cli("collect", COHORT_URL, "m1")
+        code, out, err = scene.run_all("--only", "alice")
+        record(code == 0, "a run of one participant succeeds", err)
+        path = scene.tmp / "judgement.json"
+        path.write_text(json.dumps({"participants": {
+            "alice": {"design": {"points": 15, "evidence": "alice: quoted"}}}}))
+        code, out, err = propose(scene, path)
+        record(code == 0, "the proposal covers only alice", err)
+        final = scene.store() / "final.json"
+
+        code, out, err = confirm(scene)
+        record(code == 1 and "bob has a branch" in err and "carol has a branch" in err
+               and "--exclude" in err and not final.exists(),
+               "with no --exclude confirm refuses, and says how to leave a branch out", f"{code} {err}")
+        code, out, err = confirm(scene, "--exclude", "bob")
+        record(code == 1 and "carol has a branch" in err and "bob has a branch" not in err
+               and not final.exists(), "--exclude of one still refuses for the other", f"{code} {err}")
+        code, out, err = confirm(scene, "--exclude", "bob", "--exclude", "carol", "--exclude", "dave")
+        record(code == 1 and "dave" in err and "no branch" in err and not final.exists(),
+               "--exclude of a name with no branch is refused", f"{code} {err}")
+        code, out, err = confirm(scene, "--exclude", "bob", "--exclude", "carol", "--exclude", "alice")
+        record(code == 1 and "who is gradable" in err and not final.exists(),
+               "--exclude of a gradable participant the proposal covers stays refused", f"{code} {err}")
+        code, out, err = confirm(scene, "--exclude", "bob", "--exclude", "carol", "--change", "bob:design=1:x")
+        record(code == 1 and "not in the proposal" in err and not final.exists(),
+               "an excluded participant takes no change", f"{code} {err}")
+
+        code, out, err = confirm(scene, "--exclude", "bob", "--exclude", "carol")
+        data = json.loads(final.read_text()) if final.exists() else {}
+        record(code == 0 and sorted(data.get("participants", [])) == ["alice"]
+               and sorted(data.get("not_graded", [])) == ["bob", "carol"],
+               "excluded participants are in not_graded and not in participants", f"{code} {err}")
+        record("excluded by the trainer" in data.get("not_graded", {}).get("bob", ""),
+               "the reason says the trainer excluded them", str(data.get("not_graded")))
+        record("bob" in out and "excluded by the trainer" in out, "the summary says so too", out)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = Scene(tmp)
+        path = graded(scene)
+        propose(scene, path)
+        code, out, err = confirm(scene, "--exclude", "bob")
+        record(code == 1 and "who is gradable" in err, "after a full run bob stays in the proposal", err)
+        (scene.store() / "run.json").unlink()
+        code, out, err = scene.run_all("--only", "alice")
+        path.write_text(json.dumps({"participants": {
+            "alice": {"design": {"points": 15, "evidence": "alice: quoted"}}}}))
+        propose(scene, path)
+        code, out, err = confirm(scene, "--exclude", "bob", "--exclude", "carol")
+        record(code == 0 and sorted(load(scene, "final.json")["not_graded"]) == ["bob", "carol"],
+               "deleting run.json and running --only is the way out after a run", f"{code} {err}")
+
+
+def test_by_takes_printable_unicode() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = Scene(tmp)
+        propose(scene, graded(scene))
+        for bad, label in (("Ann\nBob", "a line break"), ("Ann\x1b[31m", "a control character"),
+                           ("Ann\u2028Bob", "a Unicode line separator")):
+            code, out, err = confirm(scene, by=bad)
+            record(code == 1 and "--by" in err and not (scene.store() / "final.json").exists(),
+                   f"--by refuses {label}", f"{code} {err}")
+        code, out, err = confirm(scene, by="J\u00fcrgen M\u00fcller")
+        record(code == 0 and load(scene, "final.json")["confirmed_by"] == "J\u00fcrgen M\u00fcller",
+               "--by accepts printable Unicode, and stores it as given", f"{code} {err}")
+
+
 def main() -> int:
     for test in (test_cohort_from_url_forms, test_store_dir_follows_xdg, test_work_tree_refusal,
                  test_forget, test_scheme, test_cli, test_classify_branch, test_collect,
@@ -2168,7 +2238,8 @@ def main() -> int:
                  test_no_gate_is_null, test_writes_refuse_a_work_tree,
                  test_runtime_faults_are_not_scores, test_proposed_points_and_validator_changes,
                  test_damaged_proposal_and_recursion, test_rubric_edit_needs_no_rerun,
-                 test_archive_without_hard_links):
+                 test_archive_without_hard_links,
+                 test_exclude_a_branch_the_proposal_does_not_cover, test_by_takes_printable_unicode):
         try:
             test()
         except Exception:  # pragma: no cover

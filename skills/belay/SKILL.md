@@ -22,7 +22,7 @@ learner is stuck, when you are confident, and when the change is trivial.
 Four exceptions, and no others:
 
 - the instance's `ownership_policy` is `on-request` and the learner explicitly asks, or
-  it is `unrestricted`;
+  it is `unrestricted`, but never in an exam lesson;
 - the path is tutor-owned (`tutorial/STATE.md`, `tutorial/DESIGN.md`,
   `tutorial/EVENTS.jsonl`, `tutorial/REPORT.md`, and whatever else `tutor_owned` lists);
 - you are **creating** a file the bundle declares in `supplies`, which is placement rather
@@ -75,7 +75,7 @@ A bundle contains `STATE.template.md` and never `STATE.md`. An instance contains
 ## Step 1 — orient
 
 **Asked to grade a cohort's module?** That person is a trainer: skip Steps 1 to 3, load
-`references/runner-protocol.md`, and follow its section 20.
+`references/runner-protocol.md`, and follow section 20.
 
 Run `belay-catalogs find-instance` (on `command not found`,
 `python3 <skill dir>/scripts/catalogs.py find-instance`) and act on what it prints; never
@@ -252,7 +252,7 @@ sections 11 and 12, `references/state-lifecycle.md` section 10).
 |---|---|
 | `references/catalogue-format.md` | no active instance was found and you must find a tutorial to offer; the learner asks what tutorials are available; the learner wants to add a catalogue or register a course; a catalogue failed to refresh |
 | `references/state-lifecycle.md` | materializing a new instance; the first time this session you are about to change `STATE.md`; a task completes; a lesson completes; an offer of an optional lesson is accepted or deferred; the learner acknowledges the assumed-concept review; you need to advance `active_lesson`; an assessment ends or is interrupted; you are about to write a generated lesson; the learner asks to update the course (section 3.2) |
-| `references/runner-protocol.md` | before the first task of a teaching session; when validating; when completion conditions look met; when unsure whether an edit is yours to make; when considering whether to write a lesson; when deciding whether to offer or re-offer an optional lesson; when the active lesson declares `assesses`, or the learner asks to be quizzed; when the active lesson declares `tasks`; when a course declares `assumes`; when a course declares `setup_validators`, or a setup check fails, or the learner asks whether a course is safe to run; when a course finishes or the learner asks what comes after it; when the learner asks how they have done; when you report a defect, or the learner does; when the active lesson declares `exam`; when a trainer asks to grade a cohort's module |
+| `references/runner-protocol.md` | before the first task of a teaching session; when validating; when completion conditions look met; when unsure whether an edit is yours to make; when considering whether to write a lesson; when deciding whether to offer or re-offer an optional lesson; when the active lesson declares `assesses`, or the learner asks to be quizzed; when the active lesson declares `tasks`; when a course declares `assumes`; when a course declares `setup_validators`, or a setup check fails, or the learner asks whether a course is safe to run; when a course finishes or the learner asks what comes after it; when the learner asks how they have done; when you report a defect, or the learner does; when the active lesson declares `exam`; when a trainer asks to grade a cohort's module. A teaching tutor skips section 20; a trainer reads it and section 1's commands |
 | `references/bundle-format.md` | authoring, importing or repairing a **bundle**, including promoting a generated lesson into one. Not needed to teach. |
 
 A learner's session runs four scripts, each at one moment, never per turn.

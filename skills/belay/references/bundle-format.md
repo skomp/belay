@@ -1337,7 +1337,12 @@ cost of that and do not remove it, which is one reason a person confirms every g
 
 Everything named here is this example's own choice; the format names no tool. The image is
 built and published by the course, with Python, `pytest`, `pytest-cov`, `cosmic-ray`, the module's
-dependencies, and `/opt/grading/cosmic-ray.toml`, which sets `module-path = "src"` and the test command.
+dependencies, `/opt/grading/cosmic-ray.toml`, which sets `module-path = "src"` and the test command,
+and `PYTHONPATH=/workspace/src`. The last is needed: `-c /dev/null` discards the participant's own
+`pythonpath` setting, so tests importing from `src/` otherwise stop at a collection error, exit 2, which
+fails every participant as their own result. The lessons therefore fix the `src/` and `tests/` layout.
+Tried on a small project with pytest 9.2.0, pytest-cov 7.1.0 and cosmic-ray 8.7.0, and none of it ran
+in a container.
 
 ```yaml
 validators:
@@ -2127,8 +2132,12 @@ looks for them there and nowhere else.
 - `exam/07/` holds a design note naming the budget and a measurement against it.
 ```
 
-- **The body alone has to be enough.** No `material` file is loaded and no level guides anyone, so
-  write nothing that depends on them. `teaches` changes nothing here.
+- **The body alone has to be enough.** No `material` file is loaded and no level guides anyone, and
+  the tutor presents what the body states and adds no explanation of its own. So teach what the exam
+  uses in an earlier lesson, or state it in the body. `teaches` changes nothing here.
+- **Do not name an exam lesson in `offer_at` or `required_for`.** No optional lesson is offered and
+  no `required_for` applies until the exam lesson has ended, so the offer waits and the gate never
+  binds on it (`runner-protocol.md` section 15.14).
 - **`exam` and `assesses` are independent.** `assesses` decides how answers are judged and `exam` how
   far the tutor helps; a lesson may declare both.
 - **A task lesson can be an exam lesson.** `exam: true` then holds in every state and for every

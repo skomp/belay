@@ -351,7 +351,8 @@ branch against the rubric side by side, propose, confirm, and draft the outputs.
 - **The AI proposes and the trainer decides.** Only what the trainer confirms is final.
 - **Grades stay on the trainer's machine**, in `~/.local/share/belay/grading/`, and `belay-grade`
   refuses to keep them in a Git work tree. It never publishes, sends or pushes anything. How long
-  they are kept is the trainer's decision.
+  they are kept is the trainer's decision. They leave the machine only as feedback the trainer
+  sends. The employer receives only the certificate result, passed or not passed.
 - **Participant code runs only in a container**, so the trainer needs docker or podman; without one
   nothing runs. Only the checkout and the variables the module declares go in. Use a separate,
   limited key for grading, and never take the module's scheme from the cohort repository.
@@ -453,9 +454,6 @@ judged rubric, a person confirming every grade, and exam lessons that cap the tu
 - **Grading has never run in a real container.** Its tests replace the container runtime with a
   stub, because neither docker nor podman is on the development machine. The first run on a grading
   machine has a list of what to check (`runner-protocol.md` section 20.9).
-- **A trainer cannot leave a listed participant out of a grading run**, except one with a runtime
-  fault. `confirm` refuses while the cache holds a module branch the proposal does not cover, so that
-  branch has to go from the repository first.
 - **An update cannot tell who changed a file.** The instance keeps no copy of the course as
   it was when you started, so a lesson you worked in, or a `DESIGN.md`, that differs from
   the newer course is shown to you as a difference, and you decide what to keep.
@@ -513,7 +511,7 @@ python3 tests/test_catalogs.py            # 565 assertions
 python3 tests/test_plan_update.py         # 129 assertions
 python3 tests/test_evidence.py            # 89 assertions
 python3 tests/test_bin_wrappers.py        # 66 assertions
-python3 tests/test_grade.py               # 570 assertions; slow, it runs every step
+python3 tests/test_grade.py               # 586 assertions; slow, it runs every step
 ```
 
 **Those numbers are properties of this commit, not of your machine.** A clean

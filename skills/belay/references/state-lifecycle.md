@@ -362,11 +362,12 @@ What the command does, step by step:
    point. Say the entry's `describe` line before each one — the learner was told at step 7
    that this would happen, and this is it happening.
 
-   **You run them yourself, as the agent, through your own host.** Nothing in this skill
-   executes a validator, and nothing in it ever will: the moment a script here ran a
-   bundle's command, the call would stop passing through the host's permission layer, and
-   that layer is the only boundary there is. `runner-protocol.md` section 14 states the
-   rule and why it is the one thing this design must not do.
+   **You run them yourself, as the agent, through your own host.** In a learner's session
+   nothing in this skill executes a validator, and nothing in it ever will: the moment a
+   script here ran a bundle's command, the call would stop passing through the host's
+   permission layer, and that layer is the only boundary there is. `runner-protocol.md`
+   section 14 states the rule, its one exception, a trainer's `belay-grade run`, and why it
+   is the one thing this design must not do.
 
    **Nothing about a setup validator is progress.** Same rule `supplies` carries: nothing
    is written to `STATE.md` for a setup check that passed, and none of it is a task the
