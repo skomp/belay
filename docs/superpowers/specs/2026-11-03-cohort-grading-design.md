@@ -223,8 +223,21 @@ therefore comes from what the code cannot reach on the trainer's machine:
 - The certificate (belay#95) reads the `final.json` of every module of a cohort from here.
 
 The `final.json` shape is the contract belay#95 builds on: per participant, per validator
-`{passed, points}`, per criterion `{points, max, evidence, changed_by_trainer, reason}`, `gate`,
-`total`, `max_total`; and at the top `module`, `bundle_version`, `confirmed_by`, `confirmed_at`.
+`{passed, points}`, per criterion `{points, proposed_points, max, evidence, changed_by_trainer, reason}`, `gate`,
+`total`, `max_total`; and at the top `module`, `bundle_version`, `confirmed_by`, `confirmed_at`,
+`not_graded`.
+
+- **`proposed_points` is always the AI's proposed value**, whether or not the trainer changed the
+  criterion, because `proposal.json` is overwritten by a later proposal and the record exists to
+  audit a human decision. `points` is the confirmed value.
+- **A runtime fault is not a result.** A participant whose branch failed to check out, or whose
+  validator ended with exit status 125, 126 or 127 or no status, is marked ungradable in the
+  proposal, with the reason: no total, no rank, gate `null`. A timeout is the participant's own
+  result and stays gradable. `confirm` refuses while any participant is ungradable, unless the
+  trainer passes `--exclude <participant>`; an excluded participant is absent from `participants`
+  and listed in `not_graded` as `{participant: reason}`. The usual fix is to repair the fault and run
+  again.
+- **Gate** is `true`, `false`, or `null` when the module has no gate validator and no gate criterion.
 
 ---
 
@@ -235,9 +248,8 @@ New checks take the next free numbers. All are silent when the key is absent.
 | Check | Mode | Reports |
 |---|---|---|
 | grading shape | both | `grading` not a mapping; an unknown key; `image` not a non-empty string; `network` not a boolean; `env` not a list of valid variable names; `timeout_minutes` not a positive integer |
-| grading gate | both | `gate` on a rubric criterion not a boolean |
 | grading validators | both | a name that is not a declared validator; a validator of kind `manual` or `git-diff`; `points` not a positive integer; `gate` not a boolean |
-| grading rubric | both | a criterion without `id`, positive integer `points`, or a non-empty `standard`; a duplicate `id`; `paths` not a non-empty list of globs the ownership dialect accepts |
+| grading rubric | both | a criterion without `id`, positive integer `points`, or a non-empty `standard`; a duplicate `id`; `paths` not a non-empty list of globs the ownership dialect accepts; `gate` not a boolean |
 | grading share | both | the validator points less than 60% of the total |
 | exam | both | `exam` not a boolean |
 

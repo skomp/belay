@@ -931,13 +931,16 @@ def remove_checkout(plan: RunPlan, parent: Path, checkout: Path, warnings: list[
 # --------------------------------------------------------------------------
 
 
-def verdict(share: ValidatorShare, passed: bool, output: str = "", reason: str | None = None) -> dict:
+def verdict(share: ValidatorShare, passed: bool, output: str = "", reason: str | None = None,
+            fault: bool = False) -> dict:
+    """`fault` marks a result that is the runtime's or the checkout's, not the participant's."""
     return {
         "kind": share.declared.get("kind"),
         "passed": passed,
         "gate": share.gate,
         "output": output,
         "reason": reason,
+        "fault": fault,
     }
 
 
@@ -964,6 +967,7 @@ def run_branch(plan: RunPlan, ref: BranchRef, warnings: list[str]) -> tuple[dict
     found: dict[str, dict] = {}
     timed_out = False
     suspect = False
+    checkout_failed = False
     stop_reason: str | None = None
     parent = Path(tempfile.mkdtemp(prefix="belay-grade-"))
     checkout = parent / "checkout"
@@ -975,6 +979,7 @@ def run_branch(plan: RunPlan, ref: BranchRef, warnings: list[str]) -> tuple[dict
             stop_reason = f"not run: {ran_out} during the checkout"
         except CheckoutFailed as exc:
             suspect = True
+            checkout_failed = True
             stop_reason = f"checkout failed: {exc}"
             warnings.append(f"{ref.participant}: {stop_reason}")
         ordered = sorted(plan.scheme.validators, key=lambda v: v.declared.get("kind") == "command")
@@ -984,7 +989,7 @@ def run_branch(plan: RunPlan, ref: BranchRef, warnings: list[str]) -> tuple[dict
                 timed_out = True
                 stop_reason = f"not run: {ran_out}"
             if stop_reason is not None:
-                found[share.name] = verdict(share, False, reason=stop_reason)
+                found[share.name] = verdict(share, False, reason=stop_reason, fault=checkout_failed)
                 continue
             if share.declared.get("kind") != "command":
                 try:
@@ -1009,13 +1014,13 @@ def run_branch(plan: RunPlan, ref: BranchRef, warnings: list[str]) -> tuple[dict
                     )
             elif outcome.status is None:
                 suspect = True
-                found[share.name] = verdict(share, False, output, outcome.error)
+                found[share.name] = verdict(share, False, output, outcome.error, fault=True)
             elif outcome.status == 0:
                 found[share.name] = verdict(share, True, output)
             elif outcome.status == RUNTIME_REFUSED_STATUS or outcome.status in COMMAND_NOT_RUN_STATUSES:
                 suspect = True
                 reason = not_a_judgement(outcome.status)
-                found[share.name] = verdict(share, False, output, reason)
+                found[share.name] = verdict(share, False, output, reason, fault=True)
                 warnings.append(f"{ref.participant}: {share.name}: {reason}")
             else:
                 found[share.name] = verdict(share, False, output, f"exit status {outcome.status}")
@@ -1028,6 +1033,8 @@ def run_branch(plan: RunPlan, ref: BranchRef, warnings: list[str]) -> tuple[dict
         "started_at": started,
         "finished_at": now_iso(),
         "timed_out": timed_out,
+        # Why this branch's result may not be a judgement of the code, or None.
+        "fault": next((r["reason"] or "a runtime fault" for r in found.values() if r["fault"]), None),
         "validators": {v.name: found[v.name] for v in plan.scheme.validators},
     }
     return record, suspect
@@ -1074,7 +1081,17 @@ def scheme_problems(scheme: Scheme) -> list[str]:
 
 
 def scheme_digest(scheme: Scheme) -> str:
-    text = json.dumps(dataclasses.asdict(scheme), sort_keys=True, default=str)
+    """What a RUN depends on: the image, the container settings and the validators.
+
+    The rubric, the module's version and the grading hash are left out, so editing
+    a rubric criterion forces no container re-run. confirm still refuses such an
+    edit, through the grading hash in the proposal.
+    """
+    text = json.dumps(
+        dict(image=scheme.image, network=scheme.network, env=scheme.env,
+             timeout_minutes=scheme.timeout_minutes,
+             validators=[dataclasses.asdict(v) for v in scheme.validators]),
+        sort_keys=True, default=str)
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
@@ -1333,7 +1350,7 @@ def read_json_file(path: Path, what: str, limit: int) -> Any:
         raise GradeError(f"{what} {path} is larger than {limit} bytes", EXIT_USAGE)
     try:
         return json.loads(raw.decode("utf-8"), object_pairs_hook=_no_duplicates)
-    except (ValueError, UnicodeDecodeError) as exc:
+    except (ValueError, UnicodeDecodeError, RecursionError) as exc:
         raise GradeError(f"{what} {path} is not valid JSON: {exc}", EXIT_USAGE) from exc
 
 
@@ -1341,8 +1358,13 @@ def _is_points(value: Any) -> bool:
     return isinstance(value, int) and not isinstance(value, bool)
 
 
-def read_judgement(path: Path, scheme: Scheme, known: list[str]) -> tuple[dict, dict | None]:
-    """The rated points and the draft, or a refusal naming every defect found."""
+def read_judgement(path: Path, scheme: Scheme, known: list[str],
+                   ungradable: frozenset[str] = frozenset()) -> tuple[dict, dict | None]:
+    """The rated points and the draft, or a refusal naming every defect found.
+
+    `known` are the participants in run.json. An `ungradable` one (a runtime fault)
+    need not be in the judgement; if it is, it is checked like any other and unused.
+    """
     data = read_json_file(path, "the judgement", JUDGEMENT_MAX_BYTES)
     problems: list[str] = []
 
@@ -1369,7 +1391,8 @@ def read_judgement(path: Path, scheme: Scheme, known: list[str]) -> tuple[dict, 
     for who in known:
         entry = people.get(who)
         if entry is None:
-            bad(f"{who} is in run.json and missing from the judgement")
+            if who not in ungradable:
+                bad(f"{who} is in run.json and missing from the judgement")
             continue
         if not isinstance(entry, dict):
             bad(f"{who}: must be an object of criterion id to {{points, evidence}}")
@@ -1449,12 +1472,23 @@ def gate_result(validators: dict, criteria: dict) -> bool | None:
     return all(v["passed"] for v in gate_v) and all(c["points"] == c["max"] for c in gate_c)
 
 
+def short(text: Any) -> str:
+    """A reason for the terminal: printable ASCII, one line, bounded."""
+    return escape_name(str(text))[:300]
+
+
 def _summary_lines(participants: dict, ranking: list[dict], max_total: int) -> list[str]:
     lines = []
     for who, p in participants.items():
+        if p.get("ungradable"):
+            lines.append(f"{who}: NOT GRADABLE, no total and no rank. A runtime fault, not the "
+                         f"participant's result: {short(p['reason'])}")
+            continue
         gate = {True: "passed", False: "NOT passed", None: "n/a"}[p["gate"]]
+        late = f"  (timed out: {short(next((v['reason'] for v in p['validators'].values() if v.get('reason') and 'time limit' in v['reason']), ''))})" \
+            if p.get("timed_out") else ""
         lines.append(f"{who}: validators {p['validator_points']}, rubric {p['rubric_points']}, "
-                     f"total {p['total']}/{max_total}, gate {gate}")
+                     f"total {p['total']}/{max_total}, gate {gate}{late}")
     for group in ranking:
         names = ", ".join(group["participants"])
         mark = f"{group['rank']}= " if group["tied"] else f"{group['rank']}. "
@@ -1483,7 +1517,9 @@ def cmd_propose(args: argparse.Namespace) -> int:
         got = branches[who].get("validators") if isinstance(branches[who], dict) else None
         if not isinstance(got, dict) or any(v.name not in got for v in scheme.validators):
             raise GradeError(f"run.json holds no complete validator results for {who}; run again")
-    ratings, draft = read_judgement(Path(args.judgement), scheme, known)
+    faults = {who: branches[who]["fault"] for who in known
+              if isinstance(branches[who].get("fault"), str)}
+    ratings, draft = read_judgement(Path(args.judgement), scheme, known, frozenset(faults))
 
     warnings: list[str] = []
     cache = cache_dir(repo)
@@ -1499,9 +1535,20 @@ def cmd_propose(args: argparse.Namespace) -> int:
         rec = branches[who]
         validators = {}
         for share in scheme.validators:
-            passed = rec["validators"][share.name].get("passed") is True
+            got = rec["validators"][share.name]
+            passed = got.get("passed") is True
             validators[share.name] = {"passed": passed, "points": share.points if passed else 0,
-                                      "gate": share.gate}
+                                      "gate": share.gate, "reason": got.get("reason"),
+                                      "fault": got.get("fault") is True}
+        if who in faults:
+            # A runtime fault is not the participant's result: no total, no rank, no gate.
+            participants[who] = {
+                "branch": rec.get("branch"), "commit": rec.get("commit"),
+                "ungradable": True, "reason": faults[who], "timed_out": rec.get("timed_out") is True,
+                "validators": validators, "criteria": {}, "validator_points": None,
+                "rubric_points": None, "gate": None, "total": None, "max_total": scheme.max_total,
+            }
+            continue
         criteria = {}
         for crit in scheme.rubric:
             criteria[crit.id] = {**ratings[who][crit.id], "max": crit.points, "gate": crit.gate}
@@ -1509,12 +1556,13 @@ def cmd_propose(args: argparse.Namespace) -> int:
         rpts = sum(c["points"] for c in criteria.values())
         participants[who] = {
             "branch": rec.get("branch"), "commit": rec.get("commit"),
+            "ungradable": False, "reason": None, "timed_out": rec.get("timed_out") is True,
             "validators": validators, "criteria": criteria,
             "validator_points": vpts, "rubric_points": rpts,
             "gate": gate_result(validators, criteria),
             "total": vpts + rpts, "max_total": scheme.max_total,
         }
-    ranking = rank({w: p["total"] for w, p in participants.items()})
+    ranking = rank({w: p["total"] for w, p in participants.items() if not p["ungradable"]})
     proposal = {
         "module": scheme.module,
         "bundle_version": scheme.bundle_version,
@@ -1597,8 +1645,53 @@ def archive_previous(store: Path) -> Path | None:
             os.link(current, target)
         except FileExistsError:
             continue
+        except OSError:
+            # No hard links here (a file system without them): copy, then rename.
+            if target.exists():
+                continue
+            handle, name = tempfile.mkstemp(dir=store, prefix=f".{target.name}.")
+            try:
+                with os.fdopen(handle, "wb") as stream:
+                    stream.write(current.read_bytes())
+                os.replace(name, target)
+            except BaseException:
+                if os.path.exists(name):
+                    os.unlink(name)
+                raise
         return target
     raise GradeError("cannot find a free name for the previous final.json")
+
+
+def check_proposal(proposal: Any) -> None:
+    """A proposal.json that parses but is not one is a message, not a KeyError."""
+    def damaged(why: str) -> GradeError:
+        return GradeError(f"proposal.json is damaged ({why}); run `belay-grade propose` again")
+
+    if not isinstance(proposal, dict):
+        raise damaged("it is not an object")
+    for key in ("module", "bundle_version", "grading_hash", "max_total", "participants"):
+        if key not in proposal:
+            raise damaged(f"no `{key}`")
+    people = proposal["participants"]
+    if not isinstance(people, dict) or not people:
+        raise damaged("`participants` is empty or not an object")
+    for who, p in people.items():
+        if not isinstance(p, dict) or not isinstance(p.get("validators"), dict) \
+                or not isinstance(p.get("commit"), str) or "ungradable" not in p:
+            raise damaged(f"the entry of {escape_name(str(who))} is incomplete")
+        if p["ungradable"]:
+            if not isinstance(p.get("reason"), str):
+                raise damaged(f"{escape_name(str(who))} is ungradable with no reason")
+            continue
+        if not isinstance(p.get("criteria"), dict) or "max_total" not in p:
+            raise damaged(f"the entry of {escape_name(str(who))} is incomplete")
+        for name, v in p["validators"].items():
+            if not (isinstance(v, dict) and {"passed", "points", "gate"} <= set(v)):
+                raise damaged(f"{escape_name(str(who))}: validator {escape_name(str(name))} is incomplete")
+        for cid, c in p["criteria"].items():
+            if not (isinstance(c, dict) and {"points", "max", "evidence", "gate"} <= set(c)
+                    and _is_points(c["points"]) and _is_points(c["max"])):
+                raise damaged(f"{escape_name(str(who))}: criterion {escape_name(str(cid))} is incomplete")
 
 
 def cmd_confirm(args: argparse.Namespace) -> int:
@@ -1613,8 +1706,7 @@ def cmd_confirm(args: argparse.Namespace) -> int:
     if not (store / PROPOSAL_FILE).exists():
         raise GradeError("there is no proposal for this module; run `belay-grade propose` first")
     proposal = read_json_file(store / PROPOSAL_FILE, "the proposal", JUDGEMENT_MAX_BYTES * 8)
-    if not isinstance(proposal, dict) or not isinstance(proposal.get("participants"), dict):
-        raise GradeError("proposal.json is not a proposal; run `belay-grade propose` again")
+    check_proposal(proposal)
     stale = changes_since(proposal, scheme, cache_dir(repo), args.module)
     if stale:
         raise GradeError(
@@ -1623,12 +1715,33 @@ def cmd_confirm(args: argparse.Namespace) -> int:
             + "\n  ".join(stale))
 
     people = proposal["participants"]
+    excluded = list(dict.fromkeys(args.exclude or []))
+    for who in excluded:
+        if who not in people:
+            raise GradeError(f"--exclude names {escape_name(who)}, who is not in the proposal "
+                             f"({', '.join(people)})")
+        if not people[who]["ungradable"]:
+            raise GradeError(f"--exclude names {who}, who is gradable; only a participant with a "
+                             "runtime fault can be excluded")
+    open_faults = [w for w, p in people.items() if p["ungradable"] and w not in excluded]
+    if open_faults:
+        raise GradeError(
+            "nothing was confirmed: these participants could not be graded because of a runtime "
+            "fault, which is not their result. Repair the fault and run again, or pass "
+            "--exclude <participant> to leave one out of final.json:\n  "
+            + "\n  ".join(f"{w}: {short(people[w]['reason'])}" for w in open_faults))
     applied: dict[tuple[str, str], tuple[int, str]] = {}
     for text in args.change or []:
         who, cid, pts, reason = parse_change(text)
         if who not in people:
             raise GradeError(f"--change names {escape_name(who)}, who is not in the proposal "
                              f"({', '.join(people)})")
+        if people[who]["ungradable"]:
+            raise GradeError(f"--change names {who}, who is not graded (a runtime fault)")
+        if cid in people[who]["validators"]:
+            raise GradeError(f"--change names {escape_name(cid)}, which is a validator: validators are "
+                             "deterministic and the trainer cannot change them. A criterion of the "
+                             f"rubric can be changed ({', '.join(people[who]['criteria']) or 'none'}).")
         crit = people[who]["criteria"].get(cid)
         if crit is None:
             raise GradeError(f"--change names criterion {escape_name(cid)}, which {who} has no "
@@ -1643,12 +1756,15 @@ def cmd_confirm(args: argparse.Namespace) -> int:
 
     final_people: dict[str, dict] = {}
     for who, p in people.items():
+        if p["ungradable"]:
+            continue
         validators = {n: {"passed": v["passed"], "points": v["points"]}
                       for n, v in p["validators"].items()}
         criteria, gating = {}, {}
         for cid, c in p["criteria"].items():
             pts, reason = applied.get((who, cid), (c["points"], None))
-            criteria[cid] = {"points": pts, "max": c["max"], "evidence": c["evidence"],
+            criteria[cid] = {"points": pts, "proposed_points": c["points"], "max": c["max"],
+                             "evidence": c["evidence"],
                              "changed_by_trainer": reason is not None, "reason": reason}
             gating[cid] = {"points": pts, "max": c["max"], "gate": c["gate"]}
         # The gate is computed from the CONFIRMED points, so a change can flip it.
@@ -1663,6 +1779,7 @@ def cmd_confirm(args: argparse.Namespace) -> int:
         "confirmed_by": by,
         "confirmed_at": now_iso(),
         "participants": final_people,
+        "not_graded": {w: people[w]["reason"] for w in excluded},
     }
     refuse_work_tree(store)
     kept = archive_previous(store)
@@ -1672,9 +1789,14 @@ def cmd_confirm(args: argparse.Namespace) -> int:
     print(f"confirmed by {escape_name(by)}; {len(applied)} change(s)")
     for (who, cid), (pts, reason) in applied.items():
         print(f"  changed {who}:{cid} {people[who]['criteria'][cid]['points']} -> {pts}: {escape_name(reason)}")
-    for line in _summary_lines({w: {**p, "validator_points": sum(v["points"] for v in p["validators"].values()),
-                                    "rubric_points": sum(c["points"] for c in p["criteria"].values())}
-                                for w, p in final_people.items()}, ranking, proposal["max_total"]):
+    shown = {w: {**p, "validator_points": sum(v["points"] for v in p["validators"].values()),
+                 "rubric_points": sum(c["points"] for c in p["criteria"].values()),
+                 "timed_out": people[w].get("timed_out"),
+                 "validators": people[w]["validators"]}
+             for w, p in final_people.items()}
+    for w in excluded:
+        shown[w] = people[w]
+    for line in _summary_lines(shown, ranking, proposal["max_total"]):
         print(line)
     if ranking and ranking[0]["tied"]:
         print("the top place is a tie: choosing the start branch is the trainer's; final.json stores no winner.")
@@ -1698,6 +1820,9 @@ def _add_propose_args(parser: argparse.ArgumentParser) -> None:
 def _add_confirm_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--bundle", required=True, help="the module's bundle directory")
     parser.add_argument("--by", required=True, help="who confirms")
+    parser.add_argument("--exclude", action="append", metavar="participant",
+                        help="leave out a participant who could not be graded because of a runtime "
+                             "fault; repeat for more")
     parser.add_argument("--change", action="append", metavar="participant:criterion=points:reason",
                         help="change a criterion's points, with a reason; repeat for more")
     _add_collect_args(parser)

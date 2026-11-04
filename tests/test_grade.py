@@ -1648,7 +1648,8 @@ def test_propose_values() -> None:
         record(prop["participants"]["alice"]["commit"] == scene.commits["alice/m1"]
                and prop["grading_hash"], "the proposal records each commit and the grading hash")
         record(prop["participants"]["bob"]["validators"]["scorer-tests"]
-               == {"passed": False, "points": 0, "gate": True}, "a failed validator earns 0")
+               == {"passed": False, "points": 0, "gate": True, "reason": "exit status 1", "fault": False},
+               "a failed validator earns 0 and keeps its reason")
         record(stat.S_IMODE((scene.store() / "proposal.json").stat().st_mode) == 0o600,
                "proposal.json is private")
         # Totals are never taken from the judgement: a key carrying one is refused.
@@ -1731,7 +1732,8 @@ def test_confirm_values() -> None:
                                  by="Rob")
         record(code == 0, "confirm succeeds", f"{code} {out} {err}")
         final = load(scene, "final.json")
-        record(sorted(final) == ["bundle_version", "confirmed_at", "confirmed_by", "module", "participants"]
+        record(sorted(final) == ["bundle_version", "confirmed_at", "confirmed_by", "module", "not_graded",
+                                 "participants"] and final["not_graded"] == {}
                and final["module"] == "m1" and final["bundle_version"] == "1.2.0"
                and final["confirmed_by"] == "Rob" and final["confirmed_at"].endswith("Z"),
                "final.json top level has exactly the contract's keys", str(sorted(final)))
@@ -1739,7 +1741,7 @@ def test_confirm_values() -> None:
         record(sorted(bob) == ["criteria", "gate", "max_total", "total", "validators"],
                "a participant has exactly validators, criteria, gate, total, max_total", str(sorted(bob)))
         record(bob["criteria"]["design"] == {
-            "points": 18, "max": 20, "evidence": "bob: src/main.py:1 quoted",
+            "points": 18, "proposed_points": 10, "max": 20, "evidence": "bob: src/main.py:1 quoted",
             "changed_by_trainer": True,
             "reason": "Better than it reads: it handles retries: see lines 4-9"},
             "a change keeps its reason, colons included", str(bob["criteria"]))
@@ -1936,6 +1938,217 @@ def test_writes_refuse_a_work_tree() -> None:
             record(code == 1 and "work tree" in err, "propose with the store in a work tree is refused", err)
 
 
+# --------------------------------------------------------------------------
+# propose and confirm: runtime faults, --exclude, and the fix-round extras
+# --------------------------------------------------------------------------
+
+
+def fault_scene(tmp: str, status: int) -> Scene:
+    """Bob's gate validator exits `status`; alice and carol are as in PARTICIPANTS."""
+    scene = Scene(tmp)
+    scene.add_branch("bob/m1", {**PARTICIPANTS["bob"], "run-tests.sh": f"exit {status}\n"})
+    return scene
+
+
+def judge_without(scene: Scene, *people: str) -> Path:
+    path = scene.tmp / "judgement.json"
+    path.write_text(json.dumps({"participants": {
+        w: {"design": {"points": p, "evidence": f"{w}: quoted"}}
+        for w, p in (("alice", 15), ("carol", 5)) if w not in people}}))
+    return path
+
+
+def check_ungradable(scene: Scene, who: str, word: str, label: str) -> None:
+    path = judge_without(scene, who)
+    code, out, err = propose(scene, path)
+    prop = load(scene, "proposal.json")
+    bob = prop["participants"][who]
+    record(code == 0, f"{label}: propose succeeds without a judgement of {who}", f"{code} {err}")
+    record(bob["ungradable"] is True and word in bob["reason"] and bob["total"] is None
+           and bob["gate"] is None and bob["validator_points"] is None,
+           f"{label}: {who} is ungradable with the reason, no total and gate null", str(bob)[:300])
+    record(any(v["fault"] and v["reason"] for v in bob["validators"].values()),
+           f"{label}: the validator keeps its reason and fault flag", str(bob["validators"]))
+    ranked = [n for g in prop["ranking"] for n in g["participants"]]
+    record(who not in ranked and len(ranked) == 2, f"{label}: {who} has no rank", str(prop["ranking"]))
+    record(f"{who}: NOT GRADABLE" in out and "runtime fault" in out and word in out,
+           f"{label}: the propose summary says it is a fault, not the participant's result", out)
+    code, out, err = confirm(scene)
+    record(code == 1 and who in err and word in err and "--exclude" in err
+           and not (scene.store() / "final.json").exists(),
+           f"{label}: confirm refuses and names the participant", f"{code} {err}")
+    for bad, needle in (("dave", "not in the proposal"), ("alice", "who is gradable")):
+        code, out, err = confirm(scene, "--exclude", bad)
+        record(code == 1 and needle in err, f"{label}: --exclude {bad} is refused", err)
+    code, out, err = confirm(scene, "--exclude", who, "--change", f"{who}:design=1:x")
+    record(code == 1 and "not graded" in err, f"{label}: a change to {who} is refused", err)
+    code, out, err = confirm(scene, "--exclude", who)
+    final = load(scene, "final.json")
+    record(code == 0 and sorted(final["participants"]) == sorted({"alice", "bob", "carol"} - {who})
+           and word in final["not_graded"][who] and list(final["not_graded"]) == [who],
+           f"{label}: --exclude leaves {who} out of final.json and lists it as not graded", f"{code} {err}")
+    record(f"{who}: NOT GRADABLE" in out, f"{label}: the confirm summary says it too", out)
+
+
+def test_runtime_faults_are_not_scores() -> None:
+    for status in (125, 126, 127):
+        with tempfile.TemporaryDirectory() as tmp:
+            scene = fault_scene(tmp, status)
+            scene.cli("collect", COHORT_URL, "m1")
+            code, out, err = scene.run_all()
+            record(code == gr.EXIT_REFUSED and scene.results()["branches"]["bob"]["fault"]
+                   and scene.results()["branches"]["alice"]["fault"] is None,
+                   f"exit {status}: run.json marks bob's fault and nobody else's", err)
+            check_ungradable(scene, "bob", f"exit status {status}", f"exit {status}")
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = Scene(tmp)
+        scene.cli("collect", COHORT_URL, "m1")
+        cache = scene.data / "belay" / "grading" / gr.cohort_name(COHORT_URL) / gr.CACHE_NAME
+        blob = git_fixture("--git-dir", str(cache), "rev-parse", "refs/heads/alice/m1:README.md", cwd=scene.tmp)
+        (cache / "objects" / blob[:2] / blob[2:]).unlink()
+        scene.run_all()
+        path = scene.tmp / "judgement.json"
+        path.write_text(json.dumps({"participants": {
+            w: {"design": {"points": p, "evidence": f"{w}: quoted"}} for w, p in (("bob", 10), ("carol", 5))}}))
+        code, out, err = propose(scene, path)
+        prop = load(scene, "proposal.json")
+        record(code == 0 and prop["participants"]["alice"]["ungradable"] is True
+               and "checkout failed" in prop["participants"]["alice"]["reason"]
+               and prop["participants"]["alice"]["total"] is None
+               and prop["participants"]["bob"]["ungradable"] is False,
+               "a checkout failure makes that participant ungradable and no other", str(prop["participants"]["alice"])[:300])
+        code, out, err = confirm(scene)
+        record(code == 1 and "alice" in err and "checkout failed" in err, "confirm refuses on a checkout failure", err)
+        # A judgement that does cover the ungradable participant is checked and then unused.
+        path.write_text(json.dumps({"participants": {
+            w: {"design": {"points": p, "evidence": f"{w}: quoted"}}
+            for w, p in (("alice", 15), ("bob", 10), ("carol", 5))}}))
+        record(propose(scene, path)[0] == 0 and load(scene, "proposal.json")["participants"]["alice"]["total"] is None,
+               "a judgement covering an ungradable participant is accepted and not used")
+        bad = json.loads(path.read_text())
+        bad["participants"]["alice"]["design"]["points"] = 99
+        path.write_text(json.dumps(bad))
+        record(propose(scene, path)[0] == 1, "and is still checked")
+        code, out, err = confirm(scene, "--exclude", "alice", "--exclude", "alice")
+        record(code == 0 and load(scene, "final.json")["not_graded"].keys() == {"alice"},
+               "a repeated --exclude is harmless", err)
+    # A timeout is the participant's own result: gradable, with the reason shown.
+    yaml = hang_yaml(
+        '  quick: { kind: command, command: [sh, -c, "echo fine"] }\n'
+        '  hang: { kind: command, command: [sh, -c, "echo started; sleep 60"] }\n'
+        '  has-readme: { kind: file-exists, path: README.md }',
+        "    quick: { points: 10 }\n    hang: { points: 10, gate: true }\n    has-readme: { points: 10 }")
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = Scene(tmp, module_yaml=yaml)
+        scene.cli("collect", COHORT_URL, "m1")
+        scene.run_all(prelude=LIMIT_PRELUDE)
+        path = scene.tmp / "judgement.json"
+        path.write_text(json.dumps({"participants": {w: {} for w in ("alice", "bob", "carol")}}))
+        code, out, err = propose(scene, path)
+        alice = load(scene, "proposal.json")["participants"]["alice"]
+        record(code == 0 and alice["ungradable"] is False and alice["timed_out"] is True
+               and alice["total"] == 20 and alice["gate"] is False
+               and "time limit" in alice["validators"]["hang"]["reason"],
+               "a timeout stays gradable, keeps its reason and scores what finished", str(alice)[:300])
+        record("timed out" in out and "time limit" in out and "NOT GRADABLE" not in out,
+               "the summary shows the timeout", out)
+        code, out, err = confirm(scene)
+        record(code == 0 and load(scene, "final.json")["participants"]["alice"]["total"] == 20
+               and load(scene, "final.json")["not_graded"] == {}, "confirm needs no --exclude for a timeout", err)
+
+
+def test_proposed_points_and_validator_changes() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = Scene(tmp)
+        path = graded(scene)
+        propose(scene, path)
+        code, out, err = confirm(scene, "--change", "bob:lint=0:no")
+        record(code == 1 and "validators are deterministic" in err and "cannot change them" in err
+               and "design" in err, "a change on a validator says validators cannot be changed", err)
+        code, out, err = confirm(scene, "--change", "bob:design=18:why")
+        crit = load(scene, "final.json")["participants"]["bob"]["criteria"]["design"]
+        record(code == 0 and crit["points"] == 18 and crit["proposed_points"] == 10,
+               "a changed criterion keeps the AI's proposed points", str(crit))
+        other = load(scene, "final.json")["participants"]["alice"]["criteria"]["design"]
+        record(other["points"] == 15 and other["proposed_points"] == 15,
+               "an unchanged criterion's proposed_points equals its points", str(other))
+        # A re-proposal overwrites proposal.json; final.json keeps the audit.
+        path.write_text(json.dumps(ratings(bob=2)))
+        propose(scene, path)
+        record(load(scene, "final.json")["participants"]["bob"]["criteria"]["design"]["proposed_points"] == 10,
+               "final.json still holds the first proposed value after a re-proposal")
+
+
+def test_damaged_proposal_and_recursion() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = Scene(tmp)
+        path = graded(scene)
+        propose(scene, path)
+        good = (scene.store() / "proposal.json").read_text()
+        damaged = {
+            "a participant with no body": lambda d: d["participants"].__setitem__("alice", {}),
+            "no participants key": lambda d: d.pop("participants"),
+            "a criterion with no points": lambda d: d["participants"]["bob"]["criteria"]["design"].pop("points"),
+            "a validator with no passed": lambda d: d["participants"]["bob"]["validators"]["lint"].pop("passed"),
+            "a missing max_total": lambda d: d.pop("max_total"),
+        }
+        for name, damage in damaged.items():
+            data = json.loads(good)
+            damage(data)
+            (scene.store() / "proposal.json").write_text(json.dumps(data))
+            code, out, err = confirm(scene)
+            record(code == 1 and "proposal.json is damaged" in err and "Traceback" not in err
+                   and "propose` again" in err, f"confirm says a damaged proposal ({name}) is damaged", f"{code} {err}")
+        (scene.store() / "proposal.json").write_text("[1, 2]")
+        record("is damaged" in confirm(scene)[2], "a proposal that is a list is damaged")
+        (scene.store() / "proposal.json").write_text(good)
+        record(confirm(scene)[0] == 0, "control: the intact proposal confirms")
+        deep = scene.tmp / "deep.json"
+        deep.write_text("[" * 200000)
+        code, out, err = propose(scene, deep)
+        record(code == 2 and "not valid JSON" in err and "Traceback" not in err,
+               "a deeply nested judgement is a message and not a traceback", f"{code} {err[:200]}")
+
+
+def test_rubric_edit_needs_no_rerun() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = Scene(tmp)
+        path = graded(scene)
+        propose(scene, path)
+        first = load(scene, "proposal.json")["grading_hash"]
+        (scene.bundle / "tutorial.yaml").write_text(MODULE_YAML.replace(
+            "standard: The choice is justified.", "standard: The choice is justified well."))
+        code, out, err = confirm(scene)
+        record(code == 1 and "`grading` block differs" in err,
+               "a rubric edit makes the old proposal stale", err)
+        code, out, err = propose(scene, path)
+        record(code == 0 and load(scene, "proposal.json")["grading_hash"] != first,
+               "a rubric-only edit needs no container re-run: propose works from run.json", err)
+        record(confirm(scene)[0] == 0, "and the new proposal confirms")
+        # Control: a validator edit does demand a re-run.
+        (scene.bundle / "tutorial.yaml").write_text(MODULE_YAML.replace("lint.sh", "lint2.sh"))
+        code, out, err = propose(scene, path)
+        record(code == 1 and "changed since the last run" in err, "control: a validator edit still demands a run", err)
+
+
+def test_archive_without_hard_links() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = Scene(tmp)
+        path = graded(scene)
+        propose(scene, path)
+        prelude = "import os\ndef _no(*a, **k): raise OSError(1, 'hard links are not allowed')\ngrade.os.link = _no"
+        scene.cli("confirm", "--bundle", str(scene.bundle), "--by", "one", COHORT_URL, "m1", prelude=prelude)
+        first = (scene.store() / "final.json").read_text()
+        code, out, err = scene.cli("confirm", "--bundle", str(scene.bundle), "--by", "two", COHORT_URL, "m1",
+                                   prelude=prelude)
+        kept = sorted(p.name for p in scene.store().glob("final.*.json"))
+        record(code == 0 and len(kept) == 1 and (scene.store() / kept[0]).read_text() == first
+               and load(scene, "final.json")["confirmed_by"] == "two",
+               "without hard links the previous final.json is copied beside the new one", f"{kept} {err}")
+        record([p.name for p in scene.store().iterdir() if p.name.startswith(".")] == [],
+               "and no temp file is left")
+
+
 def main() -> int:
     for test in (test_cohort_from_url_forms, test_store_dir_follows_xdg, test_work_tree_refusal,
                  test_forget, test_scheme, test_cli, test_classify_branch, test_collect,
@@ -1952,7 +2165,10 @@ def main() -> int:
                  test_ascii_stdout, test_only_keeps_other_branches_provenance,
                  test_propose_values, test_propose_refusals, test_confirm_values,
                  test_confirm_top_tie, test_confirm_refusals, test_gate_criterion,
-                 test_no_gate_is_null, test_writes_refuse_a_work_tree):
+                 test_no_gate_is_null, test_writes_refuse_a_work_tree,
+                 test_runtime_faults_are_not_scores, test_proposed_points_and_validator_changes,
+                 test_damaged_proposal_and_recursion, test_rubric_edit_needs_no_rerun,
+                 test_archive_without_hard_links):
         try:
             test()
         except Exception:  # pragma: no cover
