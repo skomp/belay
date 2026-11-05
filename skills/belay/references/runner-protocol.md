@@ -8,10 +8,9 @@ learner asks what comes after it, when a newly materialized instance does not pa
 validation, when you are unsure whether an edit is yours to make, when the learner asks
 how they have done (section 16), when you find a defect or the learner asks to report one
 (section 17), when the manifest declares `levels` (section 18), when the course a learner
-chose has a `start_from` in its catalogue entry (section 18.6), when the active lesson
-declares `tasks` or the learner asks to add a task of their own (section 19), when the active
-lesson declares `exam` (section 15.14), or when a trainer asks to grade a cohort's module
-(section 20).
+chose starts from a ref (section 18.6), when the active lesson declares `tasks` or the learner
+asks to add a task of their own (section 19), when the active lesson declares `exam` (section
+15.14), or when a trainer asks to grade a cohort's module (section 20).
 
 **A teaching tutor skips section 20**, about 300 lines: Read up to the line of `## 20. Grading a
 cohort`, which Grep finds. A trainer reads section 20 plus section 1's commands (**The runner's
@@ -283,7 +282,9 @@ and `belay-catalogs place-supplies` and `belay-plan-update` read the source from
 instance stamp; each opens the bundle inside its own process. `belay-catalogs report`
 reads only the instance and its draft (section 17), and `belay-catalogs find-instance`
 searches the directories above the current one inside its own process, so it takes no path
-either (**Finding the instance**, above).
+either (**Finding the instance**, above). `belay-catalogs resolve` takes the tutorial id, and
+`belay-catalogs check-start` reads nothing at all and takes only the two values it checks
+(section 18.6).
 
 **Fallback.** When the bare command reports `command not found` — the skill was installed
 without its plugin, as the Codex route in the README does, or the host does not put plugin
@@ -1293,8 +1294,8 @@ the cheaper mistake than writing a new one.
   a pointer to a course that exists somewhere, not a dependency. Section 12.4.
 - **Copying a finished course's workspace into a follow-up.** Relationship metadata says
   nothing about source code. Section 12.5.
-- **Running the Git commands that start a module yourself**, or proposing one whose
-  repository or ref begins with `-` or holds a shell character. Section 18.6.
+- **Running the Git commands that start a module yourself**, or proposing one from a value
+  `belay-catalogs check-start` has not passed. Section 18.6.
 - **Teaching from an instance nobody validated.** Materialization runs the validator once,
   on the instance it just created, before the first task. An instance whose stamp carries
   no `validated` key has never been checked, and the first defect in it will be found by
@@ -1693,9 +1694,9 @@ the repository they just finished in, and it is theirs to give. Recommendation m
 never overwrite or mutate an existing project.
 
 **A module that declares `starts_from: ref` is not an exception to this.** Its starting code
-is named by the catalogue entry's `start_from` — a separate, explicit statement by whoever
-runs the programme, never something inferred from a recommendation — and it is the code at
-that ref, not the code this learner just wrote. Section 18.6 is how such a module starts.
+is what the learner names when asked, with the catalogue entry's `start_from` as the
+suggestion — an explicit answer, never something inferred from a recommendation. Section
+18.6 is how such a module starts.
 
 ### 12.6 Failure modes to refuse
 
@@ -2710,51 +2711,86 @@ than rung 3 is told that lowering the level is how to get it (18.2).
 
 ### 18.6 Starting a module that starts from a ref
 
-A module whose bundle declares `starts_from: ref` starts from the code at a Git ref the
-catalogue entry's `start_from` names, typically the best solution of the previous module
+A module whose bundle declares `starts_from: ref` starts from the code at a Git ref that
+**you ask the learner for**. It is typically the best solution of the previous module, and
+the catalogue entry's `start_from`, when it has a usable one, is the answer you suggest
 (`bundle-format.md` section 2, **Levels and modules**; `catalogue-format.md` section 5.3).
 This runs **after the learner has chosen the course and before materialization**:
 `state-lifecycle.md` section 3 sends you here.
 
-1. **Read `start_from` from `belay-catalogs resolve <id> --json`** — the entry that won the
-   merge for this id (`catalogue-format.md` section 6). Never from a catalogue file you
-   open yourself, a shadowed entry, or the bundle.
-   - **A mapping**: go on to step 2.
-   - **`null`, with a `metadata_notes` entry about it**: the entry's `start_from` is
-     malformed and was dropped. Say what the note says, say the module cannot start until
-     whoever runs the catalogue corrects it, and stop.
-   - **`null`, with no note**: the entry names no start. That is every ordinary course, so
-     materialize as usual (`state-lifecycle.md` section 3). Once its step 6 has verified the
-     instance, and before anything is placed outside `tutorial/`, look at the instance's
-     manifest: if it declares `starts_from: ref`, **the module cannot start yet**. Say that
-     the previous module's review has not published a starting point, and stop. The
-     `tutorial/` just created holds no progress; offer to remove it, because the module is
-     materialized again on the branch its start creates, and let the learner decide.
-2. **Refuse a `repo` or `ref` that begins with `-` or holds whitespace or any of
-   `` ` $ ; | & < > ( ) ' " \ ``.** Propose no command at all; say the entry's
-   `start_from` cannot be used, and that whoever runs the catalogue must correct it. The
-   catalogue reader already drops such a value — it requires the host, and any user
-   before it, to begin with a letter or digit, refuses those characters in `repo`, and
-   requires `ref` to match `[A-Za-z0-9_][A-Za-z0-9._/-]*` with no `..`, `//` or `/.` and
-   no trailing `/`, `.` or `.lock` (`catalogue-format.md` section 5.3) — so a mapping that
-   reaches you should pass. Check anyway: you are about to propose a command the learner
-   pastes into a shell, and the check costs nothing.
+1. **Run `belay-catalogs --json resolve <id>`, and decide from its output, before
+   materializing.** Two keys say what you need, and the command reads the bundle inside its
+   own process, so there is nothing for you to open. Never read either from a catalogue file
+   you open yourself, a shadowed entry, or the bundle.
+   - **`starts_from`** is the bundle's own. **`ref`** means this section applies: go on. Any
+     other value means it does not, and nothing changes: this is an ordinary course, and you
+     materialize as usual (`state-lifecycle.md` section 3). `null` says the bundle does not
+     declare it, or could not be read; a bundle that cannot be used also shows in `problems`,
+     and materializing refuses it.
+   - **`start_from`** is the entry's, and only matters when `starts_from` is `ref`. **A
+     mapping** is your suggestion. **`null`, with a `metadata_notes` entry about it**, is
+     malformed and was dropped: say what the note says, and that whoever runs the catalogue
+     should correct it, and go on with no suggestion. **`null`, with no note**: go on with no
+     suggestion. None of these stops the module.
+
+   When the bundle is usable and declares no `starts_from: ref`, but the entry has a
+   `start_from`, the entry and the module disagree: say so, and go on as for an ordinary
+   course, because the bundle is authoritative (`catalogue-format.md` section 5).
+2. **Ask the learner which repository and branch to start from**, and name the suggestion
+   when there is one: the answer is theirs, and agreeing to the suggestion is an answer.
+   Never assume it unasked. Then **check the answer before anything is built from it**,
+   including a suggestion they accepted:
+
+   ```
+   belay-catalogs check-start -- '<repo>' '<ref>'
+   ```
+
+   This is the first command a typed value reaches, so it is written with care: **single
+   quotes around each value, and the `--`, every time.** Without the quotes a repository
+   typed as ``https://example.com/a`id` `` runs `id` before the check can refuse it; without
+   the `--` a value beginning with `-` is taken for an option. A value holding a single
+   quote or a line break breaks out of the quotes and could never pass, so do not run the
+   command on it: say why, and ask again.
+
+   Exit 0 is usable. **Any other exit means no Git command**: say what it printed, in plain
+   words, and ask again. It applies the rules a catalogue's `start_from` is held to
+   (`catalogue-format.md` section 5.3), reads no file and contacts nothing, so it says
+   nothing about whether the ref exists; `git fetch` finds that out, in step 4.
 3. **Ask for two branch names**: the learner's **own** branch of the previous module, which
    the carry-forward reads (`state-lifecycle.md` section 13.4), and the name of the new
    branch, for example `<their-name>/<module-id>`. Remind them that the previous branch's
    work, `tutorial/STATE.md` included, has to be committed before they leave it, and pushed
-   if they will continue on another machine. A new branch name that begins with `-` is
-   refused the same way: ask for another. When the previous branch is not in this
-   checkout — they worked on it on another machine — propose that they fetch it, and let
-   them run it:
+   if they will continue on another machine. Both names are typed values and go into
+   commands too, so run step 2's check on each before using it, with the name in the place
+   of `<ref>` beside the repository already accepted.
+   - **A new branch name that fails**: ask for another. It is theirs to choose.
+   - **A previous branch name that fails**: do not just ask again. It is a fact with one
+     name, so `feature/#12` fails every time and the question would never end. The refusal
+     stands, because you run `git show` on that name yourself. Say why, and offer two
+     choices. **Copy it under a safe name**: check the safe name, then propose that they run
+
+     ```
+     git branch -- '<safe-name>' '<old-name>'
+     ```
+
+     and use the copy as the previous branch. The old name passed no check, so the quotes
+     and the `--` are all that protect this command: when it holds a single quote or a line
+     break, propose nothing, and leave making the copy to them. **Or go on without carrying
+     levels forward**, which is `state-lifecycle.md` section 13.4 step 4: empty ledgers, and
+     every objective at A.
+   - **A learner with no previous branch**: say the same about going on without carrying
+     levels forward, and let them decide. There is nothing to copy.
+
+   When the previous branch is not in this checkout — they worked on it on another machine —
+   propose that they fetch it, and let them run it:
 
    ```
-   git fetch -- <remote> <their-previous-branch>
+   git fetch -- '<remote>' '<their-previous-branch>'
    ```
 
    which leaves it readable as `<remote>/<their-previous-branch>` (`git remote` lists the
-   names; `origin` is the usual one). A remote or branch name that begins with `-` is
-   refused as in step 2: propose nothing, and ask for another.
+   names; `origin` is the usual one). Check the remote name the same way: propose nothing
+   until it passes.
 4. **Check `tutorial/` for the learner's own uncommitted files first**, with
    `git status --porcelain --ignored -- tutorial/`, which changes nothing. A line
    beginning `??` (untracked) or `!!` (ignored) is a file of theirs that no commit holds —
@@ -2767,36 +2803,38 @@ This runs **after the learner has chosen the course and before materialization**
    Then **propose the commands, and let the learner run them**:
 
    ```
-   git fetch -- <repo> <ref>
-   git switch -c <new-branch> FETCH_HEAD
+   git fetch -- '<repo>' '<ref>'
+   git switch -c '<new-branch>' FETCH_HEAD
    ```
 
    The `--` ends git's options, so neither the repository nor the ref can be read as one.
+   The single quotes are safe because a checked value cannot hold one, and they are needed:
+   the check refuses only the characters `catalogue-format.md` section 5.3 lists, and a
+   repository may still hold others a shell gives meaning to.
    Put it wherever git accepts it; `git switch` does not accept it before a start point,
    and `FETCH_HEAD` needs none. **You
    never run these yourself**, nor any other Git command that changes the learner's
    repository: proposing is yours, running is theirs. When one fails, read its message
    with them; never resolve it by moving or deleting a file of theirs.
-5. **Remove the `tutorial/` that came with the winner's code**, once the learner is on the
+5. **Remove the `tutorial/` that came with the starting code**, once the learner is on the
    new branch, and remove only that: what `git ls-files -- tutorial/` lists. First run
    `git status --porcelain --ignored -- tutorial/` again; any `??` or `!!` line is a file
-   of the learner's, not the winner's, and you stop exactly as in step 4. When it shows
-   none, say what is being removed and why, and propose, for the learner to run:
+   of the learner's, not the starting code's, and you stop exactly as in step 4. When the
+   listing is empty, as it is for a ref that never held an instance, there is nothing to
+   remove, and `git rm` would fail on it: go on to step 6. Otherwise say what is being removed and why,
+   and propose, for the learner to run:
 
    ```
    git rm -r --quiet -- tutorial/
    ```
 
    which deletes the tracked files and nothing else. Never read them: they are another
-   learner's instance. **The winner's code carries over; the winner's progress never
-   does.** The deletion is staged in the learner's index, and committing it is theirs.
+   instance, usually another learner's. **The code carries over; its progress never does.**
+   The deletion is staged in the learner's index, and committing it is theirs.
 6. **Materialize as for any course** — `state-lifecycle.md` section 3, from its first step,
-   where the `start_from` precondition is now met by steps 1 to 5 above —
+   where the precondition about starting from a ref is now met by steps 1 to 5 above —
    and then run the carry-forward of `state-lifecycle.md` section 13.4 before the first
-   task. If, once that section's step 6 has verified the instance, its manifest declares no
-   `starts_from: ref`, the catalogue entry and the module disagree: say so — the bundle is
-   authoritative (`catalogue-format.md` section 5) — and let the learner decide whether to
-   go on from the branch they made before anything is placed outside `tutorial/`.
+   task.
 
 One instance per workspace is unchanged: this module's instance replaces the previous one
 on a new branch, and the previous module's instance stays on the learner's previous branch.
@@ -2813,11 +2851,15 @@ on a new branch, and the previous module's instance stays on the learner's previ
   one file per objective, or another level's file to compare. Section 18.4.
 - **Treating an objective with no row as anything but A.** Section 18.1.
 - **Refusing, or arguing against, a level the learner asked for.** Section 18.5.
-- **Starting a `starts_from: ref` module from anything but its winning entry's
-  `start_from`** — a guess, a shadowed entry, the learner's previous branch. Section 18.6.
-- **Running a Git command that changes the learner's repository**, or proposing one whose
-  repository or ref begins with `-` or holds a shell character. Section 18.6.
-- **Reading the winner's `tutorial/`**, or carrying anything of it forward. Section 18.6,
+- **Starting a `starts_from: ref` module from anything the learner did not name or agree
+  to** — a guess, a shadowed entry, the entry's `start_from` taken unasked, or the learner's
+  previous branch assumed rather than given. Section 18.6.
+- **Stopping a `starts_from: ref` module because its entry has no usable `start_from`.** You
+  ask, with no suggestion. Section 18.6.
+- **Running a Git command that changes the learner's repository**, proposing one from a
+  value `belay-catalogs check-start` has not passed, or putting a typed value into that
+  check without single quotes and `--`. Section 18.6.
+- **Reading the `tutorial/` that came with the starting code**, or carrying anything of it forward. Section 18.6,
   and `state-lifecycle.md` section 13.4.
 - **Switching branch, or removing `tutorial/`, over an untracked or ignored file in it**:
   that is the learner's own, and the procedure stops for them. Section 18.6, steps 4 and 5.

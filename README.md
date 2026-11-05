@@ -317,7 +317,7 @@ its bare name:
 
 | Command | Runs | When |
 |---|---|---|
-| `belay-catalogs` | `skills/belay/scripts/catalogs.py` | the start of every session: `belay-catalogs find-instance` finds `tutorial/` in this directory or a parent. Then discovery: refresh and list courses, resolve the one you chose, follow-ups; then create `tutorial/` from it and place its supplied files. When the tutor finds a defect in the course, `belay-catalogs report` turns the report it drafted, and you read, into a link you open to send it to the author yourself |
+| `belay-catalogs` | `skills/belay/scripts/catalogs.py` | the start of every session: `belay-catalogs find-instance` finds `tutorial/` in this directory or a parent. Then discovery: refresh and list courses, resolve the one you chose, follow-ups; then create `tutorial/` from it and place its supplied files. When a module starts from a Git ref, `belay-catalogs check-start` checks the repository and branch you named before the tutor proposes a command from them. When the tutor finds a defect in the course, `belay-catalogs report` turns the report it drafted, and you read, into a link you open to send it to the author yourself |
 | `belay-validate` | `skills/belay/scripts/validate_bundle.py` | checks a new instance before the first task; authors check bundles and catalogues with it, and the tutor checks task files you wrote yourself |
 | `belay-plan-update` | `skills/belay/scripts/plan_update.py` | you asked to update a course; it plans, shows each difference, and applies only what you accepted. A resume may ask it whether the course has a newer version |
 | `belay-evidence` | `skills/belay/scripts/evidence.py` | a lesson completed; it compacts `tutorial/EVENTS.jsonl` |
@@ -429,7 +429,9 @@ yourself; the tutor never sends it. Per-objective levels for a cohort programme:
 assessment and every later one set how closely the tutor guides you on each learning
 objective, and which material it hands you, without changing what counts as done; a
 programme's modules are separate courses, and the next one can start from a branch chosen
-after it was written, carrying your levels forward from your own previous branch. Task
+after it was written: the tutor asks you which repository and branch, suggesting the one the
+catalogue names if it names one, and carries your levels forward from your own previous
+branch. Task
 lessons: a lesson's tasks come from a folder of task files, exercises or labs or user
 stories, worked one at a time in priority order through states the course names, with your
 progress in your own `STATE.md`; a course can have you write tasks of your own once it has
@@ -507,10 +509,10 @@ No pytest; six plain scripts, run from a checkout of this repository.
 
 ```
 python3 tests/test_validate_bundle.py     # 1216 assertions
-python3 tests/test_catalogs.py            # 565 assertions
+python3 tests/test_catalogs.py            # 589 assertions
 python3 tests/test_plan_update.py         # 129 assertions
 python3 tests/test_evidence.py            # 89 assertions
-python3 tests/test_bin_wrappers.py        # 66 assertions
+python3 tests/test_bin_wrappers.py        # 69 assertions
 python3 tests/test_grade.py               # 619 assertions; slow, it runs every step
 ```
 

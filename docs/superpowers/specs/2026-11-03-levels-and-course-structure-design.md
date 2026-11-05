@@ -1,7 +1,7 @@
 # Learning goals, per-objective levels, and modules as bundles — Design
 
 **Date:** 2026-11-03
-**Last amended:** 2026-11-04
+**Last amended:** 2026-11-05
 **Status:** implemented — see §7 for the decisions the implementation added;
 `bundle-format.md` §2, §6, §10, §13, `catalogue-format.md` §5.3, `runner-protocol.md`
 §15.10-15.11 and §18, `state-lifecycle.md` §13, validator checks 35-41 and catalogue checks
@@ -145,24 +145,31 @@ starts_from: ref                         # new, MAY; the only value
 ```
 
 `starts_from: ref` says: this module's starting code is not in the bundle and not in the
-participant's workspace; it is the code at a Git ref named later. The **catalog entry's
-`start_from`** names it — a `repo` URL and a `ref` — and the trainer sets it once the review
-has chosen a winner. Who writes the module and who chooses the start stay separate, and the
-catalog is the trainer's single place to say it.
+participant's workspace; it is the code at a Git ref named later. **The tutor asks the
+participant which repository and branch to start from.** The **catalog entry's
+`start_from`** — a `repo` URL and a `ref` — is the suggested answer, and the trainer may set
+it once the review has chosen a winner. Who writes the module and who chooses the start stay
+separate. (Decided on 2026-11-03, replacing a `start_from` the module could not start
+without: section 7, item 7.)
 
 **Starting the module:**
 
-1. The runner reads `start_from` from the catalog entry that won the merge for the bundle's
-   `id`. **With no `start_from`, the module cannot start yet**: the tutor says that the
-   previous module's review has not published a starting point, and stops.
+1. `belay-catalogs --json resolve <id>` prints the bundle's `starts_from` and the `start_from`
+   of the catalog entry that won the merge for its `id`. When `starts_from` is `ref`, the tutor
+   asks where to start, offering `start_from` as the suggestion when it is usable.
+   **With no usable `start_from` the tutor asks with no suggestion; the module does not
+   stop.** `belay-catalogs check-start <repo> <ref>` holds the answer to the rules a
+   `start_from` is held to, before any command is built from it, and on a failure the tutor
+   says why and asks again.
 2. The tutor proposes, and the participant runs, the Git commands that create the
    participant's new branch from the ref — for example
    `git fetch <repo> <ref> && git switch -c <participant>/<module-id> FETCH_HEAD`. The runner
    never runs a Git operation that changes the participant's repository on its own, as
    `instance_git.py` already does not.
 3. The tutor has the participant remove the `tutorial/` directory that came with the
-   winner's code — only its tracked files, with `git rm -r -- tutorial/`. **The winner's
-   code carries over; the winner's progress never does.** Before the branch switch and
+   starting code — only its tracked files, with `git rm -r -- tutorial/`, and nothing when
+   `git ls-files -- tutorial/` lists none, as for a ref that never held an instance. **The
+   code carries over; its progress never does.** Before the branch switch and
    again before the removal, an untracked or ignored file in `tutorial/` (`git status
    --porcelain --ignored`) is the participant's own and stops the procedure until they
    decide what to do with it: `git switch` silently overwrites an ignored file the new
@@ -174,6 +181,11 @@ replaces module n's on a new branch, and module n's instance stays on the partic
 previous branch.
 
 `starts_from` with any other value is a finding. A bundle without it starts as today.
+
+**A module declaring it tests behaviour only.** It is written before anyone knows whose code
+it starts on, so its validators may test APIs, outputs and tests the course ships, never file
+names or the internal structure of the starting code. This is an authoring obligation
+(`bundle-format.md` §2, §10), and nothing in the validator enforces it.
 
 ### 2.3 A lesson says which learning objectives it teaches
 
@@ -227,8 +239,8 @@ module starts. It is a summary of that module's `## Assessments`, never a copy o
 2.2, step 4):
 
 1. The tutor asks the participant for their **own** previous branch and reads its
-   `tutorial/STATE.md` through Git (`git show <branch>:tutorial/STATE.md`). It never reads the
-   winner's.
+   `tutorial/STATE.md` through Git (`git show <branch>:tutorial/STATE.md`). It never reads
+   anyone else's.
 2. It copies `## Levels` into the new `STATE.md` unchanged.
 3. It copies `## Modules` and appends one row for the module just finished.
 4. If the previous branch or its `STATE.md` cannot be read, the tutor says so, writes an
@@ -338,7 +350,7 @@ Every new key is additive and MAY: `goals` and `start_from` in a catalog; `level
 | Reader | Sees a course using this design | Result |
 |---|---|---|
 | this runner, `levels` and `starts_from` absent | — | exactly today's behaviour |
-| an older runner | unknown keys, ignored | the body for everyone, guided as today; the placement lesson runs as an ordinary assessment and offers practice; a `starts_from: ref` module starts in whatever workspace it is given, without the winner's code |
+| an older runner | unknown keys, ignored | the body for everyone, guided as today; the placement lesson runs as an ordinary assessment and offers practice; a `starts_from: ref` module starts in whatever workspace it is given, without its starting code |
 | an older validator | unknown top-level keys and entry fields; unknown lesson frontmatter keys | check 28 and catalog checks 1 and 3 **warn** and never reject; lesson frontmatter keys are read by name, so the new ones are not seen at all. Measured on 2026-11-03: nothing this design adds is inside a structure an older validator checks key by key |
 
 An older validator accepts a folder lesson's `material` files for one reason only: its
@@ -440,24 +452,26 @@ harness is the check for them, and is filed there as an issue rather than built 
 
 ## 7. Implementation notes
 
-Implemented on 2026-11-03. Writing the protocol forced six decisions this design left open;
-each is stated once, where the tutor reads it.
+Implemented on 2026-11-03. Writing the protocol forced the first six decisions below, which
+this design left open; the seventh was the project owner's, later the same day. Each is
+stated once, where the tutor reads it.
 
-1. **The runner cannot see `starts_from` before materializing.** Discovery and `resolve`
-   read the catalogue entry, never the bundle, and the learner's new branch has to exist
-   before `tutorial/` is created. So the procedure keys on the entry: `resolve --json`'s
-   `start_from` decides whether to propose a branch, and a module whose instance turns out
-   to declare `starts_from: ref` with no `start_from` stops before its first task, the
-   just-created `tutorial/` left for the learner to remove (`runner-protocol.md` §18.6). A
-   later `resolve` that also printed the bundle's `starts_from` — it is allowed to open the
-   bundle — would remove the second case.
+1. **`resolve` says whether a bundle starts from a ref, before materializing.** The learner's
+   new branch has to exist before `tutorial/` is created, and `materialize` refuses over the
+   previous module's `tutorial/`, so the tutor has to know first. `belay-catalogs --json
+   resolve` prints the bundle's `starts_from`, which it is allowed to open: the value when
+   declared, `null` when not or when the bundle cannot be read (`runner-protocol.md` §18.6).
+   `discover` does not, because it never opens a bundle. Done on 2026-11-03 (belay#96); the
+   procedure first keyed on the entry's `start_from`, which stopped being able to decide this
+   once item 7 made that key optional. An ordinary course sees no new read and no new prompt.
 2. **Git argument hygiene is the reader's and the protocol's.** The catalogue reader drops
    a `start_from` whose `repo` host or scp user does not begin with a letter or digit,
    whose `repo` holds whitespace or any of `` ` $ ; | & < > ( ) ' " \ ``, or whose `ref`
    is not `[A-Za-z0-9_][A-Za-z0-9._/-]*` free of `..`, `//`, `/.` and a trailing `/`, `.`
-   or `.lock` (`catalogue-format.md` §5.3). The tutor still refuses a `repo` or `ref`
-   beginning with `-` or holding those characters, puts `--` before them in `git fetch`,
-   and never runs the commands itself (`runner-protocol.md` §18.6).
+   or `.lock` (`catalogue-format.md` §5.3). The tutor runs `belay-catalogs check-start`,
+   which applies those rules, on whatever is about to go into a command, puts `--` before
+   the values in `git fetch`, and never runs the commands itself (`runner-protocol.md`
+   §18.6).
    The same rules cover the fetch of the learner's own previous branch when it is not in
    the checkout, which the carry-forward then reads as `<remote>/<branch>`
    (`state-lifecycle.md` §13.4).
@@ -480,3 +494,18 @@ each is stated once, where the tutor reads it.
    a section of `state-lifecycle.md`: this design was implemented on a branch without it.
    Whatever the choice, the previous `STATE.md` reaches the next module only when it is
    committed, and pushed when the learner changes machine.
+7. **The tutor asks where a module starts** (project owner, 2026-11-03). `start_from` was
+   required and its absence stopped the module, which made every module wait on the trainer.
+   Now the tutor asks the participant for a repository and branch, `start_from` is only the
+   suggested answer, and a `null` or absent one no longer stops anything. Three things follow.
+   A typed value is held to the same rules by `belay-catalogs check-start`, a command that
+   takes the values and no path, so it is expected to start without a permission prompt,
+   though that has not been measured on a live host; because that command is
+   itself the first shell line a typed value reaches, the protocol requires single quotes and
+   `--`, and the command has no help option, so a value typed as `--help` can never exit 0.
+   The start may be any repository, so a ref with no `tutorial/` skips the removal. A previous
+   branch is a fact with one name, so one that fails the check is copied under a safe name, or
+   the participant goes on without carrying levels forward. And since
+   nobody knows whose code a module starts on when it is written, its validators test
+   behaviour only: an authoring obligation (`bundle-format.md` §2, §10) that nothing in the
+   validator enforces.

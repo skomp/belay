@@ -184,7 +184,7 @@ advance_on: validated-evidence-only
 | `setup_validators` | MAY | Checks the runner performs itself, unprompted, rather than assigning them: a list of `name` + `describe` entries naming validators from `validators`. See **Setup validators** below. |
 | `report` | MAY | Where a learner's defect report goes: a `url` that starts `https://` or `mailto:`, and an optional `prefill` of `github`, `gitlab` or `none`. See **Defect reports** below. |
 | `levels` | MAY | `true` turns on per-objective levels: how closely the tutor guides a learner on each learning objective, and which `material` it loads. Default `false`; absent, the course runs exactly as it would without this key. Any value but `true` or `false` is check 35's finding. See **Levels and modules** below. |
-| `starts_from` | MAY | `ref`, the only value: the course's starting code is the code at a Git ref that the catalogue entry's `start_from` names, not anything in the bundle or the learner's workspace. Any other value is check 36's finding. See **Levels and modules** below. |
+| `starts_from` | MAY | `ref`, the only value: the course's starting code is the code at a Git ref the tutor asks the learner for, with the catalogue entry's `start_from` as the suggested answer, not anything in the bundle or the learner's workspace. Any other value is check 36's finding. See **Levels and modules** below. |
 | `grading` | MAY | How a trainer grades a cohort's work on this module: a container, validators that earn points and a judged rubric. Absent, the course is not graded. Malformed is the finding of checks 47-50. See **Cohort grading** below. |
 | `one_task_at_a_time` | SHOULD | Default `true`. |
 | `solution_code` | SHOULD | `on-request-only` or `freely`. |
@@ -1225,15 +1225,26 @@ stays readable by every released runner and validator.
 
 **`starts_from: ref`** says this module's starting code is in neither the bundle nor the
 learner's workspace: it is the code at a Git ref named later, typically the best solution
-of the previous module, which is not known until that module's review. The **catalogue
-entry's `start_from`** names the repository and the ref (`catalogue-format.md` section 5.3),
-and the trainer sets it once the review has chosen. So who writes a module and who chooses
-where it starts stay separate, and the catalogue is the one place the second is said.
+of the previous module, which is not known until that module's review. **The tutor asks the
+learner which repository and branch to start from.** The **catalogue entry's `start_from`**
+(`catalogue-format.md` section 5.3) is the suggested answer, which the trainer may set once
+the review has chosen; with none, the tutor asks with no suggestion. So who writes a module
+and who chooses where it starts stay separate.
 
-Write the module's lessons against the code that start will hold, and do not ship that
-code: it does not exist yet when you write. How a learner starts such a module — a new
-branch from the ref, the old progress left behind, the levels carried forward — is the
-runner's, in `runner-protocol.md` section 18.6 and `state-lifecycle.md` section 13.4.
+Do not ship the starting code: it does not exist yet when you write.
+
+**A `starts_from: ref` module's validators test behaviour only, and this is yours to hold.**
+The module is written before anyone knows whose code it starts on, and two starts can
+arrange the same behaviour completely differently. So a validator may test what the code
+does — an API it answers, an output it produces, a test the course itself ships — and never
+a file name or the internal structure of the starting code. A file the module's own task
+has the learner create is the module's, not the start's, and may be named. **Nothing in the
+validator enforces this**: it cannot know which paths the start will hold, so a bundle that
+breaks the rule validates clean, and fails only on a learner whose start is arranged
+differently.
+
+How a learner starts such a module — a new branch from the ref, the old progress left
+behind, the levels carried forward — is the runner's, in `runner-protocol.md` section 18.6 and `state-lifecycle.md` section 13.4.
 **A `starts_from: ref` module needs a runner that knows the key** (section 13). A bundle
 without it starts exactly as any other.
 
@@ -2454,8 +2465,13 @@ Confirm each of these by looking, not by remembering:
 - [ ] every `assesses` id is a key in `covers`, and an assessment's Theory does not state
       the answers its questions ask for
 - [ ] `levels`, if declared, is `true` or `false`, and `starts_from`, if declared, is `ref`
-      — and the catalogue that carries a `starts_from: ref` module gives its entry a
-      `start_from` once the starting ref is chosen (`catalogue-format.md` section 5.3)
+      — and a catalogue that carries a `starts_from: ref` module may give its entry a
+      `start_from` as the tutor's suggestion once a start is chosen, though it need not
+      (`catalogue-format.md` section 5.3)
+- [ ] a module declaring `starts_from: ref` has validators that test only behaviour — APIs,
+      outputs, tests the course ships — and never a file name or the internal structure of
+      the starting code, which nobody knew when you wrote them. No check does this for you
+      (section 2, **Levels and modules**)
 - [ ] every `teaches` id is a key in `covers`, and in a programme every learning objective
       is spelled the same way in every module that names it
 - [ ] every `material` entry sits on a folder lesson, names an objective that lesson
@@ -2782,9 +2798,9 @@ keys, and ignores them. The effect on a learner is precise, and worth stating pl
   so `teaches`, `material` and `placement` are not seen at all;
 - **a `starts_from: ref` module starts without the code it starts from.** This is the one
   key here whose loss is a real degradation rather than a missing convenience, and it is
-  worth saying plainly: an older runner ignores `starts_from`, never reads the catalogue
-  entry's `start_from`, and materializes the module in whatever workspace it is given, with
-  none of the code its lessons were written against and no levels carried forward. **A
+  worth saying plainly: an older runner ignores `starts_from`, never asks where to start,
+  never reads the catalogue entry's `start_from`, and materializes the module in whatever
+  workspace it is given, with none of the code its lessons were written against and no levels carried forward. **A
   programme that uses `starts_from: ref` needs a runner that knows it.** An older validator
   warns about the key as an unrecognised top-level field and accepts the bundle, so nothing
   at authoring time will tell you which runner your learners have;

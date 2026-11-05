@@ -1,7 +1,7 @@
 # Grading a cohort's module, on the trainer's machine — Design
 
 **Date:** 2026-11-03
-**Last amended:** 2026-11-04
+**Last amended:** 2026-11-05
 **Status:** implemented — `skills/belay/scripts/grade.py` and `bin/belay-grade`, validator
 checks 47-51, `bundle-format.md` §2 **Cohort grading** and §6 **Writing an exam lesson**,
 `runner-protocol.md` §15.14 and §20, `tests/test_grade.py`. **The manual run is outstanding:** the
@@ -332,5 +332,5 @@ exam lesson is taught as an ordinary lesson; `bundle-format.md` section 13 says 
 - **No grades in the cohort repository, and none to the employer.**
 - **No partial credit for a validator.**
 - **The certificate** — belay#95.
-- **The participant's tutor asking for the starting branch** — a separate change, discussed on
-  2026-11-03 and not yet decided.
+- **The participant's tutor asking for the starting branch** — a separate change, PR: belay#103;
+  the levels design, section 2.2, states it.

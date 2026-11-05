@@ -3114,7 +3114,226 @@ def test_start_from_is_normalised_in_json() -> None:
         )
 
 
+def test_check_start() -> None:
+    """What a participant types meets the rules a catalogue value meets.
+
+    Through the real CLI, with the config and cache pointing at nothing: the
+    command must read neither, so a start can be checked with no catalogue.
+    """
+    print("\ncheck-start, on a repository and ref a participant typed:")
+    with tempfile.TemporaryDirectory() as tmp:
+        absent = Path(tmp) / "absent"
+
+        def run(*argv: str) -> tuple[int, str]:
+            out = io.StringIO()
+            err = io.StringIO()
+            try:
+                with redirect_stderr(err):
+                    code = cat.main(
+                        ["--config", str(absent / "c.yaml"), "--cache-dir", str(absent),
+                         *argv],
+                        stream=out,
+                    )
+            except SystemExit as exc:
+                code = exc.code
+            return code, out.getvalue() + err.getvalue()
+
+        for repo, ref in (
+            ("git@github.com:o/r.git", "winner-m1"),
+            ("https://github.com/o/r.git", "release/1.2"),
+        ):
+            code, text = run("check-start", repo, ref)
+            record(
+                code == 0 and "Usable." in text and "Not usable" not in text
+                and repr(repo) in text and repr(ref) in text,
+                f"{repo} at {ref} is usable, exit 0",
+                f"exit {code}: {text}",
+            )
+
+        for repo, ref, naming in (
+            ("ssh://-oProxyCommand=id/x", "main", "'start_from.repo'"),
+            ("https://github.com/a/b`id`", "main", "'start_from.repo'"),
+            ("https://github.com/o/r.git", "main; curl evil | sh", "'start_from.ref'"),
+            ("https://github.com/o/r.git", "", "'start_from.ref' must be a non-empty"),
+            ("", "main", "'start_from.repo' must be a non-empty"),
+        ):
+            code, text = run("check-start", "--", repo, ref)
+            other = "'start_from.ref'" if "repo" in naming else "'start_from.repo'"
+            record(
+                code == 1 and "Not usable" in text and naming in text
+                and other not in text and "Usable." not in text,
+                f"repo {repo!r} ref {ref!r} is refused, exit 1, naming only the "
+                f"value at fault",
+                f"exit {code}: {text}",
+            )
+
+        code, text = run("check-start", "--", "http://h/r.git", "-x")
+        record(
+            code == 1 and "'start_from.repo'" in text and "'start_from.ref'" in text,
+            "two bad values report two problems, each named",
+            f"exit {code}: {text}",
+        )
+
+        code, payload_text = run("--json", "check-start", "git@github.com:o/r.git", "winner-m1")
+        record(
+            code == 0 and json.loads(payload_text) == {
+                "command": "check-start",
+                "repo": "git@github.com:o/r.git",
+                "ref": "winner-m1",
+                "usable": True,
+                "problems": [],
+                "exit_code": 0,
+            },
+            "--json on a usable start: usable, no problems, exit_code 0",
+            payload_text,
+        )
+        code, payload_text = run("--json", "check-start", "--", "https://github.com/o/r.git", "a..b")
+        payload = json.loads(payload_text)
+        record(
+            code == 1 and payload["usable"] is False and payload["exit_code"] == 1
+            and payload["repo"] == "https://github.com/o/r.git" and payload["ref"] == "a..b"
+            and len(payload["problems"]) == 1
+            and "'start_from.ref' 'a..b' is not a usable" in payload["problems"][0],
+            "--json on an unusable start: not usable, the one problem, exit_code 1",
+            payload_text,
+        )
+        record(
+            payload["problems"] == cat.start_from_problems(
+                {"repo": "https://github.com/o/r.git", "ref": "a..b"}
+            ),
+            "the problems are start_from_problems' own, not a second rule",
+            payload_text,
+        )
+
+        # A value is typed by a participant, so one that looks like an option
+        # must never read as a pass. `--help` was the trap: exit 0, and help.
+        for argv in (
+            ("--help", "main"),
+            ("-h", "main"),
+            ("https://github.com/o/r.git", "--help"),
+            ("-oProxyCommand=id", "main"),
+            ("--json", "main"),
+        ):
+            code, text = run("check-start", *argv)
+            record(
+                code == 2 and "Usable." not in text,
+                f"without --, {argv!r} is a usage error (exit 2), never a pass",
+                f"exit {code}: {text}",
+            )
+        code, text = run("check-start", "--", "--help", "main")
+        record(
+            code == 1 and "'start_from.repo' '--help'" in text,
+            "with --, a repo typed as --help is checked, and refused, exit 1",
+            f"exit {code}: {text}",
+        )
+
+        record(not absent.exists(), "it created neither a config nor a cache", str(absent))
+
+
 PROGRAMME_CATALOG = HERE / "fixtures" / "levelled-programme" / "catalog.yaml"
+
+
+def test_resolve_prints_the_bundles_starts_from() -> None:
+    """belay#96, through a real process: the tutor decides from this before materializing."""
+    print("\nresolve --json carries the bundle's starts_from:")
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        config = root / "catalogs.yaml"
+        odd = root / "odd"
+        broken = root / "broken"
+        for bundle, manifest in (
+            (odd, "id: odd\nstarts_from: branch\n"),
+            (broken, "id: [\n"),
+        ):
+            bundle.mkdir()
+            (bundle / "tutorial.yaml").write_text(manifest, encoding="utf-8")
+            (bundle / "STATE.template.md").write_text("x\n", encoding="utf-8")
+        catalog = root / "catalog.yaml"
+        entries = [
+            yaml_entry(name, name)
+            for name in ("odd", "broken")
+        ]
+        catalog.write_text(
+            "catalog_version: 1\ntutorials:\n" + "".join(entries), encoding="utf-8"
+        )
+        config.write_text(
+            file_config(
+                ("prog", PROGRAMME_CATALOG), ("sf", START_FROM_CATALOG), ("own", catalog)
+            ),
+            encoding="utf-8",
+        )
+
+        def resolve(identifier: str) -> tuple[int, dict]:
+            proc = subprocess.run(
+                [sys.executable, str(SCRIPTS / "catalogs.py"), "--config", str(config),
+                 "--cache-dir", str(root / "cache"), "--json", "resolve", identifier],
+                capture_output=True, text=True, timeout=60,
+                env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+            )
+            return proc.returncode, json.loads(proc.stdout)
+
+        code, entry = resolve("stockroom-forecasting")
+        record(
+            code == 0 and entry["starts_from"] == "ref",
+            "module 2 of the programme: starts_from is 'ref'",
+            f"exit {code}: {entry.get('starts_from', '(absent)')!r}",
+        )
+        code, entry = resolve("stockroom-basics")
+        record(
+            code == 0 and "starts_from" in entry and entry["starts_from"] is None,
+            "module 1 declares none: the key is there, and null",
+            f"exit {code}: {entry.get('starts_from', '(absent)')!r}",
+        )
+        code, entry = resolve("with-start")
+        record(
+            code == 1 and entry["bundle_present"] is False
+            and "starts_from" in entry and entry["starts_from"] is None
+            and entry["start_from"] is not None,
+            "a bundle whose path is missing: null, exit 1, and the entry's own "
+            "start_from is not mistaken for it",
+            f"exit {code}: {entry.get('starts_from', '(absent)')!r}",
+        )
+        code, entry = resolve("broken")
+        record(
+            "starts_from" in entry and entry["starts_from"] is None,
+            "a manifest that does not parse: null, never a crash",
+            f"exit {code}: {entry.get('starts_from', '(absent)')!r}",
+        )
+        code, entry = resolve("odd")
+        record(
+            entry["starts_from"] == "branch",
+            "an undefined value is reported as declared; judging it is check 36's",
+            f"exit {code}: {entry.get('starts_from', '(absent)')!r}",
+        )
+        proc = subprocess.run(
+            [sys.executable, str(SCRIPTS / "catalogs.py"), "--config", str(config),
+             "--cache-dir", str(root / "cache"), "--json", "discover"],
+            capture_output=True, text=True, timeout=60,
+            env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+        )
+        listed = json.loads(proc.stdout)["tutorials"]
+        record(
+            len(listed) >= 2 and not any("starts_from" in e for e in listed),
+            "discover does not carry it: discover never opens a bundle",
+            repr([e["id"] for e in listed if "starts_from" in e]),
+        )
+
+
+def yaml_entry(identifier: str, path: str) -> str:
+    return (
+        f"  - id: {identifier}\n"
+        f"    title: {identifier}\n"
+        f"    description: A course.\n"
+        f"    subjects: [testing]\n"
+        f"    level: beginner\n"
+        f"    workspace_kind: existing-repository\n"
+        f"    covers:\n"
+        f"      a-concept:\n"
+        f"        summary: A concept.\n"
+        f"    source:\n"
+        f"      type: local\n"
+        f"      path: {path}\n"
+    )
 
 
 def test_levelled_programme_end_to_end() -> None:
@@ -4511,6 +4730,8 @@ def main() -> int:
         test_find_instance,
         test_start_from_is_normalised_in_json,
         test_read_start_from_value_by_value,
+        test_check_start,
+        test_resolve_prints_the_bundles_starts_from,
         test_levelled_programme_end_to_end,
     ):
         try:
