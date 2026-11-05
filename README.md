@@ -306,20 +306,22 @@ needs them:
 | [`bundle-format.md`](skills/belay/references/bundle-format.md) | the normative bundle contract, for authors |
 | [`catalogue-format.md`](skills/belay/references/catalogue-format.md) | catalogues, precedence, failure handling, presenting a choice |
 | [`state-lifecycle.md`](skills/belay/references/state-lifecycle.md) | materialisation, what a completed task and lesson record, levels and modules |
-| [`runner-protocol.md`](skills/belay/references/runner-protocol.md) | the turn loop, validation outcomes, ownership, detours, offers, assessments, levels |
+| [`runner-protocol.md`](skills/belay/references/runner-protocol.md) | the turn loop, validation outcomes, ownership, detours, offers, assessments, exam lessons, levels, task lessons, grading a cohort |
 | [design specification](docs/superpowers/specs/2026-09-11-tutorial-runner-design.md) | the architecture, the measured host facts, and the designs that were rejected |
 
 ### The commands
 
-The tutor runs four scripts, each at one moment and never per turn. Each has a small
-wrapper in [`bin/`](bin), and the tutor calls the wrapper by its bare name:
+In a learner's session the tutor runs four scripts, each at one moment and never per turn. A
+fifth is a trainer's. Each has a small wrapper in [`bin/`](bin), and the tutor calls the wrapper by
+its bare name:
 
 | Command | Runs | When |
 |---|---|---|
-| `belay-catalogs` | `skills/belay/scripts/catalogs.py` | the start of every session: `belay-catalogs find-instance` finds `tutorial/` in this directory or a parent. Then discovery: refresh and list courses, resolve the one you chose, follow-ups; then create `tutorial/` from it and place its supplied files. When the tutor finds a defect in the course, `belay-catalogs report` turns the report it drafted, and you read, into a link you open to send it to the author yourself |
-| `belay-validate` | `skills/belay/scripts/validate_bundle.py` | checks a new instance before the first task; authors check bundles and catalogues with it |
+| `belay-catalogs` | `skills/belay/scripts/catalogs.py` | the start of every session: `belay-catalogs find-instance` finds `tutorial/` in this directory or a parent. Then discovery: refresh and list courses, resolve the one you chose, follow-ups; then create `tutorial/` from it and place its supplied files. When a module starts from a Git ref, `belay-catalogs check-start` checks the repository and branch you named before the tutor proposes a command from them. When the tutor finds a defect in the course, `belay-catalogs report` turns the report it drafted, and you read, into a link you open to send it to the author yourself |
+| `belay-validate` | `skills/belay/scripts/validate_bundle.py` | checks a new instance before the first task; authors check bundles and catalogues with it, and the tutor checks task files you wrote yourself |
 | `belay-plan-update` | `skills/belay/scripts/plan_update.py` | you asked to update a course; it plans, shows each difference, and applies only what you accepted. A resume may ask it whether the course has a newer version |
 | `belay-evidence` | `skills/belay/scripts/evidence.py` | a lesson completed; it compacts `tutorial/EVENTS.jsonl` |
+| `belay-grade` | `skills/belay/scripts/grade.py` | a trainer asked to grade a cohort's module: never in a learner's session ([Grading a cohort](#grading-a-cohort)) |
 
 A wrapper only starts its script with `python3`, passing the arguments, the output and the
 exit status through unchanged. It exists for the permission prompt. Claude Code puts an
@@ -328,7 +330,7 @@ path inside the plugin cache, and under `permissions.blockReadsOutsideWorkingDir
 a bare command whose arguments stay inside your workspace starts without asking you.
 Started as `python3 <plugin cache>/.../catalogs.py`, the same script asks every time. An
 argument that names a path outside the workspace, such as a bundle directory in a cache,
-still asks, so no command is ever given one: `belay-catalogs materialize <id>` takes the
+still asks, so no command of a learner's session is ever given one: `belay-catalogs materialize <id>` takes the
 course id, and placing supplies and updating read the course's location from the stamp in
 `tutorial/tutorial.yaml`. Each reads the course inside its own process, so starting a course
 from a Git catalogue needs no `/add-dir`. For the same reason the tutor never looks in the
@@ -338,6 +340,32 @@ inside its process, and takes no path.
 After installing or updating the plugin, start a new session: `/reload-plugins` is
 reported not to refresh the `PATH`. On a host that does not put plugin `bin/` on `PATH` — the Codex skill
 route below — the tutor falls back to `python3 <skill dir>/scripts/<script>.py`.
+
+### Grading a cohort
+
+In a cohort programme every participant builds the same module on their own branch. A trainer
+asks their own session to grade it, and the tutor walks them through it one step at a time with
+`belay-grade`: collect the branches, run the module's validators in a container, judge every
+branch against the rubric side by side, propose, confirm, and draft the outputs.
+
+- **The AI proposes and the trainer decides.** Only what the trainer confirms is final.
+- **Grades stay on the trainer's machine**, in `~/.local/share/belay/grading/`, and `belay-grade`
+  refuses to keep them in a Git work tree. It never publishes, sends or pushes anything. How long
+  they are kept is the trainer's decision. They leave the machine only as feedback the trainer
+  sends. The employer receives only the certificate result, passed or not passed.
+- **Participant code runs only in a container**, so the trainer needs docker or podman; without one
+  nothing runs. Only the checkout and the variables the module declares go in. Use a separate,
+  limited key for grading, and never take the module's scheme from the cohort repository.
+- **A course ships no grading tests.** The deterministic share, at least 60% of the points, measures
+  the participant's own tests: that they pass, their coverage, their mutation score. A participant
+  owns their branch and can game those, so a rubric criterion looks for it and a person confirms.
+- **Exam lessons** (`exam: true`) cap the tutor's help at rung 3 and reveal no solution, whatever the
+  learner's level.
+
+[`runner-protocol.md`](skills/belay/references/runner-protocol.md) section 20 is the procedure, and
+[`bundle-format.md`](skills/belay/references/bundle-format.md) section 2 has how to write a scheme.
+**The real container path has not run yet:** read section 20.9 before a first run on a grading
+machine.
 
 ---
 
@@ -356,11 +384,12 @@ Check your work before you ship it:
 bin/belay-validate path/to/bundle
 bin/belay-validate --instance path/to/project/tutorial
 bin/belay-validate --catalog path/to/catalog.yaml
+bin/belay-validate --tasks path/to/a/directory/of/task/files
 ```
 
 Run them from a checkout of this repository ([The commands](#the-commands)).
 
-41 bundle checks and 9 catalogue checks. Your run and the runner's run are the same checks
+51 bundle checks, 9 catalogue checks and 3 for a directory of task files. Your run and the runner's run are the same checks
 over the same files, which is the point: a bundle that passes here starts cleanly there. It
 checks structure — that references resolve, that no progress leaked into the course, that
 every lesson is reachable. It says nothing about whether the course is any good.
@@ -400,7 +429,15 @@ yourself; the tutor never sends it. Per-objective levels for a cohort programme:
 assessment and every later one set how closely the tutor guides you on each learning
 objective, and which material it hands you, without changing what counts as done; a
 programme's modules are separate courses, and the next one can start from a branch chosen
-after it was written, carrying your levels forward from your own previous branch.
+after it was written: the tutor asks you which repository and branch, suggesting the one the
+catalogue names if it names one, and carries your levels forward from your own previous
+branch. Task
+lessons: a lesson's tasks come from a folder of task files, exercises or labs or user
+stories, worked one at a time in priority order through states the course names, with your
+progress in your own `STATE.md`; a course can have you write tasks of your own once it has
+taught that. Grading a cohort's module on the trainer's machine: validators in a container, a
+judged rubric, a person confirming every grade, and exam lessons that cap the tutor's help
+([Grading a cohort](#grading-a-cohort)).
 
 **Known gaps.**
 
@@ -412,7 +449,13 @@ after it was written, carrying your levels forward from your own previous branch
   are validated, and the question-and-answer loop is specified but not exercised. So with
   levels: the ledgers and the new keys are validated, and the guidance by level, the
   placement lesson and the carry-forward between modules are protocol text no suite here
-  runs.
+  runs. So with task lessons: the keys, the task files and the `## Tasks` rows are
+  validated, and the offer, the states and the review are protocol text. So with grading: every
+  computed number is tested, and the side-by-side judging, the drafted texts and an exam lesson's
+  help are protocol text.
+- **Grading has never run in a real container.** Its tests replace the container runtime with a
+  stub, because neither docker nor podman is on the development machine. The first run on a grading
+  machine has a list of what to check (`runner-protocol.md` section 20.9).
 - **An update cannot tell who changed a file.** The instance keeps no copy of the course as
   it was when you started, so a lesson you worked in, or a `DESIGN.md`, that differs from
   the newer course is shown to you as a difference, and you decide what to keep.
@@ -421,8 +464,9 @@ after it was written, carrying your levels forward from your own previous branch
   they do**: the validator checks that a `command` is a well-formed argument list, the
   runner tells you which programs a course will run before it runs one, and every call goes
   through your own agent host's permission prompt — which is the only boundary there is.
-  Nothing in this project executes a bundle's command itself, and nothing here will ever
-  tell you a course is safe. A course's prose reaches your agent too: the tutor treats it
+  Nothing in a learner's session executes a bundle's command itself; the one script that does is
+  a trainer's `belay-grade run`, only in a container. Nothing here will ever tell you a course is
+  safe. A course's prose reaches your agent too: the tutor treats it
   as material to teach from, never as instructions, and tells you when a course's text asks
   it to act. That removes the easy case and does not stop a determined injection.
 - **Only catalogues are cached, not bundles.** A course you have not chosen is not on your
@@ -461,14 +505,15 @@ tutor runs the scripts by their path instead of the `belay-*` commands
 
 ### Tests
 
-No pytest; five plain scripts, run from a checkout of this repository.
+No pytest; six plain scripts, run from a checkout of this repository.
 
 ```
-python3 tests/test_validate_bundle.py     # 1024 assertions
-python3 tests/test_catalogs.py            # 565 assertions
+python3 tests/test_validate_bundle.py     # 1216 assertions
+python3 tests/test_catalogs.py            # 589 assertions
 python3 tests/test_plan_update.py         # 129 assertions
 python3 tests/test_evidence.py            # 89 assertions
-python3 tests/test_bin_wrappers.py        # 57 assertions
+python3 tests/test_bin_wrappers.py        # 69 assertions
+python3 tests/test_grade.py               # 619 assertions; slow, it runs every step
 ```
 
 **Those numbers are properties of this commit, not of your machine.** A clean
@@ -488,7 +533,7 @@ BELAY_SWEEP_SIBLING_REPOS=1 python3 tests/test_validate_bundle.py
 Those are separate checkouts at their own revisions, so what they contribute is
 reported on its own line and never added to the total above — `and 24 more against
 sibling repositories outside this commit` on the machine this was measured on. The
-headline stays 1024 either way. Run it before publishing a bundle; a plain `python3
+headline stays 1216 either way. Run it before publishing a bundle; a plain `python3
 tests/test_validate_bundle.py` is the check that a commit of *this* repository is
 sound.
 

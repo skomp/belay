@@ -6,8 +6,9 @@ lesson completes, when an offer of an optional lesson is accepted or deferred, w
 learner acknowledges the assumed-concept review, when you need to advance
 `active_lesson`, when an assessment ends or is interrupted (section 11), when the
 learner asks to update the course to a newer version (section 3.2), when the learning
-record is missing, broken or asked about (section 12), or when a level changes or a module
-that starts from a ref is materialized (section 13).
+record is missing, broken or asked about (section 12), when a level changes or a module
+that starts from a ref is materialized (section 13), or when a task lesson's task is taken,
+skipped or changes state (section 14).
 
 `STATE.md` is the only place a learner's progress is recorded. Nothing in the bundle
 records progress; nothing outside `STATE.md` in the instance records it either. If you
@@ -90,11 +91,12 @@ work.
 
 ### Body sections
 
-All seven headings are always present, even when a section says "None". Five further
+All seven headings are always present, even when a section says "None". Six further
 sections appear only once the instance needs them: *Generated lessons*, once a lesson has
 been written into this instance (section 8.5), *Optional lessons*, once one has been
-offered (section 9.1), *Assessments*, once one has been taken (section 11.1), and *Levels*
-and *Modules*, once a level is set or carried forward (section 13).
+offered (section 9.1), *Assessments*, once one has been taken (section 11.1), *Levels*
+and *Modules*, once a level is set or carried forward (section 13), and *Tasks*, once a
+task lesson's task has been taken or skipped (section 14).
 
 | Section | Holds | Does not hold |
 |---|---|---|
@@ -123,12 +125,13 @@ Preconditions:
 - the entry's `source` resolves to a readable bundle directory. `belay-catalogs materialize`
   resolves it itself, exactly as `belay-catalogs resolve` does, from what discovery left on
   disk, and refuses when it does not;
-- the chosen entry's `start_from` has been read, with `belay-catalogs resolve <id> --json`.
-  When it is a mapping, the module starts from a ref, and `runner-protocol.md` section 18.6
-  comes first: the learner's new branch, and the removal of the `tutorial/` that came with
-  it, are what make the last precondition below true. Once that section's steps 1 to 5 are
-  done, this precondition is met and you go on from step 1 below. When it is `null`, that section's
-  step 1 says what to check once step 6 below has verified the instance;
+- the chosen entry has been read, with `belay-catalogs --json resolve <id>`. When its
+  `starts_from` is `ref`, the module starts from a ref, and `runner-protocol.md` section 18.6
+  comes first, unless it has already put the learner on the new branch: that branch, and the
+  removal of the `tutorial/` that came with it, are what make the last precondition below
+  true. Once that section's steps 1 to 5 are done, this precondition is met and you go on
+  from step 1 below. Any other `starts_from` is an ordinary course, and this asks nothing
+  more of it;
 - the workspace root is known, and satisfies the bundle's `workspace_kind`;
 - there is no existing `tutorial/` in that workspace. If there is, stop — `tutorial/` is
   singular, and materializing over it destroys a learner's progress. When the existing
@@ -360,11 +363,12 @@ What the command does, step by step:
    point. Say the entry's `describe` line before each one — the learner was told at step 7
    that this would happen, and this is it happening.
 
-   **You run them yourself, as the agent, through your own host.** Nothing in this skill
-   executes a validator, and nothing in it ever will: the moment a script here ran a
-   bundle's command, the call would stop passing through the host's permission layer, and
-   that layer is the only boundary there is. `runner-protocol.md` section 14 states the
-   rule and why it is the one thing this design must not do.
+   **You run them yourself, as the agent, through your own host.** In a learner's session
+   nothing in this skill executes a validator, and nothing in it ever will: the moment a
+   script here ran a bundle's command, the call would stop passing through the host's
+   permission layer, and that layer is the only boundary there is. `runner-protocol.md`
+   section 14 states the rule, its one exception, a trainer's `belay-grade run`, and why it
+   is the one thing this design must not do.
 
    **Nothing about a setup validator is progress.** Same rule `supplies` carries: nothing
    is written to `STATE.md` for a setup check that passed, and none of it is a task the
@@ -860,6 +864,7 @@ started lets the tutor assume it exists.
   than concept ids under "not demonstrated";
 - a *Levels* or *Modules* row that does not parse, a level other than `A`, `B` or `C`, or
   one objective or one module recorded twice (section 13.5);
+- a *Tasks* row that does not parse, or the other cases section 14.4 lists;
 - `tutorial_id` does not match the manifest's `id`;
 - `STATE.template.md` is present in the instance;
 - the manifest names a lesson file that does not exist.
@@ -1724,23 +1729,26 @@ It runs **once**, when a module that declares `starts_from: ref` is materialized
 
 1. **Read the learner's own previous `STATE.md`, through Git.** The branch is the one they
    named at `runner-protocol.md` section 18.6 step 3; read it with
-   `git show <their-previous-branch>:tutorial/STATE.md`, which changes nothing in their
+   `git show '<their-previous-branch>:tutorial/STATE.md'`, which changes nothing in their
    repository. When the branch is not in this checkout, that step had the learner fetch it,
-   and the name to read is `<remote>/<their-previous-branch>`. **Never read the
-   winner's** — not from the winner's branch, and not from the `tutorial/` that came with
-   the winner's code, which `runner-protocol.md` section 18.6 removed unread.
+   and the name to read is `<remote>/<their-previous-branch>`. **Never read anyone else's**
+   — not from the branch the start came from, unless that is also their own previous branch,
+   and not from the `tutorial/` that came with the starting code, which `runner-protocol.md`
+   section 18.6 removed unread.
 2. **Copy its `## Levels` into the new `STATE.md` unchanged** — every row, including rows
    for objectives this module does not cover.
 3. **Copy its `## Modules`, and append one row** for the module just finished (13.3). When
    that module's `status` is not `complete`, append nothing for it, and say so: the row
    records a finished module, and an unfinished one has no completion date to give it.
-4. **If the previous branch or its `STATE.md` cannot be read**, say so — which one, and
-   why — then write an empty *Levels* and an empty *Modules*, each saying `None.`, and
+4. **If the previous branch or its `STATE.md` cannot be read, or the learner has no
+   previous branch or chose at `runner-protocol.md` section 18.6 step 3 to go on without
+   carrying levels forward**, say so — which one, and why — then write an empty *Levels* and an empty *Modules*, each saying `None.`, and
    continue: every objective is at A (13.1). **Never borrow another learner's record** to
-   fill the gap, the winner's included. A level is a statement about one person.
+   fill the gap, including the one the start came from. A level is a statement about one person.
 
 Both sections are written in step 2 to 4 even when there is nothing to copy, so the new
-`STATE.md` shows that the carry-forward ran.
+`STATE.md` shows that the carry-forward ran. It copies those two sections and no other:
+`## Tasks` belongs to the module that wrote it (section 14.3).
 
 **The carry-forward needs the previous `STATE.md` committed, and pushed** when the learner
 continues on another machine. So a `starts_from: ref` module, when the learner is asked
@@ -1764,3 +1772,102 @@ Report, and let the learner decide, as section 7 says for every structural defec
 Do not guess which of two rows was meant, and do not repair a level from the learning
 record: it is evidence, never progress (section 12.1). A level that looks wrong but parses
 is not a defect; the learner may ask for a different one.
+
+---
+
+## 14. Task rows
+
+A task lesson's tasks come from a directory of task files (`bundle-format.md` section 6,
+**Writing a task lesson**), and the learner's progress through them is one section of
+`STATE.md`. What the tutor does with them is `runner-protocol.md` section 19; this section is
+what `STATE.md` records. A shared tracker such as a GitHub issue cannot hold it: every learner
+of a cohort works on the same task, and an issue has one state for all of them.
+
+### 14.1 `## Tasks`
+
+```markdown
+## Tasks
+
+- `012-lead-scoring` — reviewed — PR #14; 2027-03-04
+- `013-dedupe` — handed-off — 2027-03-05
+- `014-export` — skipped — 2027-03-05 (depends on 013, which is not merged)
+```
+
+**One row per task, updated in place**: `` - `<id>` — <state> — ``, then free text that ends in
+a date, and an optional parenthesis. Write the separators as em dashes; check 46 also reads an
+en dash or a hyphen, as for *Levels* (13.1). A long row may wrap: an indented line below a bullet
+is read as part of that bullet, so the date and the parenthesis may sit on a later line.
+
+- **The id** is the task file's `id`.
+- **The state** is one of the active lesson's states (`runner-protocol.md` section 19), or
+  `skipped`. A row is in the state whose work is under way; only the last state is entered once
+  its work is finished (`runner-protocol.md` section 19.2).
+- **The free text** may be empty, and holds what the course or the tutor needs to name: a pull
+  request, the result of a review (14.2). Nothing here calls a service to find out about it.
+- **The date** is the day of the last change to the row, `YYYY-MM-DD`.
+- **The parenthesis** holds the reason for a skip, or for taking a task out of order, and for a
+  task the learner asked to add it also names the lesson it was taken in. It survives a state
+  change, so an out-of-order reason is not lost; only a reopening rewrites it, or taking again a
+  task left open under an earlier lesson, which keeps the row's state rather than writing the
+  first state as moment 1 of 14.2 does (`runner-protocol.md` section 19).
+
+> **A task with no row has not been started.**
+
+So a fresh instance has no *Tasks* section, `STATE.template.md` never has one, and nobody
+writes a row to say a task is waiting.
+
+### 14.2 When a row is written
+
+Only while a task lesson is active, and at exactly four moments, each of which sets the row's
+date and `updated`:
+
+1. **the learner takes a task** — the row, in the first state. It records that they took the
+   task, which has happened, and claims nothing about the work (section 1). A task taken out of
+   order carries the reason in its parenthesis;
+2. **the learner skips a task** — the row, in `skipped`, with the reason in its parenthesis;
+3. **the state changes**, forwards or back, a reopening included, by `runner-protocol.md` section
+   19.2 — the row is rewritten in place, and *Next task* with it;
+4. **a review ends** (`runner-protocol.md` section 19.4) — the free text of the **existing** row
+   gains which checklist, and what was not met, kept brief, and earlier results stay. A review
+   of a file not yet taken has no row and writes none: it is only spoken.
+
+A row entering the last state is also a completed task, so section 4 applies. "Validates" there
+means here that the body's condition for that state is met, whether or not it names a validator.
+*Concepts demonstrated* also takes an objective at moment 4, when the work reviewed shows the
+learner using it, by the test of section 4's item 2: used, not explained. No validator need
+have run, because the review is the evidence.
+
+A row moved to an earlier state is not a failure and is not recorded as one; the row simply says
+where the task is now.
+
+No learning-record event is written for a row or a review. The record's event types are a closed
+set (section 12.2), and none of them holds either.
+
+### 14.3 The section belongs to the module
+
+- **Completing a lesson leaves the rows alone.** Section 5 resets nothing here, so one module's
+  rows accumulate across its task lessons, and a row may outlive the lesson that declared its
+  state. Which rows the active lesson acts on is `runner-protocol.md` section 19, at its top.
+- **A new module starts with no rows.** The carry-forward (13.4) does not copy them, because
+  they are about that module's tasks and not about the learner.
+- **An update leaves the rows alone** (section 3.2), including a row naming a task file the new
+  version removed. The offer lists only files that exist, so such a row is simply kept.
+
+Validator check 46 checks the shape in an instance: a row that does not parse, an id or a state
+that is not `[a-z0-9-]+`, a date that is not a date, two rows for one id. It never compares a
+row with the bundle's task files, because a row may name a task the learner wrote, and never
+with `task_states`, because a row may outlive the lesson that declared them.
+
+### 14.4 Inconsistencies to report rather than repair
+
+Report, and let the learner decide, as section 7 says for every structural defect:
+
+- a *Tasks* row that does not parse, or one id with two rows;
+- two rows that would both be the active task (`runner-protocol.md` section 19);
+- a row for a task file in the active lesson's own `tasks` directory whose state is neither one
+  of that lesson's states nor `skipped`. That file's states can only have come from this lesson,
+  so the course changed under the row, or the row was edited.
+
+Do not guess which was meant. These are not inconsistencies: a row outside the active lesson's
+scope, which is kept and ignored; and a row for a learner's own task file in a state this lesson
+does not declare, which an earlier lesson wrote and which counts as closed.

@@ -31,3 +31,6 @@ what is new here.
 **01 - Placement.** A short check of the two new objectives.
 
 **02 - Forecasting one item.** Estimate demand for one item and state the error.
+
+**03 - Working through the ordering stories.** Three prioritised stories, then a use case
+cut into stories of your own.
