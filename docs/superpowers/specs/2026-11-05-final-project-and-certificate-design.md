@@ -26,6 +26,11 @@ hands on.
   points on the final project, whose own gate they also passed.** Module scores count for nothing
   beyond the gate. Everyone continues from the best solution of each module, so a weak module does
   not follow a participant to the end, but the final project stands on its own.
+- **A missed module gate stays open until the certificate is run.** Nobody is told after an early
+  module that the certificate is out of reach. The participant makes the gate up on the same task
+  (section 3.1). They have seen the best solution by then and could copy it; that is accepted,
+  because the gate only asks that the requirement is met, and the final project is solo work with
+  its own threshold.
 - **The result rests on the trainer's confirmed grades**, never on the self-run assessments in a
   participant's repository, which are traceable and not tamper-proof (levels design, section 1.2).
 - **The employer receives only passed or not passed.** Grades, levels, assessment results and
@@ -78,20 +83,69 @@ tutorials: [ ... ]
 
 **A participant passes when all of these hold:**
 
-1. For every id in `modules`, they are in that module's `final.json` under `participants`, and
-   their `gate` is true or null. Null means the module declares no gate, so being graded is enough.
+1. For every id in `modules`, **either** they are in that module's `final.json` under
+   `participants` with a `gate` of true or null, **or** they have a confirmed make-up of that module
+   (section 3.1) with a `gate` of true or null. Null means the module declares no gate, so being
+   graded is enough.
 2. They are in the `final.json` of **exactly one** id in `final_project`.
 3. In that file, their `gate` is true or null, and `total * 100 >= final_project_share * max_total`,
    compared in whole numbers.
 
-**Anything else is not passed, with the reason recorded**: a gate not passed, a participant in
-`not_graded`, a participant absent from a module, no final project, two final projects, or too few
-points. Two final projects is a reason and not a guess, because Belay cannot know which one counts;
+**Anything else is not passed, with the reason recorded**: a gate not passed and not made up, a
+participant in `not_graded` or absent from a module with no make-up, no final project, two final
+projects, or too few points. Two final projects is a reason and not a guess, because Belay cannot know which one counts;
 the trainer removes one through the grading steps.
 
 **The set of participants** is everyone named in any of those `final.json` files, under
-`participants` or `not_graded`. A participant is known by the part of their branch name before the
+`participants` or `not_graded`, or holding a make-up of a listed module. A participant is known by the part of their branch name before the
 slash, so the same id must be used on every branch of the cohort.
+
+### 3.1 Making up a missed gate
+
+A participant whose gate is open makes it up on the **same task**, on a branch of its own:
+`<participant>/<module-id>-makeup`. "Open" means a gate of false, a place in `not_graded`, or no
+branch at the checkpoint, so someone who was ill is covered too.
+
+**The separate branch is required.** `belay-grade confirm` refuses when a module branch has moved
+since the proposal, so a fix pushed to the module branch would block every later grade change in
+that module. It would also leave the graded commit no longer at the branch's head. The participant
+may start the make-up branch from their module branch; nothing requires it.
+
+```
+belay-grade makeup run     <repo> <module-id> <participant> --bundle <dir>
+belay-grade makeup propose <repo> <module-id> <participant> --bundle <dir> --judgement <file>
+belay-grade makeup confirm <repo> <module-id> <participant> --bundle <dir> --by <name>
+                           [--change <criterion>=<points>:<reason>]
+```
+
+`belay-grade collect` fetches the branch as it fetches any other, and lists make-up branches under
+their own heading. The steps then follow the grading run, with these differences:
+
+- **Only the gate counts.** `run` runs only the gate validators, in the same container with the same
+  rules. The tutor judges only the gate criteria. A module with no gate runs nothing, and the trainer
+  confirms that the work exists.
+- **The tutor judges this one branch against the standard**, with no comparison. Nothing is ranked.
+- **A runtime fault records no result**, as in grading: it is not the participant's result.
+- **`confirm` refuses when the make-up branch has moved** since the proposal.
+
+**`makeup run` refuses, naming the problem, when:** the module has no confirmed `final.json`; the
+participant already holds a gate of true or null in it, because there is nothing to make up; the
+branch does not exist; or the bundle's `bundle_version` differs from the one in the module's
+`final.json`, because the make-up must meet the standard the cohort met.
+
+**It writes** to `<store>/<cohort>/<module>/makeup/<participant>/`: `run.json`, `proposal.json` and
+`final.json`, the last holding `commit`, `gate`, the gate validators and criteria with their
+evidence, `confirmed_by` and `confirmed_at`, and archiving an earlier attempt as module grading does.
+
+**What it leaves alone:** the module's own `final.json`, and so the participant's score, the ranking,
+and the best solution everyone continued from. A make-up changes only the certificate rule.
+
+**There is no limit on attempts and no date in the tool.** The last moment is the trainer's
+certificate run. A failed attempt records a gate of false, and a later attempt replaces it.
+
+**What people see.** The participant's tutor already says a gate is "not met yet". The trainer's
+feedback at a checkpoint says the same and names the make-up, and never says the participant failed.
+`details.json` records that a gate was made up; `results.csv` and the certificate do not.
 
 ---
 
@@ -111,7 +165,7 @@ belay-grade certificate <repo> --catalog <file> --names <file> [--template <file
 - a participant has no entry in the names file;
 - the template has a placeholder other than the three in section 5.
 
-It reads only `final.json` files in the cohort's store. It fetches nothing and runs no participant
+It reads only `final.json` files in the cohort's store, make-ups included. It fetches nothing and runs no participant
 code, so it needs no container runtime.
 
 **The names file** is a local UTF-8 CSV of `participant,full name`, because a branch gives only an
@@ -130,7 +184,7 @@ private modes, atomic writes.
 
 | File | Contains | For |
 |---|---|---|
-| `details.json` | per participant, each requirement with its result and reason, and which `final.json` files were read, with their `confirmed_at` | the trainer only |
+| `details.json` | per participant, each requirement with its result and reason, whether a gate was made up, and which `final.json` files were read, with their `confirmed_at` | the trainer only |
 | `results.csv` | a header and one row per participant: full name, `passed` or `not passed`. **Nothing else** | what the trainer hands on |
 | `certificates/<participant>.md` (or the template's extension) | the template filled in, for each participant who passed | the participant |
 
@@ -160,6 +214,7 @@ when `certificate` is absent:
 - `title` not a non-empty string;
 - `modules` or `final_project` not a non-empty list of strings;
 - an id that is not an entry in this catalog; an id in both lists, or twice in one;
+- an id in `modules` ending in `-makeup`, because its branches could not be told from make-up branches;
 - `final_project_share` not a whole number from 1 to 100, a boolean included;
 - a listed id whose bundle resolves on disk, as catalog check 6 already resolves it, and whose
   `tutorial.yaml` declares no `grading`.
@@ -178,8 +233,8 @@ rejects.
 |---|---|
 | `catalogue-format.md` | `certificate`, the rule, and the new check |
 | `bundle-format.md` | **Writing a final project**: a bundle in the catalog, exam lessons, a grading scheme |
-| `runner-protocol.md` section 20 | the certificate step; the shared review is skipped for a cohort of one; what is handed to whom; the employer's view |
-| `README.md` | the command, the feature list, and test totals |
+| `runner-protocol.md` section 20 | the certificate step; the make-up steps, and "not met yet" as the wording for an open gate; the shared review is skipped for a cohort of one; what is handed to whom; the employer's view |
+| `README.md` | the commands, the feature list, and test totals |
 | `2026-09-11-tutorial-runner-design.md` | section 18's status |
 | `2026-11-03-levels-and-course-structure-design.md` | section 1.2: item 4 points here, and the certificate no longer "rests on the trainer-run reviews" as a future statement |
 
@@ -193,13 +248,19 @@ rejects.
 3. An end-to-end test on a fake cohort, with written `final.json` files for two modules and two
    use cases, covers: a participant who passes; one who failed a gate; one in `not_graded`; one
    absent from a module; one with no final project; one with two; one exactly at the share and one
-   just under it; a module with no gate; a changed grade flipping a result on the next run.
+   just under it; a module with no gate; a changed grade flipping a result on the next run; a
+   failed gate made up; a failed make-up followed by a passed one; a make-up for a participant
+   absent from the module.
 4. `results.csv` is pinned to exactly two columns, with no reason, grade, rank or level anywhere in
-   it, and that holds for a participant who did not pass.
+   it, and that holds for a participant who did not pass. It reads the same for a participant who
+   passed first time and one who made a gate up.
 5. Each refusal in section 4 writes nothing. A template with `{{total}}` is refused. An HTML template
    escapes a name holding `<`.
 6. Output goes through the work-tree refusal, and a re-run keeps the earlier output.
 7. The tutor's handling of the step is added to the dry run in belay-authoring#43.
+8. A make-up leaves the module's `final.json` byte for byte unchanged, and a grade change in that
+   module still confirms after the make-up branch was collected. Each refusal in section 3.1 writes
+   nothing, and a make-up branch that moved after the proposal is refused at `confirm`.
 
 ---
 
@@ -212,3 +273,15 @@ rejects.
 - **No verification service.** A certificate is a document; nothing checks it later.
 - **No sending.** The trainer hands the results on.
 - **No use of self-run assessments or `## Levels`** in the result.
+- **No separate make-up task.** It would cost one more task per module to write and grade, for a gate
+  that only asks that the requirement is met.
+- **No allowance of missed gates.** Every module's requirement is met in the end, first time or later.
+
+---
+
+## 10. Open question
+
+**May a participant retry the final project?** Not decided. Until it is, section 3's rule stands: one
+attempt, graded with the cohort of that use case. A retry differs from a module make-up, because the
+final project counts points and not only the gate, so it needs its own decision and cannot reuse
+section 3.1 unchanged.
