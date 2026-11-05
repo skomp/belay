@@ -39,6 +39,7 @@ WRAPPERS = {
     "belay-validate": ("validate_bundle.py", "Structurally validate a Belay"),
     "belay-plan-update": ("plan_update.py", "Plan the update of a Belay instance"),
     "belay-evidence": ("evidence.py", "Repair, compact or summarise"),
+    "belay-grade": ("grade.py", "Grade a cohort"),
 }
 
 # Scripts that are libraries, not commands, and so have no wrapper.
@@ -92,7 +93,7 @@ def test_every_script_has_a_wrapper() -> None:
     record(scripts == wrapped, "every runner script has exactly one wrapper",
            f"scripts {sorted(scripts)}, wrapped {sorted(wrapped)}")
     present = {p.name for p in BIN.iterdir()} if BIN.is_dir() else set()
-    record(present == set(WRAPPERS), "bin/ holds the four wrappers and nothing else",
+    record(present == set(WRAPPERS), "bin/ holds exactly the wrappers in WRAPPERS and nothing else",
            f"found {sorted(present)}")
 
 

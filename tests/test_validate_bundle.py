@@ -4022,6 +4022,591 @@ m_levels_subsection = _ledger(
 )
 
 
+# -- check 46: STATE.md's '## Tasks' rows
+
+TASK_ROWS_VALID = (
+    f"- `012-lead-scoring` {D} reviewed {D} PR #14; 2027-03-04\n"
+    f"- `013-dedupe` {D} handed-off {D} 2027-03-05\n"
+    f"- `014-export` {D} skipped {D} 2027-03-05 (depends on 013, which is "
+    f"not merged)\n"
+)
+
+m_task_rows_valid = _ledger("Tasks", TASK_ROWS_VALID)
+m_task_rows_none = _ledger("Tasks", "- None\n")
+m_task_rows_wrapped = _ledger(
+    "Tasks", f"- `012-lead-scoring` {D} reviewed {D} PR #14;\n"
+    f"  checked with the participant 2027-03-04\n"
+    f"  (second pass)\n"
+)
+m_task_rows_en_dash = _ledger(
+    "Tasks", f"- `012-lead-scoring` {EN} reviewed {EN} 2027-03-04\n"
+)
+m_task_rows_hyphen = _ledger(
+    "Tasks", "- `012-lead-scoring` - handed-off - 2027-03-04\n"
+)
+# Review Focus 5: a state no current lesson declares, and an id no bundle
+# file has (a row may name a task the participant wrote).
+m_task_rows_foreign = _ledger(
+    "Tasks", f"- `my-own-task` {D} written-by-me {D} 2027-03-04\n"
+    f"- `012-lead-scoring` {D} state-of-an-earlier-lesson {D} 2027-03-04\n"
+)
+m_task_rows_subsection = _ledger(
+    "Decisions", "### Tasks\n\n- do the small ones first\n"
+)
+m_task_rows_unparsed = _ledger(
+    "Tasks", f"- `012-lead-scoring` {D} reviewed {D} yesterday\n"
+)
+m_task_rows_no_state = _ledger("Tasks", "- `012-lead-scoring` 2027-03-04\n")
+m_task_rows_bad_state = _ledger(
+    "Tasks", f"- `012-lead-scoring` {D} Handed_Off {D} 2027-03-04\n"
+)
+m_task_rows_bad_date = _ledger(
+    "Tasks", f"- `012-lead-scoring` {D} reviewed {D} 2027-02-30\n"
+)
+m_task_rows_bad_id = _ledger(
+    "Tasks", f"- `Lead_Scoring` {D} reviewed {D} 2027-03-04\n"
+)
+m_task_rows_duplicate = _ledger(
+    "Tasks", f"- `012-lead-scoring` {D} handed-off {D} 2027-03-04\n"
+    f"- `012-lead-scoring` {D} reviewed {D} 2027-03-05\n"
+)
+
+
+# -- checks 42-45: task lessons (a folder of task files)
+
+LESSON_DIR_STORIES = "lessons/01-subcommands/stories/"
+
+TASK_LESSON_DIR = "lessons/01-subcommands"
+
+
+def _task_file(root: Path, name: str, *, id_: str | None = None,
+               title: str = "A task", priority: str = "1",
+               fm: str | None = None, sub: str = "stories") -> None:
+    folder = root / TASK_LESSON_DIR / sub
+    folder.mkdir(parents=True, exist_ok=True)
+    stem = name[:-3] if name.endswith(".md") else name
+    head = fm if fm is not None else (
+        f"id: {id_ or stem}\ntitle: {title}\npriority: {priority}\n"
+    )
+    (folder / name).write_text(f"---\n{head}---\nAs a user I want X.\n")
+
+
+def _task_lesson(root: Path, names=("a.md", "b.md"), *, list_body=True,
+                 extra_fm: str = "") -> None:
+    """A valid task lesson on the cli folder lesson: files, listing, key."""
+    for name in names:
+        _task_file(root, name)
+    if list_body:
+        append(root / CLI_LESSON_01,
+               "\n" + "".join(f"- stories/{n} - A task\n" for n in names))
+    _add_fm(root, CLI_LESSON_01, "tasks: stories/\n" + extra_fm)
+
+
+def m_tasks_absent(root: Path) -> None:
+    for rel in (CLI_LESSON_00, CLI_LESSON_01, CLI_LESSON_02, CLI_OPTIONAL):
+        text = (root / rel).read_text()
+        for key in ("tasks:", "task_states:", "own_tasks:"):
+            assert key not in text
+
+
+def m_tasks_valid(root: Path) -> None:
+    _task_lesson(root, extra_fm="task_states: [specifying, done]\n"
+                                "own_tasks: my-stories/\n")
+
+
+def m_tasks_single_file(root: Path) -> None:
+    _add_fm(root, CLI_LESSON_00, "tasks: stories/\n")
+
+
+def _tasks_value(root: Path, value: str) -> None:
+    _task_lesson(root)
+    path = root / CLI_LESSON_01
+    edit(path, "tasks: stories/\n", f"tasks: {value}\n")
+
+
+def m_tasks_not_string(root: Path) -> None:
+    _tasks_value(root, "[stories/]")
+
+
+def m_tasks_absolute(root: Path) -> None:
+    _tasks_value(root, "/stories/")
+
+
+def m_tasks_dotdot(root: Path) -> None:
+    _tasks_value(root, "../stories/")
+
+
+def m_tasks_symlink(root: Path) -> None:
+    _task_lesson(root)
+    folder = root / TASK_LESSON_DIR
+    (folder / "linked").symlink_to(folder / "stories")
+    edit(root / CLI_LESSON_01, "tasks: stories/\n", "tasks: linked/\n")
+
+
+def m_tasks_missing_dir(root: Path) -> None:
+    _tasks_value(root, "nowhere/")
+
+
+def m_tasks_no_md(root: Path) -> None:
+    _task_lesson(root)
+    for f in (root / TASK_LESSON_DIR / "stories").glob("*.md"):
+        f.unlink()
+    (root / TASK_LESSON_DIR / "stories" / "diagram.txt").write_text("x\n")
+    # a task file in a subdirectory is not directly inside
+    _task_file(root, "deep.md", sub="stories/sub")
+
+
+def m_files_not_listed(root: Path) -> None:
+    _task_lesson(root, names=("a.md", "b.md"))
+    _task_file(root, "c.md")
+
+
+def m_files_prefix_listed(root: Path) -> None:
+    """Review Focus 2: stories/aa.md is listed, stories/a.md is not."""
+    _task_file(root, "a.md")
+    _task_file(root, "aa.md")
+    append(root / CLI_LESSON_01, "\n- stories/aa.md - A task\n")
+    _add_fm(root, CLI_LESSON_01, "tasks: stories/\n")
+
+
+def m_files_suffix_listed(root: Path) -> None:
+    """stories/a.md.bak does not list stories/a.md either."""
+    _task_file(root, "a.md")
+    append(root / CLI_LESSON_01, "\n- stories/a.md.bak\n")
+    _add_fm(root, CLI_LESSON_01, "tasks: stories/\n")
+
+
+def m_files_listed_missing(root: Path) -> None:
+    _task_lesson(root, names=("a.md",))
+    append(root / CLI_LESSON_01, "- stories/ghost.md - Not there\n")
+
+
+def m_files_non_md(root: Path) -> None:
+    """Review Focus 3: a non-.md file is no task file, and check 6 judges it."""
+    _task_lesson(root, names=("a.md",))
+    (root / TASK_LESSON_DIR / "stories" / "flow.svg").write_text("<svg/>\n")
+
+
+def m_files_non_md_named(root: Path) -> None:
+    """The same file, named in the body as check 6 requires: all silent."""
+    m_files_non_md(root)
+    append(root / CLI_LESSON_01, "- stories/flow.svg is the flow diagram\n")
+
+
+def m_files_subdir_md(root: Path) -> None:
+    """A subdirectory's .md file is not a task file: no frontmatter needed."""
+    _task_lesson(root, names=("a.md",))
+    sub = root / TASK_LESSON_DIR / "stories" / "notes"
+    sub.mkdir()
+    (sub / "plain.md").write_text("no frontmatter\n")
+    append(root / CLI_LESSON_01, "- stories/notes/plain.md\n")
+
+
+def _one_file(root: Path, **kw) -> None:
+    _task_file(root, "a.md", **kw)
+    append(root / CLI_LESSON_01, "\n- stories/a.md - A task\n")
+    _add_fm(root, CLI_LESSON_01, "tasks: stories/\n")
+
+
+def m_files_no_frontmatter(root: Path) -> None:
+    folder = root / TASK_LESSON_DIR / "stories"
+    folder.mkdir()
+    (folder / "a.md").write_text("just a body\n")
+    append(root / CLI_LESSON_01, "\n- stories/a.md\n")
+    _add_fm(root, CLI_LESSON_01, "tasks: stories/\n")
+
+
+def m_files_no_title(root: Path) -> None:
+    _one_file(root, fm="id: a\npriority: 1\n")
+
+
+def m_files_empty_title(root: Path) -> None:
+    _one_file(root, fm='id: a\ntitle: ""\npriority: 1\n')
+
+
+def m_files_no_priority(root: Path) -> None:
+    _one_file(root, fm="id: a\ntitle: T\n")
+
+
+def m_files_priority_string(root: Path) -> None:
+    _one_file(root, priority='"1"')
+
+
+def m_files_priority_bool(root: Path) -> None:
+    _one_file(root, priority="true")
+
+
+def m_files_bad_id(root: Path) -> None:
+    _one_file(root, fm="id: A_B\ntitle: T\npriority: 1\n")
+
+
+def m_files_id_not_stem(root: Path) -> None:
+    _one_file(root, fm="id: other\ntitle: T\npriority: 1\n")
+
+
+def m_files_duplicate_id(root: Path) -> None:
+    """Two files, one id: both also differ from their stem, but the
+    duplicate finding is its own."""
+    _task_lesson(root, names=("a.md", "b.md"))
+    _task_file(root, "b.md", fm="id: a\ntitle: T\npriority: 2\n")
+
+
+def m_files_symlink(root: Path) -> None:
+    _task_lesson(root, names=("a.md",))
+    (root / TASK_LESSON_DIR / "stories" / "b.md").symlink_to(
+        root / CLI_LESSON_00)
+    append(root / CLI_LESSON_01, "- stories/b.md\n")
+
+
+def m_states_without_tasks(root: Path) -> None:
+    _add_fm(root, CLI_LESSON_01, "task_states: [a, done]\n")
+
+
+def _states(root: Path, value: str) -> None:
+    _task_lesson(root, extra_fm=f"task_states: {value}\n")
+
+
+def m_states_string(root: Path) -> None:
+    _states(root, "done")
+
+
+def m_states_empty(root: Path) -> None:
+    _states(root, "[]")
+
+
+def m_states_one(root: Path) -> None:
+    _states(root, "[done]")
+
+
+def m_states_two(root: Path) -> None:
+    _states(root, "[work, done]")
+
+
+def m_states_bad_entry(root: Path) -> None:
+    _states(root, "[Hand_Off, done]")
+
+
+def m_states_duplicate(root: Path) -> None:
+    _states(root, "[review, done, review]")
+
+
+def m_states_skipped(root: Path) -> None:
+    _states(root, "[review, skipped, done]")
+
+
+def m_own_without_tasks(root: Path) -> None:
+    _add_fm(root, CLI_LESSON_01, "own_tasks: mine/\n")
+
+
+def _own(root: Path, value: str) -> None:
+    _task_lesson(root, extra_fm=f"own_tasks: {value}\n")
+
+
+def m_own_not_string(root: Path) -> None:
+    _own(root, "[mine/]")
+
+
+def m_own_absolute(root: Path) -> None:
+    _own(root, "/home/me/stories")
+
+
+def m_own_dotdot(root: Path) -> None:
+    _own(root, "../elsewhere")
+
+
+def m_own_dot(root: Path) -> None:
+    _own(root, ".")
+
+
+def m_own_empty_component(root: Path) -> None:
+    _own(root, "a//b")
+
+
+def m_own_backslash(root: Path) -> None:
+    _own(root, "..\\up")
+
+
+def m_own_tutorial(root: Path) -> None:
+    _own(root, "tutorial/")
+
+
+def m_own_under_tutorial(root: Path) -> None:
+    _own(root, "tutorial/mine")
+
+
+def m_own_tutorial_other_case(root: Path) -> None:
+    _own(root, "Tutorial/")
+
+
+def m_own_nested(root: Path) -> None:
+    _own(root, "work/stories/")
+
+
+def m_own_tutorial_lookalikes(root: Path) -> None:
+    _own(root, "tutorials/tutorial")
+
+
+# -- checks 47-51: grading and exam
+def _grading(root: Path, body: str) -> None:
+    """Append a `grading:` block and prove the reader saw a mapping or the key."""
+    manifest = root / "tutorial.yaml"
+    assert "grading:" not in manifest.read_text(), "baseline already has grading"
+    append(manifest, "\ngrading:" + body)
+    parsed = vb.load_yaml(manifest.read_text(), "tutorial.yaml")
+    assert isinstance(parsed, dict) and "grading" in parsed, "grading did not survive the reader"
+
+
+def _grading_valid_with(validators: str = "", rubric: str = "", head: str = "",
+                        image: str = "python:3.12-slim") -> str:
+    """A valid block, plus one change. The default validators need an image (check 48)."""
+    return (
+        head
+        + (f"\n  image: {image}" if image and "image:" not in head else "")
+        + "\n  validators:\n"
+        + (validators or "    cargo-test: { points: 60, gate: true }\n    has-test: { points: 20 }\n")
+        + "  rubric:\n"
+        + (rubric or "    - id: failure-handling\n      points: 15\n"
+           "      standard: Every external call has a timeout.\n      paths: [src/**]\n"
+           "    - id: design\n      points: 5\n      standard: The design is justified.\n")
+    )
+
+
+def m_grading_valid(root: Path) -> None:
+    _grading(root, _grading_valid_with(head=(
+        "\n  image: python:3.12-slim\n  network: true\n"
+        "  env: [ANTHROPIC_API_KEY]\n  timeout_minutes: 15")))
+
+
+def m_grading_absent(root: Path) -> None:
+    assert "grading" not in vb.load_yaml((root / "tutorial.yaml").read_text(), "t")
+
+
+def m_grading_string(root: Path) -> None:
+    _grading(root, " nope\n")
+
+
+def m_grading_unknown_key(root: Path) -> None:
+    _grading(root, _grading_valid_with(head="\n  timeout: 5"))
+
+
+def m_grading_image_empty(root: Path) -> None:
+    _grading(root, _grading_valid_with(head='\n  image: ""'))
+
+
+def m_grading_network_string(root: Path) -> None:
+    _grading(root, _grading_valid_with(head='\n  network: "yes"'))
+
+
+def m_grading_env_bad_name(root: Path) -> None:
+    _grading(root, _grading_valid_with(head="\n  env: [GOOD_ONE, bad-name]"))
+
+
+def m_grading_env_string(root: Path) -> None:
+    _grading(root, _grading_valid_with(head="\n  env: ANTHROPIC_API_KEY"))
+
+
+def m_grading_timeout_zero(root: Path) -> None:
+    _grading(root, _grading_valid_with(head="\n  timeout_minutes: 0"))
+
+
+def m_grading_timeout_bool(root: Path) -> None:
+    _grading(root, _grading_valid_with(head="\n  timeout_minutes: true"))
+
+
+def m_grading_validator_undeclared(root: Path) -> None:
+    _grading(root, _grading_valid_with(
+        validators="    cargo-test: { points: 60 }\n    nonesuch: { points: 20 }\n"))
+
+
+def m_grading_validator_manual(root: Path) -> None:
+    _grading(root, _grading_valid_with(
+        validators="    cargo-test: { points: 60 }\n    explains-choice: { points: 20 }\n"))
+
+
+def m_grading_validator_git_diff(root: Path) -> None:
+    append(root / "tutorial.yaml", "")
+    manifest = root / "tutorial.yaml"
+    text = manifest.read_text().replace(
+        "  explains-choice: { kind: manual }\n",
+        "  explains-choice: { kind: manual }\n  tree-clean: { kind: git-diff }\n", 1)
+    assert "tree-clean" in text
+    manifest.write_text(text)
+    _grading(root, _grading_valid_with(
+        validators="    cargo-test: { points: 60 }\n    tree-clean: { points: 20 }\n"))
+
+
+def m_grading_validator_points_zero(root: Path) -> None:
+    _grading(root, _grading_valid_with(
+        validators="    cargo-test: { points: 0 }\n    has-test: { points: 80 }\n"))
+
+
+def m_grading_validator_points_missing(root: Path) -> None:
+    _grading(root, _grading_valid_with(
+        validators="    cargo-test: { gate: true }\n    has-test: { points: 80 }\n"))
+
+
+def m_grading_validator_gate_string(root: Path) -> None:
+    _grading(root, _grading_valid_with(
+        validators='    cargo-test: { points: 60, gate: "yes" }\n    has-test: { points: 20 }\n'))
+
+
+def m_grading_validator_unknown_key(root: Path) -> None:
+    _grading(root, _grading_valid_with(
+        validators="    cargo-test: { points: 60, weight: 2 }\n    has-test: { points: 20 }\n"))
+
+
+def m_grading_validator_points_bool(root: Path) -> None:
+    _grading(root, _grading_valid_with(
+        validators="    cargo-test: { points: true }\n    has-test: { points: 80 }\n"))
+
+
+def m_grading_rubric_points_bool(root: Path) -> None:
+    _grading(root, _grading_valid_with(
+        rubric="    - id: a\n      points: true\n      standard: One.\n"))
+
+
+def m_grading_with_malformed_manifest_validators(root: Path) -> None:
+    manifest = root / "tutorial.yaml"
+    text = manifest.read_text()
+    start = text.index("\nvalidators:\n")
+    end = text.index("\nfailure_modes:", start)
+    manifest.write_text(text[:start] + "\nvalidators: [cargo-test]\n" + text[end:])
+    _grading(root, _grading_valid_with())
+
+
+def m_grading_rubric_no_id(root: Path) -> None:
+    _grading(root, _grading_valid_with(
+        rubric="    - points: 20\n      standard: A standard.\n"))
+
+
+def m_grading_rubric_points_string(root: Path) -> None:
+    _grading(root, _grading_valid_with(
+        rubric='    - id: a\n      points: "20"\n      standard: A standard.\n'))
+
+
+def m_grading_rubric_no_standard(root: Path) -> None:
+    _grading(root, _grading_valid_with(rubric="    - id: a\n      points: 20\n"))
+
+
+def m_grading_rubric_duplicate(root: Path) -> None:
+    _grading(root, _grading_valid_with(rubric=(
+        "    - id: a\n      points: 10\n      standard: One.\n"
+        "    - id: a\n      points: 10\n      standard: Two.\n")))
+
+
+def m_grading_rubric_unknown_key(root: Path) -> None:
+    _grading(root, _grading_valid_with(rubric=(
+        "    - id: a\n      points: 10\n      standard: One.\n      weight: 3\n")))
+
+
+def m_grading_rubric_gate_true(root: Path) -> None:
+    _grading(root, _grading_valid_with(rubric=(
+        "    - id: a\n      points: 10\n      standard: One.\n      gate: true\n")))
+
+
+def m_grading_rubric_gate_string(root: Path) -> None:
+    _grading(root, _grading_valid_with(rubric=(
+        '    - id: a\n      points: 10\n      standard: One.\n      gate: "yes"\n')))
+
+
+def m_grading_rubric_paths_empty(root: Path) -> None:
+    _grading(root, _grading_valid_with(rubric=(
+        "    - id: a\n      points: 10\n      standard: One.\n      paths: []\n")))
+
+
+def m_grading_rubric_paths_string(root: Path) -> None:
+    _grading(root, _grading_valid_with(rubric=(
+        "    - id: a\n      points: 10\n      standard: One.\n      paths: src/**\n")))
+
+
+def m_grading_rubric_paths_absolute(root: Path) -> None:
+    _grading(root, _grading_valid_with(rubric=(
+        "    - id: a\n      points: 10\n      standard: One.\n      paths: [/etc/**]\n")))
+
+
+def m_grading_rubric_paths_dotdot(root: Path) -> None:
+    _grading(root, _grading_valid_with(rubric=(
+        "    - id: a\n      points: 10\n      standard: One.\n      paths: [../x/**]\n")))
+
+
+def m_grading_rubric_paths_backslash(root: Path) -> None:
+    _grading(root, _grading_valid_with(rubric=(
+        "    - id: a\n      points: 10\n      standard: One.\n      paths: ['src\\\\x']\n")))
+
+
+def m_grading_rubric_id_colon(root: Path) -> None:
+    _grading(root, _grading_valid_with(rubric=(
+        '    - id: "q:1"\n      points: 20\n      standard: One.\n')))
+
+
+def m_grading_rubric_id_upper(root: Path) -> None:
+    _grading(root, _grading_valid_with(rubric=(
+        "    - id: Design\n      points: 20\n      standard: One.\n")))
+
+
+def m_grading_rubric_id_is_validator(root: Path) -> None:
+    _grading(root, _grading_valid_with(rubric=(
+        "    - id: cargo-test\n      points: 20\n      standard: One.\n")))
+
+
+def m_grading_rubric_id_names_ungraded_validator(root: Path) -> None:
+    # `explains-choice` is declared in the manifest and not graded here, so
+    # --change has no such validator and takes the name as the criterion.
+    _grading(root, _grading_valid_with(rubric=(
+        "    - id: explains-choice\n      points: 20\n      standard: One.\n")))
+
+
+def m_grading_rubric_id_digits_and_hyphen(root: Path) -> None:
+    _grading(root, _grading_valid_with(rubric=(
+        "    - id: q-1\n      points: 20\n      standard: One.\n")))
+
+
+def m_grading_command_no_image(root: Path) -> None:
+    _grading(root, _grading_valid_with(image=""))
+
+
+def m_grading_file_kinds_no_image(root: Path) -> None:
+    _grading(root, _grading_valid_with(validators="    has-test: { points: 80 }\n", image=""))
+
+
+def _grading_split(root: Path, det: int, rubric: int) -> None:
+    _grading(root, _grading_valid_with(
+        validators=f"    cargo-test: {{ points: {det} }}\n",
+        rubric=f"    - id: a\n      points: {rubric}\n      standard: One.\n"))
+
+
+def m_grading_share_exact(root: Path) -> None:
+    _grading_split(root, 60, 40)
+
+
+def m_grading_share_under(root: Path) -> None:
+    _grading_split(root, 59, 41)
+
+
+def m_grading_share_rubric_only(root: Path) -> None:
+    _grading(root, "\n  rubric:\n    - id: a\n      points: 10\n      standard: One.\n")
+
+
+def _exam(root: Path, value: str) -> None:
+    _add_fm(root, CLI_LESSON_01, f"exam: {value}\n")
+
+
+def m_exam_true(root: Path) -> None:
+    _exam(root, "true")
+
+
+def m_exam_false(root: Path) -> None:
+    _exam(root, "false")
+
+
+def m_exam_string(root: Path) -> None:
+    _exam(root, '"yes"')
+
+
+def m_exam_list(root: Path) -> None:
+    _exam(root, "[true]")
+
+
 @dataclass
 class Case:
     name: str
@@ -4988,6 +5573,288 @@ CASES: list[Case] = [
          m_placement_optional, "optional lesson", where=CLI_OPTIONAL),
     Case('39: placement: "yes" fires', 39, "cli", "bundle", m_placement_string,
          "must be true or false", where=CLI_LESSON_00),
+    # ---- checks 42-45: task lessons. Silent rows are the positive control.
+    Case("42: a bundle with no task keys is silent", 42, "cli", "bundle",
+         m_tasks_absent, kind="silent"),
+    Case("42: and so is an INSTANCE with none", 42, "cli", "instance",
+         m_tasks_absent, kind="silent"),
+    Case("43: no task keys, silent", 43, "cli", "bundle", m_tasks_absent,
+         kind="silent"),
+    Case("43: no task keys, silent in an INSTANCE", 43, "cli", "instance",
+         m_tasks_absent, kind="silent"),
+    Case("44: no task keys, silent", 44, "cli", "bundle", m_tasks_absent,
+         kind="silent"),
+    Case("44: no task keys, silent in an INSTANCE", 44, "cli", "instance",
+         m_tasks_absent, kind="silent"),
+    Case("45: no task keys, silent", 45, "cli", "bundle", m_tasks_absent,
+         kind="silent"),
+    Case("45: no task keys, silent in an INSTANCE", 45, "cli", "instance",
+         m_tasks_absent, kind="silent"),
+    Case("42: a valid task lesson is silent", 42, "cli", "bundle",
+         m_tasks_valid, kind="silent"),
+    Case("42: and in an INSTANCE", 42, "cli", "instance", m_tasks_valid,
+         kind="silent"),
+    Case("43: a valid task lesson is silent", 43, "cli", "bundle",
+         m_tasks_valid, kind="silent"),
+    Case("43: and in an INSTANCE", 43, "cli", "instance", m_tasks_valid,
+         kind="silent"),
+    Case("44: a valid task lesson is silent", 44, "cli", "bundle",
+         m_tasks_valid, kind="silent"),
+    Case("45: a valid task lesson is silent", 45, "cli", "bundle",
+         m_tasks_valid, kind="silent"),
+    Case("6: a listed task file does not fire check 6", 6, "cli", "bundle",
+         m_tasks_valid, kind="silent"),
+    Case("42: tasks on a single-file lesson fires", 42, "cli", "bundle",
+         m_tasks_single_file, "needs a folder lesson", where=CLI_LESSON_00),
+    Case("42: tasks that is not a string fires", 42, "cli", "bundle",
+         m_tasks_not_string, "must be a directory path", where=CLI_LESSON_01),
+    Case("42: an absolute tasks path fires", 42, "cli", "bundle",
+         m_tasks_absolute, "is absolute", where=CLI_LESSON_01),
+    Case("42: a tasks path with '..' fires (Review Focus 4)", 42, "cli",
+         "bundle", m_tasks_dotdot, "has a '..' segment", where=CLI_LESSON_01),
+    Case("42: a symlinked tasks directory fires, never followed (Review "
+         "Focus 4)", 42, "cli", "bundle", m_tasks_symlink,
+         "symbolic link", where=CLI_LESSON_01),
+    Case("42: a directory that does not exist fires", 42, "cli", "bundle",
+         m_tasks_missing_dir, "no such file", where=CLI_LESSON_01),
+    Case("42: a directory with no .md directly inside fires", 42, "cli",
+         "bundle", m_tasks_no_md, "holds no .md file", where=CLI_LESSON_01),
+    Case("43: a task file the body does not list fires", 43, "cli", "bundle",
+         m_files_not_listed, "does not list 'stories/c.md'",
+         where=LESSON_DIR_STORIES + "c.md"),
+    Case("43: stories/aa.md listed does not list stories/a.md (Review "
+         "Focus 2)", 43, "cli", "bundle", m_files_prefix_listed,
+         "does not list 'stories/a.md'", where=LESSON_DIR_STORIES + "a.md"),
+    Case("43: stories/a.md.bak listed does not list stories/a.md", 43, "cli",
+         "bundle", m_files_suffix_listed, "does not list 'stories/a.md'",
+         where=LESSON_DIR_STORIES + "a.md"),
+    Case("43: a listed path that does not exist fires", 43, "cli", "bundle",
+         m_files_listed_missing, "'stories/ghost.md', which does not exist",
+         where=CLI_LESSON_01),
+    Case("43: a non-.md file in the directory is not a task file (Review "
+         "Focus 3)", 43, "cli", "bundle", m_files_non_md_named, kind="silent"),
+    Case("6: ... and check 6 still judges it (Review Focus 3)", 6, "cli",
+         "bundle", m_files_non_md, "'stories/flow.svg' is never named",
+         where="lessons/01-subcommands/LESSON.md -> stories/flow.svg"),
+    Case("43: a subdirectory's .md file is not a task file", 43, "cli",
+         "bundle", m_files_subdir_md, kind="silent"),
+    Case("43: a task file without frontmatter fires", 43, "cli", "bundle",
+         m_files_no_frontmatter, "has no YAML frontmatter",
+         where=LESSON_DIR_STORIES + "a.md"),
+    Case("43: a task file without a title fires", 43, "cli", "bundle",
+         m_files_no_title, "has no 'title'", where=LESSON_DIR_STORIES + "a.md"),
+    Case("43: an empty title fires", 43, "cli", "bundle", m_files_empty_title,
+         "title is ''", where=LESSON_DIR_STORIES + "a.md"),
+    Case("43: a task file without a priority fires", 43, "cli", "bundle",
+         m_files_no_priority, "has no 'priority'",
+         where=LESSON_DIR_STORIES + "a.md"),
+    Case("43: a string priority fires", 43, "cli", "bundle",
+         m_files_priority_string, "priority is '1'; it must be an integer",
+         where=LESSON_DIR_STORIES + "a.md"),
+    Case("43: a boolean priority fires", 43, "cli", "bundle",
+         m_files_priority_bool, "priority is True; it must be an integer",
+         where=LESSON_DIR_STORIES + "a.md"),
+    Case("43: an id outside [a-z0-9-]+ fires", 43, "cli", "bundle",
+         m_files_bad_id, "must be a string matching [a-z0-9-]+",
+         where=LESSON_DIR_STORIES + "a.md"),
+    Case("43: an id that is not the filename stem fires", 43, "cli",
+         "bundle", m_files_id_not_stem, "the filename stem is 'a'",
+         where=LESSON_DIR_STORIES + "a.md"),
+    Case("43: two files with one id fire", 43, "cli", "bundle",
+         m_files_duplicate_id, "have the id 'a'",
+         where=LESSON_DIR_STORIES + "a.md, " + LESSON_DIR_STORIES + "b.md"),
+    Case("43: a symlinked task file fires, never followed", 43, "cli",
+         "bundle", m_files_symlink, "symbolic link",
+         where=LESSON_DIR_STORIES + "b.md"),
+    Case("44: task_states without tasks fires", 44, "cli", "bundle",
+         m_states_without_tasks, "task_states without 'tasks'",
+         where=CLI_LESSON_01),
+    Case("44: task_states as a string fires", 44, "cli", "bundle",
+         m_states_string, "must be a list of at least two", where=CLI_LESSON_01),
+    Case("44: an empty task_states fires", 44, "cli", "bundle",
+         m_states_empty, "must be a list of at least two", where=CLI_LESSON_01),
+    Case("44: one state fires", 44, "cli", "bundle", m_states_one,
+         "which is one state", where=CLI_LESSON_01),
+    Case("44: two states are silent", 44, "cli", "bundle", m_states_two,
+         kind="silent"),
+    Case("44: a state that does not match the pattern fires", 44, "cli",
+         "bundle", m_states_bad_entry, "'Hand_Off', which is not a state name",
+         where=CLI_LESSON_01),
+    Case("44: a duplicate state fires", 44, "cli", "bundle",
+         m_states_duplicate, "'review' more than once", where=CLI_LESSON_01),
+    Case("44: skipped listed fires", 44, "cli", "bundle", m_states_skipped,
+         "lists 'skipped'", where=CLI_LESSON_01),
+    Case("45: own_tasks without tasks fires", 45, "cli", "bundle",
+         m_own_without_tasks, "own_tasks without 'tasks'", where=CLI_LESSON_01),
+    Case("45: own_tasks that is not a string fires", 45, "cli", "bundle",
+         m_own_not_string, "must be a directory path", where=CLI_LESSON_01),
+    Case("45: an absolute own_tasks fires", 45, "cli", "bundle",
+         m_own_absolute, "is absolute", where=CLI_LESSON_01),
+    Case("45: own_tasks with '..' fires", 45, "cli", "bundle", m_own_dotdot,
+         "has a '..' segment", where=CLI_LESSON_01),
+    Case("45: own_tasks of '.' fires", 45, "cli", "bundle", m_own_dot,
+         "path component '.'", where=CLI_LESSON_01),
+    Case("45: own_tasks with an empty component fires", 45, "cli", "bundle",
+         m_own_empty_component, "path component ''", where=CLI_LESSON_01),
+    Case("45: own_tasks with a backslash fires", 45, "cli", "bundle",
+         m_own_backslash, "uses a backslash", where=CLI_LESSON_01),
+    Case("45: own_tasks of tutorial/ fires", 45, "cli", "bundle",
+         m_own_tutorial, "is under tutorial/", where=CLI_LESSON_01),
+    Case("45: own_tasks inside tutorial/ fires", 45, "cli", "bundle",
+         m_own_under_tutorial, "is under tutorial/", where=CLI_LESSON_01),
+    Case("45: own_tasks of Tutorial/ fires", 45, "cli", "bundle",
+         m_own_tutorial_other_case, "is under tutorial/", where=CLI_LESSON_01),
+    Case("45: a nested own_tasks with a trailing slash is silent", 45, "cli",
+         "bundle", m_own_nested, kind="silent"),
+    Case("45: 'tutorial' other than as the whole first segment is silent", 45,
+         "cli", "bundle", m_own_tutorial_lookalikes, kind="silent"),
+    # ---- check 46: STATE.md's '## Tasks' rows
+    Case("46: an instance with no '## Tasks' section is silent", 46, "broker",
+         "instance", m_assesses_valid, kind="silent"),
+    Case("46: a '- None' bullet is skipped", 46, "broker", "instance",
+         m_task_rows_none, kind="silent"),
+    Case("46: the spec's three rows are silent", 46, "broker", "instance",
+         m_task_rows_valid, kind="silent"),
+    Case("46: a row wrapped over several lines is one row", 46, "broker",
+         "instance", m_task_rows_wrapped, kind="silent"),
+    Case("46: a row separated by en dashes is silent", 46, "broker",
+         "instance", m_task_rows_en_dash, kind="silent"),
+    Case("46: a row separated by hyphens is silent", 46, "broker", "instance",
+         m_task_rows_hyphen, kind="silent"),
+    Case("46: a state no lesson declares and an id no bundle has are NOT "
+         "findings (Review Focus 5)", 46, "broker", "instance",
+         m_task_rows_foreign, kind="silent"),
+    Case("46: a '### Tasks' under another section is not the section", 46,
+         "broker", "instance", m_task_rows_subsection, kind="silent"),
+    Case("46: a row with no state and no separators", 46, "broker",
+         "instance", m_task_rows_no_state, "is not a task row",
+         where="STATE.md (## Tasks)"),
+    Case("46: free text that does not end in a date", 46, "broker",
+         "instance", m_task_rows_unparsed, "is not a task row",
+         where="STATE.md (## Tasks)"),
+    Case("46: a state that does not match [a-z0-9-]+", 46, "broker",
+         "instance", m_task_rows_bad_state, "'Handed_Off'",
+         where="STATE.md (## Tasks)"),
+    Case("46: a date that is not a calendar date", 46, "broker", "instance",
+         m_task_rows_bad_date, "not a calendar date",
+         where="STATE.md (## Tasks)"),
+    Case("46: an id that does not match [a-z0-9-]+", 46, "broker", "instance",
+         m_task_rows_bad_id, "is not a task id", where="STATE.md (## Tasks)"),
+    Case("46: one task with two rows", 46, "broker", "instance",
+         m_task_rows_duplicate, "recorded twice", where="STATE.md (## Tasks)"),
+    # ---- checks 47-51: grading and exam. Silent rows are the positive control.
+    Case("47: no grading is silent", 47, "cli", "bundle", m_grading_absent, kind="silent"),
+    Case("47: no grading in an INSTANCE is silent", 47, "cli", "instance", m_grading_absent, kind="silent"),
+    Case("47: a valid grading block is silent", 47, "cli", "bundle", m_grading_valid, kind="silent"),
+    Case("47: a valid grading block in an INSTANCE is silent", 47, "cli", "instance", m_grading_valid, kind="silent"),
+    Case("48: no grading is silent", 48, "cli", "bundle", m_grading_absent, kind="silent"),
+    Case("48: no grading in an INSTANCE is silent", 48, "cli", "instance", m_grading_absent, kind="silent"),
+    Case("48: a valid grading block is silent", 48, "cli", "bundle", m_grading_valid, kind="silent"),
+    Case("48: a valid grading block in an INSTANCE is silent", 48, "cli", "instance", m_grading_valid, kind="silent"),
+    Case("49: no grading is silent", 49, "cli", "bundle", m_grading_absent, kind="silent"),
+    Case("49: no grading in an INSTANCE is silent", 49, "cli", "instance", m_grading_absent, kind="silent"),
+    Case("49: a valid grading block is silent", 49, "cli", "bundle", m_grading_valid, kind="silent"),
+    Case("49: a valid grading block in an INSTANCE is silent", 49, "cli", "instance", m_grading_valid, kind="silent"),
+    Case("50: no grading is silent", 50, "cli", "bundle", m_grading_absent, kind="silent"),
+    Case("50: no grading in an INSTANCE is silent", 50, "cli", "instance", m_grading_absent, kind="silent"),
+    Case("50: a valid grading block is silent", 50, "cli", "bundle", m_grading_valid, kind="silent"),
+    Case("50: a valid grading block in an INSTANCE is silent", 50, "cli", "instance", m_grading_valid, kind="silent"),
+    Case("51: no exam key is silent", 51, "cli", "bundle", m_grading_absent, kind="silent"),
+    Case("51: no exam key in an INSTANCE is silent", 51, "cli", "instance", m_grading_absent, kind="silent"),
+    Case("47: grading as a string", 47, "cli", "bundle", m_grading_string,
+         "'grading' must be a mapping", where='tutorial.yaml'),
+    Case("47: an unknown key", 47, "cli", "bundle", m_grading_unknown_key,
+         "unknown key 'timeout'", where='tutorial.yaml'),
+    Case("47: an empty image", 47, "cli", "bundle", m_grading_image_empty,
+         'grading.image', where='tutorial.yaml'),
+    Case("47: network not a boolean", 47, "cli", "bundle", m_grading_network_string,
+         'grading.network', where='tutorial.yaml'),
+    Case("47: an env name with a hyphen", 47, "cli", "bundle", m_grading_env_bad_name,
+         "'bad-name'", where='tutorial.yaml'),
+    Case("47: env as a string", 47, "cli", "bundle", m_grading_env_string,
+         'grading.env', where='tutorial.yaml'),
+    Case("47: timeout_minutes 0", 47, "cli", "bundle", m_grading_timeout_zero,
+         'grading.timeout_minutes', where='tutorial.yaml'),
+    Case("47: timeout_minutes true", 47, "cli", "bundle", m_grading_timeout_bool,
+         'grading.timeout_minutes', where='tutorial.yaml'),
+    Case("47: an INSTANCE with an unknown key too", 47, "cli", "instance", m_grading_unknown_key,
+         "unknown key 'timeout'", where='tutorial.yaml'),
+    Case("48: a command validator with no image", 48, "cli", "bundle", m_grading_command_no_image,
+         "grading has no 'image', and 'cargo-test'", where='tutorial.yaml'),
+    Case("48: an INSTANCE with a command validator and no image too", 48, "cli", "instance",
+         m_grading_command_no_image, "grading has no 'image'", where='tutorial.yaml'),
+    Case("48: only file validators need no image", 48, "cli", "bundle",
+         m_grading_file_kinds_no_image, kind="silent"),
+    Case("48: an undeclared validator", 48, "cli", "bundle", m_grading_validator_undeclared,
+         "'nonesuch' is not a declared validator", where='tutorial.yaml (grading.validators.nonesuch)'),
+    Case("48: a manual validator", 48, "cli", "bundle", m_grading_validator_manual,
+         "kind 'manual'", where='tutorial.yaml (grading.validators.explains-choice)'),
+    Case("48: a git-diff validator", 48, "cli", "bundle", m_grading_validator_git_diff,
+         "kind 'git-diff'", where='tutorial.yaml (grading.validators.tree-clean)'),
+    Case("48: points 0", 48, "cli", "bundle", m_grading_validator_points_zero,
+         'points', where='tutorial.yaml (grading.validators.cargo-test)'),
+    Case("48: points missing", 48, "cli", "bundle", m_grading_validator_points_missing,
+         'points', where='tutorial.yaml (grading.validators.cargo-test)'),
+    Case("48: gate not a boolean", 48, "cli", "bundle", m_grading_validator_gate_string,
+         'gate', where='tutorial.yaml (grading.validators.cargo-test)'),
+    Case("48: an unknown key in an entry", 48, "cli", "bundle", m_grading_validator_unknown_key,
+         "unknown key 'weight'", where='tutorial.yaml (grading.validators.cargo-test)'),
+    Case("48: boolean points", 48, "cli", "bundle",
+         m_grading_validator_points_bool, "points",
+         where="tutorial.yaml (grading.validators.cargo-test)"),
+    Case("49: boolean points", 49, "cli", "bundle",
+         m_grading_rubric_points_bool, "points",
+         where="tutorial.yaml (grading.rubric[a])"),
+    Case("49: a criterion without id", 49, "cli", "bundle", m_grading_rubric_no_id,
+         "'id'", where='tutorial.yaml (grading.rubric[0])'),
+    Case("49: points as a string", 49, "cli", "bundle", m_grading_rubric_points_string,
+         'points', where='tutorial.yaml (grading.rubric[a])'),
+    Case("49: a criterion without standard", 49, "cli", "bundle", m_grading_rubric_no_standard,
+         'standard', where='tutorial.yaml (grading.rubric[a])'),
+    Case("49: a duplicate id", 49, "cli", "bundle", m_grading_rubric_duplicate,
+         'duplicate', where='tutorial.yaml (grading.rubric[a])'),
+    Case("49: an unknown key in a criterion", 49, "cli", "bundle", m_grading_rubric_unknown_key,
+         "unknown key 'weight'", where='tutorial.yaml (grading.rubric[a])'),
+    Case("49: an id --change cannot parse", 49, "cli", "bundle", m_grading_rubric_id_colon,
+         "'q:1' must match [a-z0-9-]+", where='tutorial.yaml (grading.rubric[q:1])'),
+    Case("49: an id with a capital letter", 49, "cli", "bundle", m_grading_rubric_id_upper,
+         "'Design' must match [a-z0-9-]+", where='tutorial.yaml (grading.rubric[Design])'),
+    Case("49: an id equal to a graded validator", 49, "cli", "bundle", m_grading_rubric_id_is_validator,
+         "'cargo-test' is also a validator", where='tutorial.yaml (grading.rubric[cargo-test])'),
+    Case("49: an INSTANCE with such an id too", 49, "cli", "instance", m_grading_rubric_id_is_validator,
+         "'cargo-test' is also a validator", where='tutorial.yaml (grading.rubric[cargo-test])'),
+    Case("49: an id equal to a validator that is not graded is silent", 49, "cli", "bundle",
+         m_grading_rubric_id_names_ungraded_validator, kind="silent"),
+    Case("49: an id of digits and hyphens is silent", 49, "cli", "bundle",
+         m_grading_rubric_id_digits_and_hyphen, kind="silent"),
+    Case("49: gate: true on a criterion is silent", 49, "cli", "bundle",
+         m_grading_rubric_gate_true, kind="silent"),
+    Case("49: gate: true on a criterion in an INSTANCE is silent", 49, "cli", "instance",
+         m_grading_rubric_gate_true, kind="silent"),
+    Case("49: gate not a boolean on a criterion", 49, "cli", "bundle",
+         m_grading_rubric_gate_string, "gate is 'yes'", where='tutorial.yaml (grading.rubric[a])'),
+    Case("49: paths: []", 49, "cli", "bundle", m_grading_rubric_paths_empty,
+         'paths', where='tutorial.yaml (grading.rubric[a])'),
+    Case("49: paths as a string", 49, "cli", "bundle", m_grading_rubric_paths_string,
+         'paths', where='tutorial.yaml (grading.rubric[a])'),
+    Case("49: an absolute glob", 49, "cli", "bundle", m_grading_rubric_paths_absolute,
+         'absolute', where='tutorial.yaml (grading.rubric[a])'),
+    Case("49: a '..' glob", 49, "cli", "bundle", m_grading_rubric_paths_dotdot,
+         "'..'", where='tutorial.yaml (grading.rubric[a])'),
+    Case("49: a backslash glob", 49, "cli", "bundle", m_grading_rubric_paths_backslash,
+         'backslash', where='tutorial.yaml (grading.rubric[a])'),
+    Case("50: exactly 60% is silent", 50, "cli", "bundle", m_grading_share_exact, kind="silent"),
+    Case("50: 59 of 100 fires", 50, "cli", "bundle", m_grading_share_under,
+         '60%', where='tutorial.yaml'),
+    Case("50: rubric points only fires", 50, "cli", "bundle", m_grading_share_rubric_only,
+         '60%', where='tutorial.yaml'),
+    Case("51: exam: true is silent", 51, "cli", "bundle", m_exam_true, kind="silent"),
+    Case("51: exam: false is silent", 51, "cli", "bundle", m_exam_false, kind="silent"),
+    Case("51: exam: true in an INSTANCE is silent", 51, "cli", "instance", m_exam_true, kind="silent"),
+    Case("51: exam as a string", 51, "cli", "bundle", m_exam_string,
+         'exam', where='lessons/01-subcommands/LESSON.md'),
+    Case("51: exam as a list", 51, "cli", "bundle", m_exam_list,
+         'exam', where='lessons/01-subcommands/LESSON.md'),
     # ---- checks 35 and 36: levels and starts_from. Silent rows are the
     # positive control for the firing ones.
     Case("35: a bundle with no levels is silent", 35, "cli", "bundle",
@@ -9602,6 +10469,164 @@ def test_ledger_checks_status() -> None:
            f"{noisy!r}, status = {report.status.get(40)!r}")
 
 
+def test_grading_empty_image_is_one_finding() -> None:
+    """A present and malformed image is check 47's finding and not also check 48's."""
+    print("\ncheck 48: an image that is present and empty:")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = fresh("cli", Path(tmpdir))
+        m_grading_image_empty(root)
+        report = vb.validate(root, "bundle")
+    record([f for f in report.findings if f.check == 47],
+           "the empty image is check 47's finding (positive control)",
+           f"{report.findings!r}")
+    record(not [f for f in report.findings if f.check == 48],
+           "check 48 adds no finding", f"{report.findings!r}")
+
+
+def test_grading_with_malformed_manifest_validators() -> None:
+    """Check 48 adds no false undeclared-name finding over a malformed manifest."""
+    print("\ncheck 48: a malformed manifest 'validators' and a valid grading:")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = fresh("cli", Path(tmpdir))
+        m_grading_with_malformed_manifest_validators(root)
+        report = vb.validate(root, "bundle")
+    record([f for f in report.findings if f.check == 8],
+           "the malformed validators is check 8's finding (positive control)",
+           f"{report.findings!r}")
+    record(not [f for f in report.findings if f.check == 48],
+           "check 48 adds no finding", f"{report.findings!r}")
+    record("NOT checked" in report.status.get(48, ("", ""))[1],
+           "check 48 says the names were not checked",
+           f"{report.status.get(48)!r}")
+
+
+def test_task_rows_check_status() -> None:
+    """Check 46: n/a without the section, ran with it, instance only."""
+    print("\ncheck 46: the status line, bundle mode, and the row parser:")
+    for mutate, want, what in (
+        (m_assesses_valid, vb.NOT_APPLICABLE, "no section: n/a"),
+        (m_task_rows_valid, vb.RAN, "section present: ran"),
+    ):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = fresh("broker", Path(tmpdir))
+            to_instance(root)
+            mutate(root)
+            report = vb.validate(root, "instance")
+        got = report.status.get(46, ("missing", ""))[0]
+        record(got == want, f"check 46: {what}", f"status = {got!r}")
+        record(not [f for f in report.findings + report.warnings
+                    if f.check == 46] or want == vb.RAN,
+               "check 46 adds no finding or warning without the section",
+               f"{report.findings!r}")
+    record(46 in vb.INSTANCE_ONLY and 46 not in vb.WARNING_ONLY,
+           "check 46 is instance-only and a finding", "")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = fresh("broker", Path(tmpdir))
+        report = vb.validate(root, "bundle")
+    record(46 not in report.status,
+           "a bundle-mode run never reports check 46",
+           f"status = {report.status.get(46)!r}")
+    rows = vb.parse_task_records(
+        ["- `a-1` \u2014 reviewed \u2014 PR #14; 2027-03-04 (ok)",
+         "- None"])
+    record(len(rows) == 1 and rows[0][1] == {
+        "id": "a-1", "state": "reviewed", "date": "2027-03-04", "note": "ok"},
+        "parse_task_records yields id, state, date and note",
+        f"{rows!r}")
+
+
+def _tasks_cli(*args: str) -> subprocess.CompletedProcess:
+    return subprocess.run([sys.executable, str(SCRIPT), *args],
+                          capture_output=True, text=True)
+
+
+def test_tasks_mode() -> None:
+    """`--tasks <dir>`, through the real command line."""
+    print("\n--tasks <dir>:")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        d = Path(tmpdir) / "mine"
+        d.mkdir()
+        for name in ("a", "b"):
+            (d / f"{name}.md").write_text(
+                f"---\nid: {name}\ntitle: T\npriority: 1\n---\nbody\n")
+        (d / "notes.txt").write_text("not a task file\n")
+        done = _tasks_cli("--tasks", str(d))
+        record(done.returncode == 0 and "PASS" in done.stdout
+               and "mode: tasks" in done.stdout,
+               "a clean directory exits 0 and PASSes",
+               f"rc={done.returncode} out={done.stdout[-300:]}")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        d = Path(tmpdir) / "bad"
+        d.mkdir()
+        (d / "nofm.md").write_text("no frontmatter\n")
+        (d / "wrongid.md").write_text(
+            "---\nid: other\ntitle: T\npriority: 1\n---\n")
+        (d / "badprio.md").write_text(
+            "---\nid: badprio\ntitle: T\npriority: high\n---\n")
+        (d / "dup1.md").write_text(
+            "---\nid: same\ntitle: T\npriority: 1\n---\n")
+        (d / "dup2.md").write_text(
+            "---\nid: same\ntitle: T\npriority: 1\n---\n")
+        (d / "noid.md").write_text("---\ntitle: T\npriority: 1\n---\n")
+        (d / "badyaml.md").write_text("---\nid: [unclosed\n---\n")
+        (d / "notutf8.md").write_bytes(b"---\nid: notutf8\n---\n\xff\xfe\n")
+        done = _tasks_cli("--tasks", str(d))
+        out = done.stdout
+        record(done.returncode == 1 and "FAIL" in out,
+               "a bad directory exits 1 and FAILs",
+               f"rc={done.returncode} out={out[-600:]}")
+        for needle, label in (
+            ("nofm.md", "a file without frontmatter"),
+            ("has no YAML frontmatter", "the frontmatter message"),
+            ("filename stem", "an id that is not the filename stem"),
+            ("priority is 'high'", "a non-integer priority"),
+            ("also the id of", "two files with one id"),
+            ("has no 'id'", "a file with no id"),
+            ("frontmatter does not parse", "frontmatter that does not parse"),
+            ("cannot be read", "a file that is not UTF-8"),
+        ):
+            record(needle in out, f"the report names {label}", out)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        d = Path(tmpdir) / "bare"
+        d.mkdir()
+        (d / "unlisted.md").write_text(
+            "---\nid: unlisted\ntitle: T\npriority: 1\n---\n")
+        done = _tasks_cli("--tasks", str(d))
+        report = vb.validate_tasks_dir(d)
+        record(done.returncode == 0 and not report.findings
+               and not report.warnings,
+               "the listing rule is not applied: a bare directory exits 0 "
+               "with no finding",
+               f"rc={done.returncode} findings={report.findings} "
+               f"out={done.stdout[-300:]}")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        d = Path(tmpdir) / "empty"
+        d.mkdir()
+        done = _tasks_cli("--tasks", str(d))
+        record(done.returncode == 0 and "warning" in done.stdout.lower()
+               and "no .md" in done.stdout,
+               "an empty directory is a warning, exit 0",
+               f"rc={done.returncode} out={done.stdout[-400:]}")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        done = _tasks_cli("--tasks", str(Path(tmpdir) / "missing"))
+        record(done.returncode == 2 and "is not a directory" in done.stderr,
+               "a missing directory exits 2, as --instance and --catalog do",
+               f"rc={done.returncode} err={done.stderr[:200]}")
+        for combo in (("--tasks", "--instance"), ("--tasks", "--catalog")):
+            done = _tasks_cli(tmpdir, *combo)
+            record(done.returncode == 2 and "not allowed with" in done.stderr,
+                   f"{' with '.join(combo)} is refused",
+                   f"rc={done.returncode} err={done.stderr[:200]}")
+        done = _tasks_cli(tmpdir, "--tasks", "--portable")
+        record(done.returncode == 2 and "--portable" in done.stderr,
+               "--tasks with --portable is refused",
+               f"rc={done.returncode} err={done.stderr[:200]}")
+
+
 def test_learning_record_check_status() -> None:
     """Check 33 is n/a without a record, instance-only, and warning-only."""
     print("\nlearning record check reports n/a where there is no record:")
@@ -9821,6 +10846,122 @@ def test_levelled_programme_is_clean_end_to_end() -> None:
         "",
     )
 
+    # Task lessons (spec 2026-11-03-user-stories-design.md section 8 item 3).
+    # Checks 42-46 are shown RUNNING, and the ids and the priority order are
+    # read from the task files, so a fixture that quietly lost its stories
+    # fails here instead of passing by emptiness.
+    for name, own in (("module1", False), ("module2", True)):
+        report = vb.validate(BASELINES[name], "bundle")
+        ran = {n: report.status.get(n, ("missing", ""))[0] for n in (42, 43, 44, 45)}
+        want = {42: vb.RAN, 43: vb.RAN, 44: vb.RAN, 45: vb.RAN if own else vb.NOT_APPLICABLE}
+        record(
+            ran == want,
+            f"{name}: checks 42-44 RAN and check 45 "
+            f"{'RAN' if own else 'is n/a, it declares no own_tasks'}",
+            f"states = {ran}",
+        )
+    report = vb.validate(instance, "instance")
+    record(
+        report.status.get(46, ("", ""))[0] == vb.RAN
+        and report.status.get(45, ("", ""))[0] == vb.RAN,
+        "the instance's task rows (check 46) and own_tasks (check 45) RAN",
+        f"46 = {report.status.get(46)!r}, 45 = {report.status.get(45)!r}",
+    )
+
+    def task_order(lesson_dir: Path) -> list[str]:
+        rows = []
+        for f in (lesson_dir / "stories").glob("*.md"):
+            front = frontmatter(f)
+            rows.append((front["priority"], front["id"]))
+        return [i for _, i in sorted(rows)]
+
+    first = BASELINES["module1"] / "lessons" / "03-shelf-stories"
+    second = BASELINES["module2"] / "lessons" / "03-order-stories"
+    record(
+        task_order(first)
+        == ["010-label-the-shelves", "020-count-by-label", "030-set-reorder-points"],
+        "module 1's task lesson holds three stories, in this priority order",
+        repr(task_order(first)),
+    )
+    f1, f2 = frontmatter(first / "LESSON.md"), frontmatter(second / "LESSON.md")
+    record(
+        f1["tasks"] == "stories/"
+        and f1["task_states"] == ["specifying", "handed-off", "implemented", "reviewed"]
+        and "own_tasks" not in f1,
+        "module 1's task lesson has tasks: stories/ and the four story states",
+        repr(f1),
+    )
+    record(
+        f2["tasks"] == "stories/" and f2["own_tasks"] == "stories/",
+        "module 2's task lesson declares own_tasks",
+        repr(f2),
+    )
+    ids = task_order(first) + task_order(second)
+    record(len(ids) == len(set(ids)) == 6, "the six task ids are distinct", repr(ids))
+    record(
+        task_order(second)
+        == ["110-forecast-one-item", "120-order-date-from-lead-time",
+            "130-flag-late-orders"],
+        "module 2's task lesson holds three stories, in this priority order",
+        repr(task_order(second)),
+    )
+    rows = [
+        record_ for _, record_ in vb.parse_task_records(
+            state.split("## Tasks", 1)[1].splitlines()
+        )
+    ]
+    record(
+        all(r is not None for r in rows)
+        and [(r["id"], r["state"]) for r in rows] == [
+            ("110-forecast-one-item", "reviewed"),
+            ("120-order-date-from-lead-time", "handed-off"),
+            ("130-flag-late-orders", "skipped"),
+        ],
+        "the instance's ## Tasks rows are these three, in these states",
+        repr(rows),
+    )
+    # The documents' terms, not only their shape: rows are written only while
+    # a task lesson is active, at most one task is active, a skip carries its
+    # reason in the parenthesis, and every row's id has a file.
+    state_front = frontmatter(instance / "STATE.md")
+    record(
+        state_front["active_lesson"] == "lessons/03-order-stories/LESSON.md"
+        and "tasks" in frontmatter(instance / state_front["active_lesson"]),
+        "the instance's active lesson is the task lesson its rows belong to",
+        repr(state_front),
+    )
+    open_states = f2["task_states"][:-1]
+    active = [r["id"] for r in rows if r and r["state"] in open_states]
+    record(
+        active == ["120-order-date-from-lead-time"],
+        "exactly one task is active, and it is 120",
+        repr(active),
+    )
+    record(
+        all((r["note"] is not None) == (r["state"] == "skipped") for r in rows if r),
+        "only the skipped row has a parenthesis, holding the skip's reason",
+        repr(rows),
+    )
+    record(
+        {r["id"] for r in rows if r}
+        == {f.stem for f in (instance / "lessons" / "03-order-stories" / "stories").glob("*.md")},
+        "every row's id has a task file in the instance's lesson, and every file a row",
+        repr(rows),
+    )
+    conditions = (second / "LESSON.md").read_text().split("## Completion conditions", 1)[1]
+    record(
+        "at least one story of your own" in conditions,
+        "module 2's completion conditions require a story of the learner's own",
+        conditions,
+    )
+    same = all(
+        (instance / "lessons" / rel.relative_to(BASELINES["module2"] / "lessons")).read_bytes()
+        == rel.read_bytes()
+        for rel in (BASELINES["module2"] / "lessons").rglob("*")
+        if rel.is_file()
+    )
+    record(same, "the instance's lesson files are byte-identical to module 2's", "")
+
 
 def test_check_coverage() -> None:
     """Every check must be demonstrated REPORTING, not merely passing.
@@ -9920,6 +11061,10 @@ def main() -> int:
     test_levels_check_status()
     test_lesson_levels_check_status()
     test_ledger_checks_status()
+    test_task_rows_check_status()
+    test_grading_with_malformed_manifest_validators()
+    test_grading_empty_image_is_one_finding()
+    test_tasks_mode()
     test_the_total_is_reproducible_from_this_commit()
     test_levelled_programme_is_clean_end_to_end()
     test_check_coverage()
