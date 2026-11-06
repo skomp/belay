@@ -189,11 +189,22 @@ class Scheme:
     timeout_minutes: int | None
     validators: tuple[ValidatorShare, ...]
     rubric: tuple[Criterion, ...]
-    grading_hash: str = ""  # of the manifest's `grading` block as written
+    grading_hash: str = ""  # of the manifest's `grading` block, without `retries`
+    retries: int = 0  # further attempts after the first; not part of the hash
 
     @property
     def max_total(self) -> int:
         return sum(v.points for v in self.validators) + sum(c.points for c in self.rubric)
+
+
+def grading_hash(grading: dict) -> str:
+    """What a proposal is compared on: the `grading` block without `retries`.
+
+    Raising `retries` during a programme must not stale a proposal, while any
+    change to what is graded still does.
+    """
+    kept = {k: v for k, v in grading.items() if k != "retries"}
+    return hashlib.sha256(json.dumps(kept, sort_keys=True, default=str).encode("utf-8")).hexdigest()
 
 
 def load_scheme(bundle: Path) -> Scheme:
@@ -258,6 +269,7 @@ def load_scheme(bundle: Path) -> Scheme:
     env = grading.get("env")
     timeout = grading.get("timeout_minutes")
     image = grading.get("image")
+    retries = grading.get("retries")
     return Scheme(
         module=module,
         bundle_version=manifest.get("version"),
@@ -267,8 +279,8 @@ def load_scheme(bundle: Path) -> Scheme:
         timeout_minutes=timeout if isinstance(timeout, int) else None,
         validators=tuple(shares),
         rubric=tuple(criteria),
-        grading_hash=hashlib.sha256(
-            json.dumps(grading, sort_keys=True, default=str).encode("utf-8")).hexdigest(),
+        grading_hash=grading_hash(grading),
+        retries=retries if isinstance(retries, int) and not isinstance(retries, bool) and retries >= 0 else 0,
     )
 
 
@@ -385,6 +397,9 @@ def store_dir(repo_url: str, module: str) -> Path:
 
     The directory is not created here; writers create it on first write.
     """
+    if module == "certificate":
+        raise GradeError("`certificate` is not usable as a module id: the certificate's "
+                         "output directory <cohort>/certificate/ would collide with it", EXIT_USAGE)
     if not module or module in (".", "..", CACHE_NAME) or re.search(r"[/\\\0]", module):
         raise GradeError(f"{module!r} is not a usable module id", EXIT_USAGE)
     path = grading_root() / cohort_name(repo_url) / module
@@ -439,19 +454,22 @@ class Listing:
     participants: list[BranchRef] = field(default_factory=list)
     refused: list[str] = field(default_factory=list)
     other: list[str] = field(default_factory=list)
+    makeup: list[BranchRef] = field(default_factory=list)
 
 
 def classify_branch(branch: str, module: str) -> tuple[str, str | None]:
-    """("participant", name), ("refused", None) or ("other", None).
+    """("participant", name), ("makeup", name), ("refused", None) or ("other", None).
+
+    A makeup branch is <participant>/<module>-makeup, a further attempt at the module.
 
     Refused is a branch that is for this module and whose participant part is
     unusable; other is a branch that is not for this module at all.
     """
-    suffix = f"/{module}"
-    if not branch.endswith(suffix):
-        return "other", None
-    who = branch[: -len(suffix)]
-    return ("participant", who) if _PARTICIPANT.fullmatch(who) else ("refused", None)
+    for suffix, kind in ((f"/{module}", "participant"), (f"/{module}-makeup", "makeup")):
+        if branch.endswith(suffix):
+            who = branch[: -len(suffix)]
+            return (kind, who) if _PARTICIPANT.fullmatch(who) else ("refused", None)
+    return "other", None
 
 
 def checked_url(repo: str) -> str:
@@ -594,6 +612,8 @@ def list_branches(cache: Path, module: str) -> Listing:
         kind, who = classify_branch(branch, module)
         if kind == "participant":
             listing.participants.append(BranchRef(who, branch, commit, date))
+        elif kind == "makeup":
+            listing.makeup.append(BranchRef(who, branch, commit, date))
         elif kind == "refused":
             listing.refused.append(escape_name(branch))
         else:
@@ -605,6 +625,9 @@ def render_not_graded(listing: Listing) -> None:
     print(f"refused, a participant name that cannot be used; never graded ({len(listing.refused)}):")
     for branch in listing.refused:
         print(f"  {branch}")
+    print(f"further attempts ({len(listing.makeup)}):")
+    for ref in listing.makeup:
+        print(f"  {ref.participant}  {escape_name(ref.branch)}  {ref.commit[:12]}  {ref.committed_at}")
     print(f"no convention, not <participant>/<module>; never graded ({len(listing.other)}):")
     for branch in listing.other:
         print(f"  {branch}")
@@ -1827,6 +1850,7 @@ def cmd_confirm(args: argparse.Namespace) -> int:
     final = {
         "module": proposal["module"],
         "bundle_version": proposal["bundle_version"],
+        "grading_hash": proposal["grading_hash"],
         "confirmed_by": by,
         "confirmed_at": now_iso(),
         "participants": final_people,

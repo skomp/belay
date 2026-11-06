@@ -655,8 +655,9 @@ def test_collect() -> None:
             record(len(row) == 1 and sha[:12] in row[0] and "T" in row[0].split()[3],
                    f"collect lists {who} with branch, last commit and date", str(row))
         head_refused = lines.index(next(l for l in lines if l.startswith("refused")))
+        head_further = lines.index(next(l for l in lines if l.startswith("further attempts")))
         head_other = lines.index(next(l for l in lines if l.startswith("no convention")))
-        refused_rows = [l.strip() for l in lines[head_refused + 1:head_other] if l.strip()]
+        refused_rows = [l.strip() for l in lines[head_refused + 1:head_further] if l.strip()]
         other_rows = [l.strip() for l in lines[head_other + 1:] if l.strip()]
         record(sorted(refused_rows) == sorted(HOSTILE_BRANCHES.values()),
                "hostile participant names are listed apart as refused, escaped", str(refused_rows))
@@ -1732,8 +1733,8 @@ def test_confirm_values() -> None:
                                  by="Rob")
         record(code == 0, "confirm succeeds", f"{code} {out} {err}")
         final = load(scene, "final.json")
-        record(sorted(final) == ["bundle_version", "confirmed_at", "confirmed_by", "module", "not_graded",
-                                 "participants"] and final["not_graded"] == {}
+        record(sorted(final) == ["bundle_version", "confirmed_at", "confirmed_by", "grading_hash",
+                                 "module", "not_graded", "participants"] and final["not_graded"] == {}
                and final["module"] == "m1" and final["bundle_version"] == "1.2.0"
                and final["confirmed_by"] == "Rob" and final["confirmed_at"].endswith("Z"),
                "final.json top level has exactly the contract's keys", str(sorted(final)))
@@ -1880,6 +1881,82 @@ def test_confirm_refusals() -> None:
         code, out, err = confirm(scene)
         record(code == 1 and "`grading` block differs" in err, "a changed grading block makes the proposal stale", err)
         record(not (scene.store() / "final.json").exists(), "and writes nothing")
+
+
+def test_retries_and_grading_hash() -> None:
+    body = "  validators:\n    a: { points: 1 }\n"
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        plain = gr.load_scheme(make_bundle(base / "p", "grading:\n" + body))
+        two = gr.load_scheme(make_bundle(base / "a", "grading:\n  retries: 2\n" + body))
+        five = gr.load_scheme(make_bundle(base / "b", "grading:\n  retries: 5\n" + body))
+        record(plain.retries == 0, "no retries key reads as 0", str(plain.retries))
+        record(two.retries == 2 and five.retries == 5, "retries is read as an int", f"{two.retries} {five.retries}")
+        record(two.grading_hash == five.grading_hash == plain.grading_hash,
+               "grading_hash ignores retries", f"{two.grading_hash} {five.grading_hash} {plain.grading_hash}")
+        block = {"validators": {"a": {"points": 1}}, "retries": 3}
+        record(gr.grading_hash(block) == gr.grading_hash({"validators": {"a": {"points": 1}}})
+               and gr.grading_hash(block) != gr.grading_hash({"validators": {"a": {"points": 2}}}),
+               "grading_hash(grading) leaves out retries only")
+        record(gr.grading_hash({"validators": {"a": {"points": 1}}}) == plain.grading_hash,
+               "load_scheme uses the same function")
+
+
+def test_retries_do_not_stale_a_proposal() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = Scene(tmp)
+        path = graded(scene)
+        record(propose(scene, path)[0] == 0, "propose succeeds")
+        # Raise retries after the proposal: the proposal still confirms.
+        (scene.bundle / "tutorial.yaml").write_text(
+            "grading:\n  retries: 4\n".join(MODULE_YAML.split("grading:\n", 1)))
+        scene.cli("collect", COHORT_URL, "m1")
+        code, out, err = confirm(scene)
+        record(code == 0, "a proposal made before raising retries still confirms", f"{out} {err}")
+        final = load(scene, "final.json")
+        record(final.get("grading_hash") == load(scene, "proposal.json")["grading_hash"]
+               == gr.load_scheme(scene.bundle).grading_hash,
+               "final.json holds the grading hash", str(final.get("grading_hash")))
+
+
+def test_makeup_branches() -> None:
+    record(gr.classify_branch("alice/m1-makeup", "m1") == ("makeup", "alice"), "alice/m1-makeup is makeup for m1")
+    record(gr.classify_branch("alice/m1-makeup", "m2") == ("other", None), "and other for m2")
+    record(gr.classify_branch("a;b/m1-makeup", "m1") == ("refused", None), "an unusable participant is refused")
+    record(gr.classify_branch("alice/m1-makeup2", "m1") == ("other", None), "m1-makeup2 is other")
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = Scene(tmp)
+        scene.add_branch("alice/m1-makeup", {"README.md": "again\n"})
+        code, out, err = scene.cli("collect", COHORT_URL, "m1")
+        record(code == 0, "collect succeeds", err)
+        lines = out.splitlines()
+        head = [i for i, l in enumerate(lines) if l.startswith("further attempts (1):")]
+        nc = [i for i, l in enumerate(lines) if l.startswith("no convention")]
+        record(len(head) == 1 and len(nc) == 1, "collect prints a further attempts heading", out)
+        if head and nc:
+            after = [l.split()[0] for l in lines[head[0] + 1:] if l.startswith("  ")]
+            record(after[:1] == ["alice"] and lines[head[0] + 1].split()[1] == "alice/m1-makeup",
+                   "alice/m1-makeup is listed under further attempts", out)
+            other_rows = [l.strip() for l in lines[nc[0] + 1:] if l.strip()]
+            record("alice/m1-makeup" not in other_rows, "and not under no convention", str(other_rows))
+            record("alice/m1-makeup" not in [l.split()[1] for l in lines[:head[0]] if l.startswith("  ")
+                                             and len(l.split()) > 1],
+                   "and not among the participants")
+        with Env(scene.data):
+            listing = gr.list_branches(gr.cache_dir(COHORT_URL), "m1")
+        record([r.branch for r in listing.makeup] == ["alice/m1-makeup"]
+               and "alice/m1-makeup" not in listing.other
+               and "alice/m1-makeup" not in [r.branch for r in listing.participants],
+               "Listing.makeup holds the BranchRef")
+
+
+def test_store_dir_refuses_certificate() -> None:
+    with tempfile.TemporaryDirectory() as tmp, Env(Path(tmp) / "data"):
+        try:
+            gr.store_dir(COHORT_URL, "certificate")
+            record(False, "store_dir refuses the module id certificate")
+        except gr.GradeError as exc:
+            record("certificate" in str(exc), "store_dir refuses the module id certificate", str(exc))
 
 
 def test_gate_criterion() -> None:
@@ -2352,6 +2429,8 @@ def main() -> int:
                  test_runtime_faults_are_not_scores, test_proposed_points_and_validator_changes,
                  test_damaged_proposal_and_recursion, test_rubric_edit_needs_no_rerun,
                  test_archive_without_hard_links,
+                 test_retries_and_grading_hash, test_retries_do_not_stale_a_proposal,
+                 test_makeup_branches, test_store_dir_refuses_certificate,
                  test_exclude_a_branch_the_proposal_does_not_cover, test_by_takes_printable_unicode):
         try:
             test()
