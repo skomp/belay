@@ -2853,7 +2853,7 @@ def write_makeup(root: Path, bundle: str, who: str, gate, *, total: int | None =
 
 
 E2E_PEOPLE = ("pat", "gail", "nina", "abe", "nofp", "twofp", "exact", "under", "flip", "mup", "fta",
-              "arch", "absmup", "fpover", "fplow", "comma")
+              "arch", "absmup", "fpover", "fplow", "comma", "recon")
 
 
 def full_name(who: str) -> str:
@@ -2864,12 +2864,13 @@ def e2e_store(root: Path) -> None:
     """Two modules (m1 gated, m2 with no gate) and two use cases, written directly."""
     in_m1 = {"pat": True, "gail": False, "nofp": True, "twofp": True, "exact": True, "under": True,
              "flip": True, "mup": False, "fta": False, "arch": False, "fpover": True, "fplow": True,
-             "comma": True}
+             "comma": True, "recon": False}
     write_final(root, "m1", {w: fentry(g, 50, 60) for w, g in in_m1.items()},
                 {"nina": {"reason": "a runtime fault", "commit": "e" * 40}})
     write_final(root, "m2", {w: fentry(None, 10, 10) for w in E2E_PEOPLE})
     fp1 = {"pat": 60, "twofp": 70, "exact": 48, "under": 47, "flip": 70, "fta": 70, "arch": 70,
-           "absmup": 70, "fpover": 40, "fplow": 40, "gail": 70, "nina": 70, "abe": 70, "comma": 70}
+           "absmup": 70, "fpover": 40, "fplow": 40, "gail": 70, "nina": 70, "abe": 70, "comma": 70,
+           "recon": 70}
     write_final(root, "fp1", {w: fentry(True, t) for w, t in fp1.items()})
     write_final(root, "fp2", {"twofp": fentry(True, 70), "mup": fentry(True, 70)})
     write_makeup(root, "m1", "mup", True)
@@ -2880,6 +2881,7 @@ def e2e_store(root: Path) -> None:
                  confirmed_at="2026-11-01T10:00:00Z")
     write_makeup(root, "m1", "arch", False)
     write_makeup(root, "m1", "absmup", True)
+    write_makeup(root, "m1", "recon", False)
     write_makeup(root, "fp1", "fpover", True, total=60)
     write_makeup(root, "fp1", "fplow", True, total=30)
 
@@ -2901,6 +2903,7 @@ E2E_EXPECT = {  # who: (passed, the requirement that decides, a reason fragment)
     "fpover": (True, "final project", "60 of 80 points in the further attempt fp1/makeup/fpover/final.json"),
     "fplow": (False, "final project", "30 of 80 points in the further attempt fp1/makeup/fplow/final.json"),
     "comma": (True, "module m1", "gate met"),
+    "recon": (False, "module m1", "gate not met in the further attempt m1/makeup/recon/final.json"),
 }
 
 
@@ -3010,12 +3013,20 @@ def test_certificate_end_to_end() -> None:
                str(outcomes.get("under")))
         # A changed grade flips the result on the next run, and the earlier output is kept.
         write_final(scene.root, "m1", {**json.loads((scene.root / "m1" / "final.json").read_text())["participants"],
-                                       "flip": fentry(False, 50, 60)},
+                                       "flip": fentry(False, 50, 60), "recon": fentry(True, 50, 60)},
                     {"nina": {"reason": "a runtime fault", "commit": "e" * 40}})
         code, out, err = scene.run()
         table = {r[0]: r[1] for r in rows(scene.results())[1:]} if code == 0 else {}
         record(code == 0 and table.get(full_name("flip")) == "not passed",
                "a changed grade flips a result on the next run", f"{code} {err} {table.get(full_name('flip'))}")
+        req = requirement(scene.details(), "recon", "module m1") if code == 0 else {}
+        record(table.get(full_name("recon")) == "passed" and req.get("result") == "passed"
+               and req.get("reason") == "gate met in m1/final.json",
+               "a module re-confirmed to a met gate after a failed further attempt passes: either/or, "
+               "a result that met it is never replaced", f"{table.get(full_name('recon'))} {req}")
+        attempts = scene.details()["participants"]["recon"]["further_attempts"] if code == 0 else []
+        record(len(attempts) == 1 and attempts[0]["bundle"] == "m1",
+               "and the further attempt is still recorded in details.json", str(attempts))
         kept = scene.root / f"certificate.{TODAY}"
         record(kept.is_dir() and f"{full_name('flip')},passed" in (kept / "results.csv").read_text(),
                "the earlier output is kept as certificate.<date>/", str(list(scene.root.iterdir())))

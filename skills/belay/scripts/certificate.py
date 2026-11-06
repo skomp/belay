@@ -251,20 +251,25 @@ def evaluate(store_root: Path, cert: Certificate) -> dict[str, Outcome]:
             people, not_graded = tables[bundle]
             latest = makeups[bundle].get(who)
             here = finals[bundle].file
+            first = people[who]["gate"] if who in people else False
             if latest is not None:
                 attempts.append(_attempts(root, bundle, who, latest))
                 read.append(latest.stamp)
+            # Rule 1 is either/or: a first result that met the gate passes whatever a further
+            # attempt says, because a result that met it is never replaced (section 3.1). A
+            # trainer may re-confirm the module after an attempt, turning the first into a pass.
+            if who in people and first is not False:
+                reason = (f"gate met in {here}" if first
+                          else f"graded in {here}; the module declares no gate")
+                ok = True
+            elif latest is not None:
                 gate = latest.data["gate"]
                 reason = (f"gate met in the further attempt {latest.file}" if gate
                           else f"graded in the further attempt {latest.file}; the module declares no gate"
                           if gate is None else f"gate not met in the further attempt {latest.file}")
                 ok = gate is not False
             elif who in people:
-                gate = people[who]["gate"]
-                reason = (f"gate met in {here}" if gate
-                          else f"graded in {here}; the module declares no gate" if gate is None
-                          else f"gate not met in {here}, with no further attempt")
-                ok = gate is not False
+                reason, ok = f"gate not met in {here}, with no further attempt", False
             elif who in not_graded:
                 why = not_graded[who].get("reason") if isinstance(not_graded[who], dict) else None
                 reason = f"in not_graded of {here}" + (f" ({why})" if isinstance(why, str) else "") \

@@ -513,7 +513,7 @@ python3 tests/test_catalogs.py            # 619 assertions
 python3 tests/test_plan_update.py         # 129 assertions
 python3 tests/test_evidence.py            # 89 assertions
 python3 tests/test_bin_wrappers.py        # 69 assertions
-python3 tests/test_grade.py               # 864 assertions; slow, it runs every step
+python3 tests/test_grade.py               # 869 assertions; slow, it runs every step
 ```
 
 **Those numbers are properties of this commit, not of your machine.** A clean
