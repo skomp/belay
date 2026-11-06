@@ -11,6 +11,13 @@ Usage:
     grade.py confirm --bundle <dir> --by <name> [--change <p>:<criterion>=<points>:<reason>]...
                      [--exclude <p>]... <repo> <module-id>
         write final.json; the previous one is kept beside it as final.<date>.json
+    grade.py makeup run|propose|confirm <repo> <bundle-id> <participant> --bundle <dir>
+                     --catalog <file> [--judgement <file>] [--by <name> [--change <criterion>=<points>:<reason>]...]
+        a further attempt, on <participant>/<bundle-id>-makeup, into <bundle-id>/makeup/<participant>/;
+        final-project-and-certificate spec, section 3.1
+    grade.py certificate <repo> --catalog <file> --names <file> [--template <file>]
+        the programme's results into <cohort>/certificate/: details.json, results.csv and,
+        with a template, certificates/; final-project-and-certificate spec, sections 4 and 5
     grade.py forget <cohort>     delete one cohort's stored grades and cache
     grade.py --help
 
@@ -189,11 +196,22 @@ class Scheme:
     timeout_minutes: int | None
     validators: tuple[ValidatorShare, ...]
     rubric: tuple[Criterion, ...]
-    grading_hash: str = ""  # of the manifest's `grading` block as written
+    grading_hash: str = ""  # of the manifest's `grading` block, without `retries`
+    retries: int = 0  # further attempts after the first; not part of the hash
 
     @property
     def max_total(self) -> int:
         return sum(v.points for v in self.validators) + sum(c.points for c in self.rubric)
+
+
+def grading_hash(grading: dict) -> str:
+    """What a proposal is compared on: the `grading` block without `retries`.
+
+    Raising `retries` during a programme must not stale a proposal, while any
+    change to what is graded still does.
+    """
+    kept = {k: v for k, v in grading.items() if k != "retries"}
+    return hashlib.sha256(json.dumps(kept, sort_keys=True, default=str).encode("utf-8")).hexdigest()
 
 
 def load_scheme(bundle: Path) -> Scheme:
@@ -258,6 +276,7 @@ def load_scheme(bundle: Path) -> Scheme:
     env = grading.get("env")
     timeout = grading.get("timeout_minutes")
     image = grading.get("image")
+    retries = grading.get("retries")
     return Scheme(
         module=module,
         bundle_version=manifest.get("version"),
@@ -267,8 +286,8 @@ def load_scheme(bundle: Path) -> Scheme:
         timeout_minutes=timeout if isinstance(timeout, int) else None,
         validators=tuple(shares),
         rubric=tuple(criteria),
-        grading_hash=hashlib.sha256(
-            json.dumps(grading, sort_keys=True, default=str).encode("utf-8")).hexdigest(),
+        grading_hash=grading_hash(grading),
+        retries=retries if isinstance(retries, int) and not isinstance(retries, bool) and retries >= 0 else 0,
     )
 
 
@@ -385,6 +404,9 @@ def store_dir(repo_url: str, module: str) -> Path:
 
     The directory is not created here; writers create it on first write.
     """
+    if module == "certificate":
+        raise GradeError("`certificate` is not usable as a module id: the certificate's "
+                         "output directory <cohort>/certificate/ would collide with it", EXIT_USAGE)
     if not module or module in (".", "..", CACHE_NAME) or re.search(r"[/\\\0]", module):
         raise GradeError(f"{module!r} is not a usable module id", EXIT_USAGE)
     path = grading_root() / cohort_name(repo_url) / module
@@ -439,19 +461,22 @@ class Listing:
     participants: list[BranchRef] = field(default_factory=list)
     refused: list[str] = field(default_factory=list)
     other: list[str] = field(default_factory=list)
+    makeup: list[BranchRef] = field(default_factory=list)
 
 
 def classify_branch(branch: str, module: str) -> tuple[str, str | None]:
-    """("participant", name), ("refused", None) or ("other", None).
+    """("participant", name), ("makeup", name), ("refused", None) or ("other", None).
+
+    A makeup branch is <participant>/<module>-makeup, a further attempt at the module.
 
     Refused is a branch that is for this module and whose participant part is
     unusable; other is a branch that is not for this module at all.
     """
-    suffix = f"/{module}"
-    if not branch.endswith(suffix):
-        return "other", None
-    who = branch[: -len(suffix)]
-    return ("participant", who) if _PARTICIPANT.fullmatch(who) else ("refused", None)
+    for suffix, kind in ((f"/{module}", "participant"), (f"/{module}-makeup", "makeup")):
+        if branch.endswith(suffix):
+            who = branch[: -len(suffix)]
+            return (kind, who) if _PARTICIPANT.fullmatch(who) else ("refused", None)
+    return "other", None
 
 
 def checked_url(repo: str) -> str:
@@ -594,6 +619,8 @@ def list_branches(cache: Path, module: str) -> Listing:
         kind, who = classify_branch(branch, module)
         if kind == "participant":
             listing.participants.append(BranchRef(who, branch, commit, date))
+        elif kind == "makeup":
+            listing.makeup.append(BranchRef(who, branch, commit, date))
         elif kind == "refused":
             listing.refused.append(escape_name(branch))
         else:
@@ -605,6 +632,9 @@ def render_not_graded(listing: Listing) -> None:
     print(f"refused, a participant name that cannot be used; never graded ({len(listing.refused)}):")
     for branch in listing.refused:
         print(f"  {branch}")
+    print(f"further attempts ({len(listing.makeup)}):")
+    for ref in listing.makeup:
+        print(f"  {ref.participant}  {escape_name(ref.branch)}  {ref.commit[:12]}  {ref.committed_at}")
     print(f"no convention, not <participant>/<module>; never graded ({len(listing.other)}):")
     for branch in listing.other:
         print(f"  {branch}")
@@ -1508,6 +1538,22 @@ def _summary_lines(participants: dict, ranking: list[dict], max_total: int) -> l
     return lines
 
 
+def proposed_validators(rec: dict, scheme: Scheme) -> dict:
+    """One branch's validator results from run.json, with the points they earn."""
+    validators = {}
+    for share in scheme.validators:
+        got = rec["validators"][share.name]
+        passed = got.get("passed") is True
+        validators[share.name] = {"passed": passed, "points": share.points if passed else 0,
+                                  "gate": share.gate, "reason": got.get("reason"),
+                                  "fault": got.get("fault") is True}
+    return validators
+
+
+def proposed_criteria(rated: dict, scheme: Scheme) -> dict:
+    return {crit.id: {**rated[crit.id], "max": crit.points, "gate": crit.gate} for crit in scheme.rubric}
+
+
 def cmd_propose(args: argparse.Namespace) -> int:
     repo = checked_url(args.repo)
     store = store_dir(repo, args.module)
@@ -1545,13 +1591,7 @@ def cmd_propose(args: argparse.Namespace) -> int:
     participants: dict[str, dict] = {}
     for who in known:
         rec = branches[who]
-        validators = {}
-        for share in scheme.validators:
-            got = rec["validators"][share.name]
-            passed = got.get("passed") is True
-            validators[share.name] = {"passed": passed, "points": share.points if passed else 0,
-                                      "gate": share.gate, "reason": got.get("reason"),
-                                      "fault": got.get("fault") is True}
+        validators = proposed_validators(rec, scheme)
         if who in faults:
             # A runtime fault is not the participant's result: no total, no rank, no gate.
             participants[who] = {
@@ -1561,9 +1601,7 @@ def cmd_propose(args: argparse.Namespace) -> int:
                 "rubric_points": None, "gate": None, "total": None, "max_total": scheme.max_total,
             }
             continue
-        criteria = {}
-        for crit in scheme.rubric:
-            criteria[crit.id] = {**ratings[who][crit.id], "max": crit.points, "gate": crit.gate}
+        criteria = proposed_criteria(ratings[who], scheme)
         vpts = sum(v["points"] for v in validators.values())
         rpts = sum(c["points"] for c in criteria.values())
         participants[who] = {
@@ -1698,16 +1736,28 @@ def unrepeated_changes(store: Path, final_people: dict) -> list[str]:
     lines = []
     for who, entry in (people.items() if isinstance(people, dict) else ()):
         criteria = entry.get("criteria") if isinstance(entry, dict) else None
-        for cid, old in (criteria.items() if isinstance(criteria, dict) else ()):
-            if not (isinstance(old, dict) and old.get("changed_by_trainer") is True):
-                continue
-            now = final_people.get(who, {}).get("criteria", {}).get(cid)
-            if now is not None and now["changed_by_trainer"] and now["points"] == old.get("points"):
-                continue
-            state = "not in this confirmation" if now is None else f"now {now['points']}"
-            lines.append(f"{short(who)}:{short(cid)} was {short(old.get('points'))}, {state}: "
-                         f"{short(old.get('reason'))}")
+        lines += unrepeated_criteria(f"{short(who)}:", criteria,
+                                     final_people.get(who, {}).get("criteria", {}))
     return lines
+
+
+def unrepeated_criteria(prefix: str, criteria: Any, now_criteria: dict) -> list[str]:
+    """unrepeated_changes for one entry: the old `criteria` against the new ones."""
+    lines = []
+    for cid, old in (criteria.items() if isinstance(criteria, dict) else ()):
+        if not (isinstance(old, dict) and old.get("changed_by_trainer") is True):
+            continue
+        now = now_criteria.get(cid)
+        if now is not None and now["changed_by_trainer"] and now["points"] == old.get("points"):
+            continue
+        state = "not in this confirmation" if now is None else f"now {now['points']}"
+        lines.append(f"{prefix}{short(cid)} was {short(old.get('points'))}, {state}: "
+                     f"{short(old.get('reason'))}")
+    return lines
+
+
+UNREPEATED_NOTICE = ("the previous confirmation changed these, and this one does not repeat them; nothing "
+                     "is carried over, so to keep one, confirm again with its --change:")
 
 
 def check_proposal(proposal: Any) -> None:
@@ -1740,6 +1790,41 @@ def check_proposal(proposal: Any) -> None:
             if not (isinstance(c, dict) and {"points", "max", "evidence", "gate"} <= set(c)
                     and _is_points(c["points"]) and _is_points(c["max"])):
                 raise damaged(f"{escape_name(str(who))}: criterion {escape_name(str(cid))} is incomplete")
+
+
+def check_change(who: str, cid: str, pts: int, entry: dict, applied: dict) -> None:
+    """One --change against one proposed entry; `applied` holds the (who, cid) already taken."""
+    if cid in entry["validators"]:
+        raise GradeError(f"--change names {escape_name(cid)}, which is a validator: validators are "
+                         "deterministic and the trainer cannot change them. A criterion of the "
+                         f"rubric can be changed ({', '.join(entry['criteria']) or 'none'}).")
+    crit = entry["criteria"].get(cid)
+    if crit is None:
+        raise GradeError(f"--change names criterion {escape_name(cid)}, which {who} has no "
+                         f"points for ({', '.join(entry['criteria']) or 'none'})")
+    if not 0 <= pts <= crit["max"]:
+        raise GradeError(f"--change {who}:{cid} gives {pts}; it must be from 0 to {crit['max']}")
+    if (who, cid) in applied:
+        raise GradeError(f"--change names {who}:{cid} twice")
+    if pts == crit["points"]:
+        raise GradeError(f"--change {who}:{cid}={pts} is not a change: the proposal has {pts}")
+
+
+def confirmed_entry(p: dict, changes: dict[str, tuple[int, str]]) -> tuple[dict, dict, bool | None, int]:
+    """validators, criteria, gate and total of one proposed entry with the trainer's changes."""
+    validators = {n: {"passed": v["passed"], "points": v["points"]} for n, v in p["validators"].items()}
+    criteria, gating = {}, {}
+    for cid, c in p["criteria"].items():
+        pts, reason = changes.get(cid, (c["points"], None))
+        criteria[cid] = {"points": pts, "proposed_points": c["points"], "max": c["max"],
+                         "evidence": c["evidence"],
+                         "changed_by_trainer": reason is not None, "reason": reason}
+        gating[cid] = {"points": pts, "max": c["max"], "gate": c["gate"]}
+    # The gate is computed from the CONFIRMED points, so a change can flip it.
+    gate = gate_result({n: {"passed": v["passed"], "gate": p["validators"][n]["gate"]}
+                        for n, v in validators.items()}, gating)
+    total = sum(v["points"] for v in validators.values()) + sum(c["points"] for c in criteria.values())
+    return validators, criteria, gate, total
 
 
 def cmd_confirm(args: argparse.Namespace) -> int:
@@ -1789,44 +1874,21 @@ def cmd_confirm(args: argparse.Namespace) -> int:
                              f"({', '.join(people)})")
         if people[who]["ungradable"]:
             raise GradeError(f"--change names {who}, who is not graded (a runtime fault)")
-        if cid in people[who]["validators"]:
-            raise GradeError(f"--change names {escape_name(cid)}, which is a validator: validators are "
-                             "deterministic and the trainer cannot change them. A criterion of the "
-                             f"rubric can be changed ({', '.join(people[who]['criteria']) or 'none'}).")
-        crit = people[who]["criteria"].get(cid)
-        if crit is None:
-            raise GradeError(f"--change names criterion {escape_name(cid)}, which {who} has no "
-                             f"points for ({', '.join(people[who]['criteria']) or 'none'})")
-        if not 0 <= pts <= crit["max"]:
-            raise GradeError(f"--change {who}:{cid} gives {pts}; it must be from 0 to {crit['max']}")
-        if (who, cid) in applied:
-            raise GradeError(f"--change names {who}:{cid} twice")
-        if pts == crit["points"]:
-            raise GradeError(f"--change {who}:{cid}={pts} is not a change: the proposal has {pts}")
+        check_change(who, cid, pts, people[who], applied)
         applied[(who, cid)] = (pts, reason)
 
     final_people: dict[str, dict] = {}
     for who, p in people.items():
         if p["ungradable"]:
             continue
-        validators = {n: {"passed": v["passed"], "points": v["points"]}
-                      for n, v in p["validators"].items()}
-        criteria, gating = {}, {}
-        for cid, c in p["criteria"].items():
-            pts, reason = applied.get((who, cid), (c["points"], None))
-            criteria[cid] = {"points": pts, "proposed_points": c["points"], "max": c["max"],
-                             "evidence": c["evidence"],
-                             "changed_by_trainer": reason is not None, "reason": reason}
-            gating[cid] = {"points": pts, "max": c["max"], "gate": c["gate"]}
-        # The gate is computed from the CONFIRMED points, so a change can flip it.
-        gate = gate_result({n: {"passed": v["passed"], "gate": p["validators"][n]["gate"]}
-                            for n, v in validators.items()}, gating)
-        total = sum(v["points"] for v in validators.values()) + sum(c["points"] for c in criteria.values())
+        validators, criteria, gate, total = confirmed_entry(
+            p, {cid: change for (w, cid), change in applied.items() if w == who})
         final_people[who] = {"commit": p["commit"], "validators": validators, "criteria": criteria, "gate": gate,
                              "total": total, "max_total": p["max_total"]}
     final = {
         "module": proposal["module"],
         "bundle_version": proposal["bundle_version"],
+        "grading_hash": proposal["grading_hash"],
         "confirmed_by": by,
         "confirmed_at": now_iso(),
         "participants": final_people,
@@ -1860,14 +1922,484 @@ def cmd_confirm(args: argparse.Namespace) -> int:
     if ranking and ranking[0]["tied"]:
         print("the top place is a tie: choosing the start branch is the trainer's; final.json stores no winner.")
     if unrepeated:
-        print("the previous confirmation changed these, and this one does not repeat them; nothing "
-              "is carried over, so to keep one, confirm again with its --change:")
+        print(UNREPEATED_NOTICE)
         for line in unrepeated:
             print(f"  {line}")
     if kept:
         print(f"previous confirmation kept: {kept}")
     print(f"final: {path}")
     return EXIT_OK
+
+
+# --------------------------------------------------------------------------
+# Further attempts (final-project-and-certificate spec, section 3.1)
+# --------------------------------------------------------------------------
+#
+# A further attempt is graded on its own branch, <participant>/<bundle>-makeup, into
+# <store>/<cohort>/<bundle>/makeup/<participant>/, by the same steps as the cohort:
+# run, propose, confirm. It never touches the bundle's own final.json, and it is
+# never ranked. An attempt is a COMMIT: the count is the number of different commits
+# with a confirmed result, so a trainer correcting a confirmed attempt uses none.
+#
+# Every refusal is raised before anything is written.
+
+MAKEUP_DIR = "makeup"
+
+
+def _certificate_module():
+    """certificate.py, imported here and not at load time, so there is no import cycle.
+
+    certificate.py takes GradeError from `grade`. Run as a script this module is
+    __main__, and importing `grade` again would make a second GradeError class that
+    main() does not catch, so this module is registered under its own name first.
+    """
+    sys.modules.setdefault("grade", sys.modules[__name__])
+    import certificate
+    return certificate
+
+
+def attempts_used(store: Path) -> set[str]:
+    """The distinct commits confirmed in a makeup directory: final.json and every final.*.json.
+
+    A file that cannot be read is a refusal, not a miscount, because a miscount could
+    give an attempt the course did not allow.
+    """
+    used: set[str] = set()
+    for path in [store / FINAL_FILE, *sorted(store.glob("final.*.json"))]:
+        if not path.is_file():
+            continue
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, RecursionError) as exc:
+            raise GradeError(f"{path} cannot be read, so the attempts used cannot be counted: {exc}") from exc
+        commit = data.get("commit") if isinstance(data, dict) else None
+        if isinstance(commit, str):
+            used.add(commit)
+    return used
+
+
+@dataclass(frozen=True)
+class Makeup:
+    repo: str
+    bundle: str
+    participant: str
+    kind: str  # "module" or "final_project"
+    share: int
+    scheme: Scheme  # the bundle's whole scheme
+    graded: Scheme  # what a further attempt is graded on
+    store: Path  # <bundle store>/makeup/<participant>
+    module_final: dict
+    latest: dict | None  # the latest confirmed further attempt, or None
+    used: frozenset[str]
+
+
+def gate_scheme(scheme: Scheme) -> Scheme:
+    """A module's further attempt: the gate validators and gate criteria, nothing else."""
+    return dataclasses.replace(scheme, validators=tuple(v for v in scheme.validators if v.gate),
+                               rubric=tuple(c for c in scheme.rubric if c.gate))
+
+
+def makeup_context(args: argparse.Namespace) -> Makeup:
+    """Everything every makeup step checks first, read and refused before any write."""
+    repo = checked_url(args.repo)
+    bundle_store = store_dir(repo, args.bundle_id)
+    who = args.participant
+    if not _PARTICIPANT.fullmatch(who):
+        raise GradeError(f"{escape_name(who)!r} is not a usable participant name: the part of a branch "
+                         "name before the slash, of letters, digits, '.', '_' and '-'")
+    cert_module = _certificate_module()
+    cert = cert_module.load_certificate(Path(args.catalog))
+    kind = cert_module.kind_of(cert, args.bundle_id)
+    scheme = load_scheme(Path(args.bundle))
+    if scheme.module != args.bundle_id:
+        raise GradeError(f"the bundle is {scheme.module}, and the further attempt asked for {args.bundle_id}")
+    problems = scheme_problems(scheme)
+    if problems:
+        raise GradeError("the bundle cannot be graded (belay-validate reports these):\n  " + "\n  ".join(problems))
+    if not (bundle_store / FINAL_FILE).is_file():
+        raise GradeError(f"{args.bundle_id} has no confirmed final.json in this cohort's store: a further "
+                         "attempt follows the cohort's grading, so confirm that first")
+    module_final = read_json_file(bundle_store / FINAL_FILE, "the confirmed grades", JUDGEMENT_MAX_BYTES * 8)
+    if not isinstance(module_final, dict) or not isinstance(module_final.get("participants"), dict):
+        raise GradeError(f"{bundle_store / FINAL_FILE} is damaged: it has no `participants`")
+    if not isinstance(module_final.get("grading_hash"), str):
+        raise GradeError(f"{bundle_store / FINAL_FILE} records no grading_hash: it was confirmed by an older "
+                         "Belay, so the grading block the cohort met is unknown. The bundle must be "
+                         "confirmed again with this Belay (`belay-grade confirm`) before a further attempt")
+    if module_final["grading_hash"] != scheme.grading_hash:
+        raise GradeError(f"the bundle's grading block differs from the one the cohort met in "
+                         f"{args.bundle_id}'s final.json; a further attempt is graded on the same task, so "
+                         "use the bundle the cohort was graded with")
+    store = bundle_store / MAKEUP_DIR / who
+    refuse_work_tree(store)
+    latest = read_json_file(store / FINAL_FILE, "the latest further attempt", JUDGEMENT_MAX_BYTES * 8) \
+        if (store / FINAL_FILE).is_file() else None
+    if latest is not None and not isinstance(latest, dict):
+        raise GradeError(f"{store / FINAL_FILE} is damaged: it is not an object")
+    return Makeup(
+        repo=repo, bundle=args.bundle_id, participant=who, kind=kind, share=cert.share, scheme=scheme,
+        graded=gate_scheme(scheme) if kind == "module" else scheme, store=store,
+        module_final=module_final, latest=latest, used=frozenset(attempts_used(store)),
+    )
+
+
+def open_requirement(ctx: Makeup) -> str | None:
+    """Why the participant's requirement is open, in the latest confirmed attempt; None when met.
+
+    A module is open on a gate of false, an entry in not_graded, or no branch at the
+    checkpoint. A final project is open only for someone under `participants`, on a
+    gate of false or too few points. A module whose first result meets the gate is met,
+    whatever a later attempt says, so a re-confirmation that meets it closes the module.
+    A damaged entry is refused, as `belay-grade certificate` refuses it, never read as met.
+    """
+    people = ctx.module_final["participants"]
+    if ctx.kind == "module" and ctx.participant in people:
+        first = people[ctx.participant]
+        _check_requirement_entry(ctx, first, f"in {ctx.bundle}'s final.json")
+        if first.get("gate") is not False:
+            return None  # a met first result is never replaced (spec section 3.1)
+    if ctx.latest is not None:
+        entry, where = ctx.latest, "in the latest confirmed further attempt"
+    else:
+        not_graded = ctx.module_final.get("not_graded")
+        if ctx.kind == "module":
+            if isinstance(not_graded, dict) and ctx.participant in not_graded:
+                return f"{ctx.participant} is in not_graded of {ctx.bundle}'s final.json"
+            if ctx.participant not in people:
+                return f"{ctx.participant} had no branch of {ctx.bundle} at the checkpoint"
+        elif ctx.participant not in people:
+            return None
+        entry, where = people[ctx.participant], f"in {ctx.bundle}'s final.json"
+    _check_requirement_entry(ctx, entry, where)
+    if entry.get("gate") is False:
+        return f"the gate is not met yet {where}"
+    if ctx.kind == "final_project":
+        total, max_total = entry["total"], entry["max_total"]
+        if total * 100 < ctx.share * max_total:
+            return f"{total} of {max_total} points {where}, under the share of {ctx.share}%"
+    return None
+
+
+def _check_requirement_entry(ctx: Makeup, entry: Any, where: str) -> None:
+    """Refuse an entry the certificate would refuse, rather than read it as met."""
+    if not isinstance(entry, dict) or entry.get("gate", "absent") not in (True, False, None):
+        raise GradeError(f"the entry of {ctx.participant} {where} is damaged: it has no `gate` of "
+                         "true, false or null")
+    if ctx.kind == "final_project" and not (_is_points(entry.get("total"))
+                                            and _is_points(entry.get("max_total"))):
+        raise GradeError(f"the entry of {ctx.participant} {where} is damaged: `total` and `max_total` "
+                         "are not whole numbers")
+
+
+def admit_attempt(ctx: Makeup, commit: str) -> str:
+    """Refuse a commit that is not a permitted attempt; return what it is, in words."""
+    if ctx.latest is not None and ctx.latest.get("commit") == commit:
+        return "a correction of the latest confirmed attempt, which uses no further attempt"
+    reason = open_requirement(ctx)
+    if reason is None:
+        where = f"in {ctx.bundle}" if ctx.kind == "module" else f"in the final project {ctx.bundle}"
+        raise GradeError(f"{ctx.participant} has nothing open {where}: the requirement is met, or "
+                         "(for a final project) they did not take part in it, so a further attempt "
+                         "would replace nothing")
+    if commit in ctx.used:
+        return f"open ({reason}); this commit was confirmed before, so it uses no further attempt"
+    if ctx.scheme.retries == 0:
+        raise GradeError(f"{ctx.bundle} allows no further attempt: its grading.retries is absent or 0 "
+                         f"({reason})")
+    if len(ctx.used) >= ctx.scheme.retries:
+        raise GradeError(f"{ctx.participant}'s further attempts at {ctx.bundle} are used up: "
+                         f"{len(ctx.used)} of {ctx.scheme.retries} (grading.retries) confirmed")
+    return f"open ({reason}); attempt {len(ctx.used) + 1} of {ctx.scheme.retries}"
+
+
+def makeup_branch(ctx: Makeup) -> BranchRef:
+    """The participant's makeup branch in the local cache; it never fetches."""
+    cache = cache_dir(ctx.repo)
+    if not (cache / "HEAD").exists():
+        raise GradeError("nothing is collected for this repository; run collect with the same URL first")
+    for ref in list_branches(cache, ctx.bundle).makeup:
+        if ref.participant == ctx.participant:
+            return ref
+    raise GradeError(f"there is no branch {ctx.participant}/{ctx.bundle}-makeup in the cache; the "
+                     "further attempt goes on that branch. Run collect after it is pushed")
+
+
+def cmd_makeup_run(args: argparse.Namespace) -> int:
+    ctx = makeup_context(args)
+    ref = makeup_branch(ctx)
+    what = admit_attempt(ctx, ref.commit)
+    graded = ctx.graded
+    warnings: list[str] = []
+    record: dict
+    suspect = False
+    if graded.validators:
+        runtime = find_runtime()
+        if ":" in tempfile.gettempdir():
+            raise GradeError(f"the temporary directory {tempfile.gettempdir()} holds ':', so it cannot be mounted")
+        plan = build_plan(ctx.repo, graded, runtime, warnings)
+        probe_runtime(runtime, plan.runtime_env)
+        digest_of_image = "unknown"
+        if any(v.declared.get("kind") == "command" for v in graded.validators):
+            pull_image(plan, warnings)
+            digest_of_image = image_digest(plan)
+            proxy_warning = docker_proxy_warning()
+            if proxy_warning:
+                warnings.append(proxy_warning)
+        signals = {s: signal.signal(s, _terminate) for s in (signal.SIGTERM, signal.SIGHUP)}
+        try:
+            record, suspect = run_branch(plan, ref, warnings)
+        finally:
+            for number, handler in signals.items():
+                signal.signal(number, handler)
+        record["runtime"] = runtime
+        record["image_digest"] = digest_of_image
+    else:
+        # A module with no gate validator: nothing runs, the trainer confirms the work.
+        stamp = now_iso()
+        record = {"branch": ref.branch, "commit": ref.commit, "committed_at": ref.committed_at,
+                  "started_at": stamp, "finished_at": stamp, "timed_out": False, "fault": None,
+                  "validators": {}}
+    data = {
+        "bundle": ctx.bundle,
+        "kind": ctx.kind,
+        "participant": ctx.participant,
+        "bundle_version": ctx.scheme.bundle_version,
+        "cohort": cohort_name(ctx.repo),
+        "repository": normalise_url(ctx.repo),
+        "grading_hash": ctx.scheme.grading_hash,
+        "scheme_digest": scheme_digest(graded),
+        "warnings": warnings,
+        "branch": record,
+    }
+    path = ctx.store / RUN_FILE
+    write_json_private(path, data)
+    for warning in warnings:
+        print(f"warning: {warning}", file=sys.stderr)
+    print(f"{ctx.participant} ({ref.branch}, {ref.commit[:12]}): {what}")
+    if not record["validators"]:
+        print("  no gate validator: nothing ran; the trainer confirms that the work exists")
+    for name, result in record["validators"].items():
+        word = "pass" if result["passed"] else f"FAIL: {short(result['reason'])}"
+        print(f"  {name}{' (gate)' if result['gate'] else ''}  {word}")
+    print(f"results: {path}")
+    if suspect:
+        print("error: a result above may not be a judgement of the code; it records no result and uses "
+              "no attempt. Repair the fault and run again", file=sys.stderr)
+        return EXIT_REFUSED
+    return EXIT_OK
+
+
+def cmd_makeup_propose(args: argparse.Namespace) -> int:
+    ctx = makeup_context(args)
+    path = ctx.store / RUN_FILE
+    if not path.is_file():
+        raise GradeError(f"there are no run results for {ctx.participant}'s further attempt; run "
+                         "`belay-grade makeup run` first")
+    run = read_json_file(path, "the run results", JUDGEMENT_MAX_BYTES * 8)
+    rec = run.get("branch") if isinstance(run, dict) else None
+    if not isinstance(rec, dict) or not isinstance(rec.get("validators"), dict) \
+            or not isinstance(rec.get("commit"), str):
+        raise GradeError(f"{path} is damaged; run `belay-grade makeup run` again")
+    if run.get("bundle") != ctx.bundle or run.get("participant") != ctx.participant:
+        raise GradeError(f"{path} is not for {ctx.participant}'s further attempt at {ctx.bundle}")
+    if run.get("scheme_digest") != scheme_digest(ctx.graded):
+        raise GradeError("the grading scheme changed since the run, so the validator results are not "
+                         "for it; run `belay-grade makeup run` again")
+    if any(v.name not in rec["validators"] for v in ctx.graded.validators):
+        raise GradeError(f"{path} holds no complete validator results; run `belay-grade makeup run` again")
+    if isinstance(rec.get("fault"), str):
+        raise GradeError(f"the further attempt could not be graded, and no proposal was written: "
+                         f"{short(rec['fault'])}. A runtime fault is not the participant's result and "
+                         "uses no attempt; repair it and run again")
+    admit_attempt(ctx, rec["commit"])
+    ratings, draft = read_judgement(Path(args.judgement), ctx.graded, [ctx.participant])
+    if draft is not None:
+        raise GradeError("the judgement has a `draft`, and a further attempt has no comparison and no "
+                         "shared review; remove it. No proposal was written")
+    validators = proposed_validators(rec, ctx.graded)
+    criteria = proposed_criteria(ratings[ctx.participant], ctx.graded)
+    vpts = sum(v["points"] for v in validators.values())
+    rpts = sum(c["points"] for c in criteria.values())
+    proposal = {
+        "bundle": ctx.bundle,
+        "kind": ctx.kind,
+        "participant": ctx.participant,
+        "branch": rec.get("branch"),
+        "commit": rec["commit"],
+        "bundle_version": ctx.scheme.bundle_version,
+        "grading_hash": ctx.scheme.grading_hash,
+        "cohort": cohort_name(ctx.repo),
+        "repository": normalise_url(ctx.repo),
+        "proposed_at": now_iso(),
+        "validators": validators,
+        "criteria": criteria,
+        "gate": gate_result(validators, criteria),
+        "total": vpts + rpts,
+        "max_total": ctx.graded.max_total,
+        "warnings": run.get("warnings") if isinstance(run.get("warnings"), list) else [],
+    }
+    out = ctx.store / PROPOSAL_FILE
+    write_json_private(out, proposal)
+    print(_makeup_line(ctx, proposal["gate"], proposal["total"], proposal["max_total"]))
+    print(f"proposal: {out}")
+    return EXIT_OK
+
+
+def _makeup_line(ctx: Makeup, gate: bool | None, total: int, max_total: int) -> str:
+    word = {True: "passed", False: "NOT met yet", None: "n/a (no gate: the work exists)"}[gate]
+    line = f"{ctx.participant}: further attempt at {ctx.bundle}, gate {word}"
+    if ctx.kind == "final_project":
+        line += f", total {total}/{max_total} (share {ctx.share}%)"
+    return line
+
+
+def check_makeup_proposal(proposal: Any, ctx: Makeup) -> None:
+    def damaged(why: str) -> GradeError:
+        return GradeError(f"the further attempt's proposal.json is damaged ({why}); run "
+                          "`belay-grade makeup propose` again")
+
+    if not isinstance(proposal, dict):
+        raise damaged("it is not an object")
+    for key in ("bundle", "participant", "commit", "grading_hash", "validators", "criteria", "max_total"):
+        if key not in proposal:
+            raise damaged(f"no `{key}`")
+    if proposal["bundle"] != ctx.bundle or proposal["participant"] != ctx.participant:
+        raise damaged(f"it is not for {ctx.participant}'s further attempt at {ctx.bundle}")
+    if not isinstance(proposal["commit"], str) or not isinstance(proposal["validators"], dict) \
+            or not isinstance(proposal["criteria"], dict):
+        raise damaged("an entry is of the wrong type")
+    for name, v in proposal["validators"].items():
+        if not (isinstance(v, dict) and {"passed", "points", "gate"} <= set(v)):
+            raise damaged(f"validator {escape_name(str(name))} is incomplete")
+    for cid, c in proposal["criteria"].items():
+        if not (isinstance(c, dict) and {"points", "max", "evidence", "gate"} <= set(c)
+                and _is_points(c["points"]) and _is_points(c["max"])):
+            raise damaged(f"criterion {escape_name(str(cid))} is incomplete")
+
+
+def parse_makeup_change(participant: str, text: str) -> tuple[str, int, str]:
+    """<criterion>=<points>:<reason>, read by parse_change with the participant put in front."""
+    try:
+        _who, cid, pts, reason = parse_change(f"{participant}:{text}")
+    except GradeError as exc:
+        if "has no reason" in str(exc):
+            raise
+        raise GradeError(f"--change {escape_name(text)!r} is not <criterion>=<points>:<reason>") from exc
+    return cid, pts, reason
+
+
+def cmd_makeup_confirm(args: argparse.Namespace) -> int:
+    ctx = makeup_context(args)
+    by = args.by.strip()
+    if not by or len(by) > 200 or not by.isprintable():
+        raise GradeError("--by must name who confirms: one line of printable text")
+    path = ctx.store / PROPOSAL_FILE
+    if not path.is_file():
+        raise GradeError(f"there is no proposal for {ctx.participant}'s further attempt; run "
+                         "`belay-grade makeup propose` first")
+    proposal = read_json_file(path, "the proposal", JUDGEMENT_MAX_BYTES * 8)
+    check_makeup_proposal(proposal, ctx)
+    stale = []
+    if proposal["grading_hash"] != ctx.scheme.grading_hash:
+        stale.append("the bundle's `grading` block differs from the one the proposal was made under")
+    ref = makeup_branch(ctx)
+    if ref.commit != proposal["commit"]:
+        stale.append(f"{ref.branch} moved: {proposal['commit'][:12]} -> {ref.commit[:12]}")
+    if stale:
+        raise GradeError("the proposal is stale, and nothing was confirmed (confirm reads the local cache "
+                         "and does not fetch; run collect, then makeup run and propose again):\n  "
+                         + "\n  ".join(stale))
+    what = admit_attempt(ctx, proposal["commit"])
+    applied: dict[tuple[str, str], tuple[int, str]] = {}
+    for text in args.change or []:
+        cid, pts, reason = parse_makeup_change(ctx.participant, text)
+        check_change(ctx.participant, cid, pts, proposal, applied)
+        applied[(ctx.participant, cid)] = (pts, reason)
+    validators, criteria, gate, total = confirmed_entry(
+        proposal, {cid: change for (_w, cid), change in applied.items()})
+    final: dict[str, Any] = {
+        "bundle": ctx.bundle,
+        "kind": ctx.kind,
+        "participant": ctx.participant,
+        "commit": proposal["commit"],
+        "gate": gate,
+        "validators": validators,
+        "criteria": criteria,
+    }
+    if ctx.kind == "final_project":
+        final["total"] = total
+        final["max_total"] = proposal["max_total"]
+    final.update({
+        "grading_hash": proposal["grading_hash"],
+        "bundle_version": ctx.scheme.bundle_version,
+        "confirmed_by": by,
+        "confirmed_at": now_iso(),
+    })
+    refuse_work_tree(ctx.store)
+    # Only a correction of the same commit replaces the trainer's earlier changes; a new
+    # attempt is graded afresh, and its predecessor's changes were about other work.
+    unrepeated = unrepeated_criteria("", ctx.latest.get("criteria"), criteria) \
+        if ctx.latest is not None and ctx.latest.get("commit") == proposal["commit"] else []
+    kept = archive_previous(ctx.store)
+    out = ctx.store / FINAL_FILE
+    write_json_private(out, final)
+    used = attempts_used(ctx.store)
+    print(f"confirmed by {by}; {len(applied)} change(s); {what}")
+    for (_w, cid), (pts, reason) in applied.items():
+        print(f"  changed {cid} {proposal['criteria'][cid]['points']} -> {pts}: {escape_name(reason)}")
+    print(_makeup_line(ctx, gate, total, proposal["max_total"]))
+    print(f"further attempts used: {len(used)} of {ctx.scheme.retries}")
+    if unrepeated:
+        print(UNREPEATED_NOTICE)
+        for line in unrepeated:
+            print(f"  {line}")
+    if kept:
+        print(f"previous confirmation kept: {kept}")
+    print(f"final: {out}")
+    return EXIT_OK
+
+
+MAKEUP_STEPS: dict[str, tuple[Callable[[argparse.Namespace], int], str]] = {
+    "run": (cmd_makeup_run, "run what a further attempt is graded on, on <participant>/<bundle-id>-makeup"),
+    "propose": (cmd_makeup_propose, "merge the run with the tutor's judgement into the attempt's proposal.json"),
+    "confirm": (cmd_makeup_confirm, "write the attempt's final.json; the bundle's own final.json is left alone"),
+}
+
+
+def _add_makeup_args(parser: argparse.ArgumentParser) -> None:
+    steps = parser.add_subparsers(dest="step", required=True)
+    for name, (func, text) in MAKEUP_STEPS.items():
+        p = steps.add_parser(name, help=text, description=text)
+        p.add_argument("repo", help="the cohort repository's URL")
+        p.add_argument("bundle_id", metavar="bundle-id", help="the module's or final project's id")
+        p.add_argument("participant", help="the participant, as in their branch name")
+        p.add_argument("--bundle", required=True, help="the bundle's directory")
+        p.add_argument("--catalog", required=True, help="the programme's catalog.yaml, with `certificate`")
+        if name == "propose":
+            p.add_argument("--judgement", required=True, help="the tutor's judgement, a JSON file")
+        if name == "confirm":
+            p.add_argument("--by", required=True, help="who confirms")
+            p.add_argument("--change", action="append", metavar="criterion=points:reason",
+                           help="change a criterion's points, with a reason; repeat for more")
+        p.set_defaults(makeup_func=func)
+
+
+def cmd_makeup(args: argparse.Namespace) -> int:
+    return args.makeup_func(args)
+
+
+def cmd_certificate(args: argparse.Namespace) -> int:
+    return _certificate_module().run(args.repo, Path(args.catalog), Path(args.names),
+                                     Path(args.template) if args.template else None)
+
+
+def _add_certificate_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("repo", help="the cohort repository's URL")
+    parser.add_argument("--catalog", required=True, help="the programme's catalog.yaml, with `certificate`")
+    parser.add_argument("--names", required=True,
+                        help="a local UTF-8 CSV with the header row `participant,full name`")
+    parser.add_argument("--template", help="a certificate template using {{name}}, {{programme}} and "
+                                           "{{date}}; an .html or .htm one is escaped")
 
 
 # --------------------------------------------------------------------------
@@ -1931,6 +2463,16 @@ SUBCOMMANDS: dict[str, tuple[Callable[[argparse.Namespace], int], str,
         cmd_confirm,
         "write final.json from the proposal, with the trainer's changes and reasons",
         _add_confirm_args,
+    ),
+    "makeup": (
+        cmd_makeup,
+        "grade a further attempt at a module or final project: run, propose or confirm",
+        _add_makeup_args,
+    ),
+    "certificate": (
+        cmd_certificate,
+        "write the programme's results from the confirmed final.json files: who passed",
+        _add_certificate_args,
     ),
     "forget": (
         cmd_forget,

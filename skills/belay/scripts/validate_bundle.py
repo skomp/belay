@@ -5983,7 +5983,9 @@ def check_starts_from(manifest: Any, report: Report) -> None:
 # sections 2 and 6). Every check is n/a when its key is absent, and a bundle
 # with neither key gets no new finding and no new warning.
 GRADING_KEY = "grading"
-GRADING_KEYS = ("image", "network", "env", "timeout_minutes", "validators", "rubric")
+GRADING_KEYS = (
+    "image", "network", "env", "timeout_minutes", "validators", "rubric", "retries",
+)
 GRADING_VALIDATOR_KEYS = ("points", "gate")
 GRADING_RUBRIC_KEYS = ("id", "points", "standard", "paths", "gate")
 # Kinds that cannot earn points: `manual` needs a learner, `git-diff` needs
@@ -5999,6 +6001,11 @@ ENV_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 
 def _positive_int(value: Any) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and value > 0
+
+
+def _whole_number(value: Any, minimum: int = 0) -> bool:
+    """A whole number of at least `minimum`; a boolean is not one."""
+    return isinstance(value, int) and not isinstance(value, bool) and value >= minimum
 
 
 def _grading_mapping(manifest: Any) -> dict | None:
@@ -6082,6 +6089,12 @@ def check_grading_shape(manifest: Any, report: Report) -> None:
             47, where,
             f"grading.timeout_minutes is {grading['timeout_minutes']!r}; it "
             f"must be a positive integer",
+        )
+    if "retries" in grading and not _whole_number(grading["retries"]):
+        report.add(
+            47, where,
+            f"grading.retries is {grading['retries']!r}; it must be a whole "
+            f"number from 0 (further attempts after the first)",
         )
     report.ran(47, "declared, malformed" if len(report.findings) > before else "declared")
 
@@ -6668,6 +6681,9 @@ CATALOG_CHECKS: dict[int, str] = {
     "objectives are each a 'covers' key of some entry, under one goal only",
     9: "start_from, when an entry declares it, is a mapping of a Git repo "
     "URL and a ref",
+    10: "certificate, when declared, is well formed: its ids are entries of "
+    "this catalogue, its share is 1-100, its bundles declare grading, and the "
+    "final projects agree on retries",
 }
 
 CATALOG_REQUIRED_FIELDS = (
@@ -6710,9 +6726,11 @@ CATALOG_COUNT_FIELDS = ("optional_lesson_count",)
 # text - see the docstring on unknown_entry_fields().
 CATALOG_KNOWN_TOP_LEVEL_FIELDS = (
     "catalog_version",
+    "certificate",
     "goals",
     "tutorials",
 )
+CERTIFICATE_KEYS = ("title", "modules", "final_project", "final_project_share")
 CATALOG_GOAL_KEYS = ("title", "summary", "objectives")
 CATALOG_KNOWN_ENTRY_FIELDS = (
     "aliases",
@@ -6941,6 +6959,167 @@ def catalog_root(target: Path) -> Path:
     return Path(os.path.abspath(target)).parent
 
 
+def catalog_bundle_path(root: Path, path: str) -> Path:
+    """Where a catalogue entry's local bundle path points, as an absolute path.
+
+    The one resolution rule: `~` expanded, a relative path taken from the
+    directory that holds the catalogue. Check 6 and check 10 both call this,
+    so the two cannot disagree about which directory an entry means. It does
+    not touch the filesystem.
+    """
+    candidate = Path(os.path.expanduser(path))
+    return candidate if candidate.is_absolute() else Path(os.path.normpath(root / candidate))
+
+
+def _certificate_bundle_grading(
+    root: Path, entries: list[tuple[str, dict]], identifier: str
+) -> tuple[bool, Any] | None:
+    """What a listed id's bundle says about `grading`, or None.
+
+    None when the bundle does not resolve on disk the way check 6 resolves
+    it, or its tutorial.yaml cannot be read as a mapping: check 6 and the
+    bundle's own validation speak about those. Otherwise `(declared, value)`.
+    """
+    for _where, item in entries:
+        if item.get("id") != identifier:
+            continue
+        source = item.get("source")
+        path = source.get("path") if isinstance(source, dict) else None
+        if not _is_text(path) or source.get("type") != "local":
+            return None
+        manifest_path = catalog_bundle_path(root, path) / "tutorial.yaml"
+        raw = read_text(manifest_path) if manifest_path.is_file() else None
+        if raw is None:
+            return None
+        try:
+            manifest = load_yaml(raw, "tutorial.yaml")
+        except YamlError:
+            return None
+        if not isinstance(manifest, dict):
+            return None
+        return (GRADING_KEY in manifest, manifest.get(GRADING_KEY))
+    return None
+
+
+def check_certificate(
+    document: dict, root: Path, entries: list[tuple[str, dict]], report: Report
+) -> None:
+    """Catalogue check 10 (final-project-and-certificate spec, sections 3 and 6)."""
+    if "certificate" not in document:
+        report.na(10, "the catalogue declares no 'certificate'")
+        return
+    cert = document["certificate"]
+    where = "certificate"
+    if not isinstance(cert, dict):
+        report.add(10, where, f"'certificate' must be a mapping, not {cert!r}")
+        report.ran(10, "declared, malformed")
+        return
+    for key in cert:
+        if key not in CERTIFICATE_KEYS:
+            report.add(
+                10, where,
+                f"certificate has the unknown key {str(key)!r}; the keys are "
+                f"{', '.join(CERTIFICATE_KEYS)}",
+            )
+    for key in CERTIFICATE_KEYS:
+        if key not in cert:
+            report.add(10, where, f"certificate.{key} is missing")
+    if "title" in cert and not _is_text(cert["title"]):
+        report.add(
+            10, where,
+            f"certificate.title is {cert['title']!r}; it must be a non-empty string",
+        )
+    share = cert.get("final_project_share")
+    if "final_project_share" in cert and not (_whole_number(share, 1) and share <= 100):
+        report.add(
+            10, where,
+            f"certificate.final_project_share is {share!r}; it must be a whole "
+            f"number from 1 to 100",
+        )
+    catalog_ids = {i["id"] for _w, i in entries if _is_text(i.get("id"))}
+    lists: dict[str, list[str]] = {}
+    for key in ("modules", "final_project"):
+        if key not in cert:
+            continue
+        value = cert[key]
+        if not _is_text_list(value):
+            report.add(
+                10, where,
+                f"certificate.{key} is {value!r}; it must be a non-empty list "
+                f"of tutorial ids",
+            )
+            continue
+        lists[key] = value
+        seen: set[str] = set()
+        for identifier in value:
+            if identifier in seen:
+                report.add(
+                    10, where,
+                    f"certificate.{key} lists {identifier!r} twice",
+                )
+            seen.add(identifier)
+    for key, value in lists.items():
+        for identifier in dict.fromkeys(value):
+            if identifier not in catalog_ids:
+                report.add(
+                    10, where,
+                    f"certificate.{key} lists {identifier!r}, which is not an "
+                    f"entry of this catalogue",
+                )
+            if identifier.endswith("-makeup"):
+                report.add(
+                    10, where,
+                    f"certificate.{key} lists {identifier!r}, which ends in "
+                    f"'-makeup'; its branches could not be told from the "
+                    f"branches of further attempts",
+                )
+            if identifier == "certificate":
+                report.add(
+                    10, where,
+                    f"certificate.{key} lists the id 'certificate', which "
+                    f"would share its output directory with the certificate",
+                )
+    if "modules" in lists and "final_project" in lists:
+        for identifier in dict.fromkeys(lists["modules"]):
+            if identifier in lists["final_project"]:
+                report.add(
+                    10, where,
+                    f"{identifier!r} is in both certificate.modules and "
+                    f"certificate.final_project",
+                )
+    # The rules that read bundles; silent for a bundle that does not resolve.
+    listed = list(dict.fromkeys(i for v in lists.values() for i in v))
+    grading_of: dict[str, tuple[bool, Any]] = {}
+    for identifier in listed:
+        found = _certificate_bundle_grading(root, entries, identifier)
+        if found is None:
+            continue
+        grading_of[identifier] = found
+        if not found[0]:
+            report.add(
+                10, where,
+                f"the bundle {identifier!r} is listed in certificate but "
+                f"declares no 'grading', so there is nothing to grade",
+            )
+    retries: dict[str, int] = {}
+    for identifier in dict.fromkeys(lists.get("final_project", [])):
+        declared, grading = grading_of.get(identifier, (False, None))
+        if identifier not in grading_of or not declared or not isinstance(grading, dict):
+            continue
+        value = grading.get("retries", 0)
+        if _whole_number(value):  # a malformed value is check 47's finding
+            retries[identifier] = value
+    if len(set(retries.values())) > 1:
+        report.add(
+            10, where,
+            "the certificate.final_project bundles declare different "
+            "grading.retries (an absent value counts as 0), so a use case "
+            "could be chosen for its retries: "
+            + ", ".join(f"{k} has {v}" for k, v in retries.items()),
+        )
+    report.ran(10, f"{len(listed)} listed bundle(s)")
+
+
 def validate_catalog(target: Path, portable: bool) -> Report:
     report = Report(
         mode="catalog" + (" --portable" if portable else ""),
@@ -7065,7 +7244,7 @@ def validate_catalog(target: Path, portable: bool) -> Report:
             "nothing and is almost certainly an accident",
         )
     if listed is None:
-        for number in (2, 3, 4, 5, 6, 7, 8, 9):
+        for number in (2, 3, 4, 5, 6, 7, 8, 9, 10):
             if number == 2:
                 report.ran(2)
             else:
@@ -7255,10 +7434,7 @@ def validate_catalog(target: Path, portable: bool) -> Report:
 
     # -- check 6: the bundle is really there
     for where, path in resolvable:
-        candidate = Path(os.path.expanduser(path))
-        absolute = (
-            candidate if candidate.is_absolute() else Path(os.path.normpath(root / candidate))
-        )
+        absolute = catalog_bundle_path(root, path)
         if not absolute.is_dir():
             report.add(
                 6,
@@ -7392,6 +7568,9 @@ def validate_catalog(target: Path, portable: bool) -> Report:
             for problem in start_from_problems(item["start_from"]):
                 report.add(9, where, problem)
         report.ran(9, f"{len(declared)} start_from declaration(s)")
+
+    # -- check 10: certificate
+    check_certificate(document, root, entries, report)
 
     # -- check 7: portability
     if not portable:

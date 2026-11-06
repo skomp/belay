@@ -4413,6 +4413,26 @@ def m_grading_timeout_bool(root: Path) -> None:
     _grading(root, _grading_valid_with(head="\n  timeout_minutes: true"))
 
 
+def m_grading_retries_zero(root: Path) -> None:
+    _grading(root, _grading_valid_with(head="\n  retries: 0"))
+
+
+def m_grading_retries_two(root: Path) -> None:
+    _grading(root, _grading_valid_with(head="\n  retries: 2"))
+
+
+def m_grading_retries_bool(root: Path) -> None:
+    _grading(root, _grading_valid_with(head="\n  retries: true"))
+
+
+def m_grading_retries_negative(root: Path) -> None:
+    _grading(root, _grading_valid_with(head="\n  retries: -1"))
+
+
+def m_grading_retries_text(root: Path) -> None:
+    _grading(root, _grading_valid_with(head='\n  retries: "1"'))
+
+
 def m_grading_validator_undeclared(root: Path) -> None:
     _grading(root, _grading_valid_with(
         validators="    cargo-test: { points: 60 }\n    nonesuch: { points: 20 }\n"))
@@ -5777,6 +5797,14 @@ CASES: list[Case] = [
          'grading.timeout_minutes', where='tutorial.yaml'),
     Case("47: timeout_minutes true", 47, "cli", "bundle", m_grading_timeout_bool,
          'grading.timeout_minutes', where='tutorial.yaml'),
+    Case("47: retries 0 is silent", 47, "cli", "bundle", m_grading_retries_zero, kind="silent"),
+    Case("47: retries 2 is silent", 47, "cli", "bundle", m_grading_retries_two, kind="silent"),
+    Case("47: retries true", 47, "cli", "bundle", m_grading_retries_bool,
+         'grading.retries', where='tutorial.yaml'),
+    Case("47: retries -1", 47, "cli", "bundle", m_grading_retries_negative,
+         'grading.retries', where='tutorial.yaml'),
+    Case("47: retries as a string", 47, "cli", "bundle", m_grading_retries_text,
+         'grading.retries', where='tutorial.yaml'),
     Case("47: an INSTANCE with an unknown key too", 47, "cli", "instance", m_grading_unknown_key,
          "unknown key 'timeout'", where='tutorial.yaml'),
     Case("48: a command validator with no image", 48, "cli", "bundle", m_grading_command_no_image,
@@ -8264,8 +8292,8 @@ def test_top_level_near_miss_distance() -> None:
         got = vb.near_misses(name, known)
         record(got == want, f"{name!r} -> {want}", f"got {got}")
     record(
-        set(known) == {"catalog_version", "goals", "tutorials"},
-        "the known top-level keys are exactly the three section 5 defines",
+        set(known) == {"catalog_version", "certificate", "goals", "tutorials"},
+        "the known top-level keys are exactly the four the catalogue format defines",
         f"got {known}",
     )
     record(
@@ -8305,7 +8333,7 @@ def test_catalog_unknown_top_level_field_warns_and_never_rejects() -> None:
             warned[0].message,
         )
         record(
-            "catalog_version, goals, tutorials" in warned[0].message,
+            "catalog_version, certificate, goals, tutorials" in warned[0].message,
             "it lists the top-level fields this document defines, so an "
             "author can check the name against them",
             warned[0].message,
@@ -8551,14 +8579,15 @@ def test_real_catalogue_gains_no_warning() -> None:
         "; ".join(str(w) for w in report.warnings),
     )
     record(
-        # `goals` is optional (check 8), and the published catalogue declares
-        # none, so its keys are the known ones minus `goals`. Before goals
-        # existed this compared against the whole tuple; the sibling sweep
-        # alone saw it stop holding, which is what the sweep is for.
+        # `goals` and `certificate` are optional (checks 8 and 10), and the
+        # published catalogue declares neither, so its keys are the known ones
+        # minus those two. Before goals existed this compared against the whole
+        # tuple; the sibling sweep alone saw it stop holding, which is what the
+        # sweep is for.
         sorted(document)
-        == sorted(set(vb.CATALOG_KNOWN_TOP_LEVEL_FIELDS) - {"goals"}),
+        == sorted(set(vb.CATALOG_KNOWN_TOP_LEVEL_FIELDS) - {"goals", "certificate"}),
         "its top-level keys are exactly the two this document always "
-        "carries (goals is optional and it has none), which is why check 1 "
+        "carries (goals and certificate are optional and it has neither), which is why check 1 "
         "has nothing to say about it",
         f"top-level keys = {sorted(document)}",
     )

@@ -1,8 +1,10 @@
 # Final project and certificate — Design
 
 **Date:** 2026-11-05
-**Last amended:** 2026-11-05
-**Status:** designed, not implemented
+**Last amended:** 2026-11-06
+**Status:** implemented — see section 10 for the decisions the implementation added;
+`belay-grade makeup` and `belay-grade certificate`, catalogue check 10, bundle check 47's `retries`,
+`bundle-format.md` section 6, `catalogue-format.md` section 5.4, `runner-protocol.md` sections 20.10-20.11
 **Issue:** belay#95
 **Builds on:** the cohort-grading design (2026-11-03), whose `final.json` this reads; the levels
 and modules-as-bundles design (2026-11-03), whose catalog holds the programme
@@ -96,7 +98,7 @@ tutorials: [ ... ]
 **Anything else is not passed, with the reason recorded**: a gate not passed, a participant in
 `not_graded` or absent from a module, in each case with no further attempt that passed; no final
 project, two final projects, or too few points. Two final projects is a reason and not a guess, because Belay cannot know which one counts;
-the trainer removes one through the grading steps.
+the trainer removes one through the grading steps (section 10.1).
 
 **The set of participants** is everyone named in any of those `final.json` files, under
 `participants` or `not_graded`, or holding a further attempt at a listed module. A participant is known by the part of their branch name before the
@@ -312,3 +314,43 @@ refused. Check 47 reports unknown keys, so a course that sets it needs a Belay w
   grade, for a module gate that only asks that the requirement is met.
 - **No allowance of missed gates.** Every module's requirement is met in the end, first time or later.
 - **No first-attempt grade changed by a further attempt**, and no new ranking from one.
+
+---
+
+## 10. Decisions the implementation added
+
+Taken while building, and recorded so they are not re-litigated.
+
+1. **A module id `certificate` is refused**, by the grader's store and by catalogue check 10, because the
+   certificate's output directory `<store>/<cohort>/certificate/` would collide with it.
+2. **The names file has a header row `participant,full name`**, and a UTF-8 byte-order mark is
+   accepted, because a spreadsheet exports one. A full name starting with `=`, `+`, `-`, `@`, a tab
+   or a carriage return is refused, naming the row, because `results.csv` is opened in a
+   spreadsheet, where such a value runs as a formula.
+3. **A judgement with a `draft` is refused for a further attempt**, because the shared review compares
+   solutions and one attempt has nothing to compare. No proposal is written.
+4. **"Exactly one final project" counts a participant under `participants` or `not_graded`** of a use
+   case's `final.json`, matching the participant set of section 3. So someone in `not_graded` of one use
+   case and graded in another is on two final projects, and someone only in `not_graded` has no result
+   there.
+5. **`results.csv` is UTF-8 with no byte-order mark and `\n` line endings**, with the header
+   `full name,result`. A BOM would argue against "nothing else"; a trainer who opens the file in Excel
+   on Windows imports it as UTF-8. Rows are sorted by full name, then participant id.
+6. **A module requirement is met by the first result or by the latest further attempt**; a first result
+   that met it is never replaced. A final project is decided by the latest confirmed attempt, even with
+   a lower total.
+7. **A correction of a confirmed attempt confirms the same commit and uses no further attempt.** If the
+   participant has pushed to the `-makeup` branch since, `confirm` refuses because the branch moved, and
+   the branch must be reset to the confirmed commit first.
+8. **A runtime fault in `makeup run`** writes `run.json` and exits 1, as module `run` does, but records no
+   result and uses no attempt; `propose` refuses it.
+
+### 10.1 A participant on two final projects: the workaround, and a gap
+
+Section 3 says the trainer removes one "through the grading steps". No command does it today: `confirm
+--exclude` accepts only an ungradable participant or a branch the proposal does not cover, and the
+participant it excludes stays in `not_graded`, which decision 4 counts. What works is to remove the
+participant's branch for the use case that does not count from the cohort repository, run `collect`
+(which prunes), and grade that use case again with `run`, `propose` and `confirm`, so its `final.json` no
+longer names them. That is heavy. **A command that removes a gradable participant from one use case is a
+known gap**, tracked as belay#109.

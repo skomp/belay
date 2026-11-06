@@ -43,7 +43,7 @@ WRAPPERS = {
 }
 
 # Scripts that are libraries, not commands, and so have no wrapper.
-LIBRARIES = {"yamlite.py"}
+LIBRARIES = {"yamlite.py", "certificate.py"}
 
 sys.dont_write_bytecode = True
 

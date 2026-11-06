@@ -183,7 +183,8 @@ tutorials:
 |---|---|---|
 | `catalog_version` | MUST | Top level. `1` for this document. A version you do not recognise is an error, not a guess. |
 | `tutorials` | MUST | Top level. The list of entries. |
-| `goals` | MAY | Top level. The programme's learning goals, each listing its learning objectives by `covers` id. Section 5.3. These three are the only top-level keys; every row below is a field of one entry. |
+| `goals` | MAY | Top level. The programme's learning goals, each listing its learning objectives by `covers` id. Section 5.3. |
+| `certificate` | MAY | Top level. The modules and final projects a programme's certificate rests on, and the share of the final project's points required: `title`, `modules`, `final_project`, `final_project_share`. Check 10 reports a malformed one. These four are the only top-level keys; every row below is a field of one entry. |
 | `id` | MUST | Stable identity, `[a-z0-9-]+`. Matches the bundle's `id`. |
 | `title` | MUST | Human-facing course name. |
 | `description` | MUST | One or two sentences. This is what a learner reads when choosing. |
@@ -231,8 +232,8 @@ likely misspelling, because that is the case with no other signal anywhere: a ru
 an entry by field name and ignores a name it does not know, so `optional_lesson_cnt` is
 silently absent rather than reported, and the entry simply advertises nothing by it.
 
-**The same rule applies at the top level.** A key beside `catalog_version`, `tutorials`
-and `goals` that this document does not define is warned about, on check 1, and the
+**The same rule applies at the top level.** A key beside `catalog_version`, `tutorials`,
+`goals` and `certificate` that this document does not define is warned about, on check 1, and the
 catalogue still passes. The validator used to reject it, which contradicted the rule
 above and defeated the point of it: the file a newer runner writes is exactly the file an
 older validator has never seen, and refusing it is the one failure an additive format
@@ -441,6 +442,65 @@ is the code the module was written for.
 
 **`catalog_version` stays `1`.** Both keys are additive, and an older reader warns about
 `goals` and `start_from` as unknown keys (checks 1 and 3) and keeps the catalogue usable.
+
+---
+
+### 5.4 A programme's certificate: `certificate`
+
+A programme may end in a certificate. Nothing but the catalogue states what earns it, so the rule is
+declared here, in the file the programme's owner maintains, and `belay-grade certificate`
+(`runner-protocol.md` section 20.11) computes it from the trainer's confirmed grades.
+
+```yaml
+catalog_version: 1
+certificate:
+  title: Example Programme Certificate
+  modules: [programme-m1, programme-m2, programme-m3]
+  final_project: [final-lead-scoring, final-invoice-check]
+  final_project_share: 60
+goals: { ... }
+tutorials: [ ... ]
+```
+
+| Key | Meaning |
+|---|---|
+| `title` | what `{{programme}}` becomes in a certificate; a non-empty string |
+| `modules` | a non-empty list of tutorial ids; each participant must pass each one's gate |
+| `final_project` | a non-empty list of tutorial ids; each participant must complete exactly one |
+| `final_project_share` | a whole number from 1 to 100: the percent of the final project's points required |
+
+**A participant passes when all of these hold:**
+
+1. For every id in `modules`, **either** they are in that module's `final.json` under `participants`
+   with a `gate` of true or null, **or** their latest confirmed further attempt at it has a `gate` of
+   true or null. Null means the module declares no gate, so being graded is enough.
+2. They are in the `final.json` of **exactly one** id in `final_project`, under `participants` or
+   `not_graded`.
+3. In their latest confirmed attempt at it, in that file or a further attempt, their `gate` is true or
+   null, and `total * 100 >= final_project_share * max_total`, compared in whole numbers.
+
+Anything else is not passed, with the reason recorded. Module scores count for nothing beyond the
+gate. A participant is known by the part of their branch name before the slash, so the same id must be
+used on every branch of the cohort. Further attempts are declared per bundle with `grading.retries`
+(`bundle-format.md` section 2), and a bundle not listed in `certificate` has none.
+
+**Check 10 of `belay-validate --catalog` is where an author is told**, and it is silent when
+`certificate` is absent. It reports:
+
+- `certificate` that is not a mapping, an unknown key, a missing key;
+- a `title` that is not a non-empty string;
+- `modules` or `final_project` that is not a non-empty list of strings;
+- an id that is not an entry of this catalogue, an id in both lists, or twice in one;
+- an id ending in `-makeup`, because its branches could not be told from the branches of further
+  attempts, and the id `certificate`, because the certificate's output directory would collide with it;
+- a `final_project_share` that is not a whole number from 1 to 100, a boolean included;
+- a listed bundle that resolves on disk, as check 6 resolves it, and declares no `grading`;
+- bundles in `final_project` that resolve on disk and declare different `retries`, absent counting as
+  0.
+
+A listed bundle that does not resolve on disk is not reported by check 10; check 6 speaks about it.
+**`catalog_version` stays `1`.** `certificate` is additive, and an older validator warns about it as an
+unknown top-level key (check 1) and keeps the catalogue usable.
 
 ---
 

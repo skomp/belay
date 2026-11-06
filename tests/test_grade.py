@@ -655,8 +655,9 @@ def test_collect() -> None:
             record(len(row) == 1 and sha[:12] in row[0] and "T" in row[0].split()[3],
                    f"collect lists {who} with branch, last commit and date", str(row))
         head_refused = lines.index(next(l for l in lines if l.startswith("refused")))
+        head_further = lines.index(next(l for l in lines if l.startswith("further attempts")))
         head_other = lines.index(next(l for l in lines if l.startswith("no convention")))
-        refused_rows = [l.strip() for l in lines[head_refused + 1:head_other] if l.strip()]
+        refused_rows = [l.strip() for l in lines[head_refused + 1:head_further] if l.strip()]
         other_rows = [l.strip() for l in lines[head_other + 1:] if l.strip()]
         record(sorted(refused_rows) == sorted(HOSTILE_BRANCHES.values()),
                "hostile participant names are listed apart as refused, escaped", str(refused_rows))
@@ -1732,8 +1733,8 @@ def test_confirm_values() -> None:
                                  by="Rob")
         record(code == 0, "confirm succeeds", f"{code} {out} {err}")
         final = load(scene, "final.json")
-        record(sorted(final) == ["bundle_version", "confirmed_at", "confirmed_by", "module", "not_graded",
-                                 "participants"] and final["not_graded"] == {}
+        record(sorted(final) == ["bundle_version", "confirmed_at", "confirmed_by", "grading_hash",
+                                 "module", "not_graded", "participants"] and final["not_graded"] == {}
                and final["module"] == "m1" and final["bundle_version"] == "1.2.0"
                and final["confirmed_by"] == "Rob" and final["confirmed_at"].endswith("Z"),
                "final.json top level has exactly the contract's keys", str(sorted(final)))
@@ -1880,6 +1881,84 @@ def test_confirm_refusals() -> None:
         code, out, err = confirm(scene)
         record(code == 1 and "`grading` block differs" in err, "a changed grading block makes the proposal stale", err)
         record(not (scene.store() / "final.json").exists(), "and writes nothing")
+
+
+def test_retries_and_grading_hash() -> None:
+    body = "  validators:\n    a: { points: 1 }\n"
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        plain = gr.load_scheme(make_bundle(base / "p", "grading:\n" + body))
+        two = gr.load_scheme(make_bundle(base / "a", "grading:\n  retries: 2\n" + body))
+        five = gr.load_scheme(make_bundle(base / "b", "grading:\n  retries: 5\n" + body))
+        record(plain.retries == 0, "no retries key reads as 0", str(plain.retries))
+        record(two.retries == 2 and five.retries == 5, "retries is read as an int", f"{two.retries} {five.retries}")
+        record(two.grading_hash == five.grading_hash == plain.grading_hash,
+               "grading_hash ignores retries", f"{two.grading_hash} {five.grading_hash} {plain.grading_hash}")
+        block = {"validators": {"a": {"points": 1}}, "retries": 3}
+        record(gr.grading_hash(block) == gr.grading_hash({"validators": {"a": {"points": 1}}})
+               and gr.grading_hash(block) != gr.grading_hash({"validators": {"a": {"points": 2}}}),
+               "grading_hash(grading) leaves out retries only")
+        record(gr.grading_hash({"validators": {"a": {"points": 1}}}) == plain.grading_hash,
+               "load_scheme uses the same function")
+
+
+def test_retries_do_not_stale_a_proposal() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = Scene(tmp)
+        path = graded(scene)
+        record(propose(scene, path)[0] == 0, "propose succeeds")
+        # Raise retries after the proposal: the proposal still confirms.
+        (scene.bundle / "tutorial.yaml").write_text(
+            "grading:\n  retries: 4\n".join(MODULE_YAML.split("grading:\n", 1)))
+        record(gr.load_scheme(scene.bundle).retries == 4, "the bundle really declares retries: 4 now",
+               str(gr.load_scheme(scene.bundle).retries))
+        scene.cli("collect", COHORT_URL, "m1")
+        code, out, err = confirm(scene)
+        record(code == 0, "a proposal made before raising retries still confirms", f"{out} {err}")
+        final = load(scene, "final.json")
+        record(final.get("grading_hash") == load(scene, "proposal.json")["grading_hash"]
+               == gr.load_scheme(scene.bundle).grading_hash,
+               "final.json holds the grading hash", str(final.get("grading_hash")))
+
+
+def test_makeup_branches() -> None:
+    record(gr.classify_branch("alice/m1-makeup", "m1") == ("makeup", "alice"), "alice/m1-makeup is makeup for m1")
+    record(gr.classify_branch("alice/m1-makeup", "m2") == ("other", None), "and other for m2")
+    record(gr.classify_branch("a;b/m1-makeup", "m1") == ("refused", None), "an unusable participant is refused")
+    record(gr.classify_branch("alice/m1-makeup2", "m1") == ("other", None), "m1-makeup2 is other")
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = Scene(tmp)
+        scene.add_branch("alice/m1-makeup", {"README.md": "again\n"})
+        code, out, err = scene.cli("collect", COHORT_URL, "m1")
+        record(code == 0, "collect succeeds", err)
+        lines = out.splitlines()
+        head = [i for i, l in enumerate(lines) if l.startswith("further attempts (1):")]
+        nc = [i for i, l in enumerate(lines) if l.startswith("no convention")]
+        record(len(head) == 1 and len(nc) == 1, "collect prints a further attempts heading", out)
+        if head and nc:
+            after = [l.split()[0] for l in lines[head[0] + 1:] if l.startswith("  ")]
+            record(after[:1] == ["alice"] and lines[head[0] + 1].split()[1] == "alice/m1-makeup",
+                   "alice/m1-makeup is listed under further attempts", out)
+            other_rows = [l.strip() for l in lines[nc[0] + 1:] if l.strip()]
+            record("alice/m1-makeup" not in other_rows, "and not under no convention", str(other_rows))
+            record("alice/m1-makeup" not in [l.split()[1] for l in lines[:head[0]] if l.startswith("  ")
+                                             and len(l.split()) > 1],
+                   "and not among the participants")
+        with Env(scene.data):
+            listing = gr.list_branches(gr.cache_dir(COHORT_URL), "m1")
+        record([r.branch for r in listing.makeup] == ["alice/m1-makeup"]
+               and "alice/m1-makeup" not in listing.other
+               and "alice/m1-makeup" not in [r.branch for r in listing.participants],
+               "Listing.makeup holds the BranchRef")
+
+
+def test_store_dir_refuses_certificate() -> None:
+    with tempfile.TemporaryDirectory() as tmp, Env(Path(tmp) / "data"):
+        try:
+            gr.store_dir(COHORT_URL, "certificate")
+            record(False, "store_dir refuses the module id certificate")
+        except gr.GradeError as exc:
+            record("certificate" in str(exc), "store_dir refuses the module id certificate", str(exc))
 
 
 def test_gate_criterion() -> None:
@@ -2329,6 +2408,901 @@ def test_by_takes_printable_unicode() -> None:
                "--by accepts printable Unicode, and stores it as given", f"{code} {err}")
 
 
+# --------------------------------------------------------------------------
+# makeup: further attempts (final-project-and-certificate spec, section 3.1)
+# --------------------------------------------------------------------------
+
+FP_YAML = MODULE_YAML.replace("id: m1\n", "id: fp1\n")
+OTHER_YAML = "id: other\ngrading:\n  image: python:3.12-slim\n"
+CERT_BLOCK = ("certificate:\n  title: Example Programme Certificate\n  modules: [{modules}]\n"
+              "  final_project: [fp1]\n  final_project_share: 60\n")
+
+
+def with_retries(yaml: str, retries: int | None) -> str:
+    if retries is None:
+        return yaml
+    return f"grading:\n  retries: {retries}\n".join(yaml.split("grading:\n", 1))
+
+
+def catalog_text(certificate: str | None) -> str:
+    lines = ["catalog_version: 1"]
+    if certificate is not None:
+        lines.append(certificate.rstrip("\n"))
+    lines.append("tutorials:")
+    for identifier, path in (("m1", "bundle"), ("fp1", "fp-bundle"), ("other", "other-bundle")):
+        lines += [f"  - id: {identifier}", f"    title: The {identifier} course",
+                  f"    description: A course about {identifier}.", "    subjects: [testing]",
+                  "    level: beginner", "    workspace_kind: new-repository",
+                  "    source:", "      type: local", f"      path: {path}"]
+    return "\n".join(lines) + "\n"
+
+
+def makeup_scene(tmp: str, *, module_yaml: str = MODULE_YAML, retries: int | None = 1) -> Scene:
+    """A confirmed m1 (alice passed, bob failed the gate, carol absent) and a confirmed
+    final project fp1 (alice 75, dave 40 of 80: under a share of 60)."""
+    scene = Scene(tmp, module_yaml=with_retries(module_yaml, retries))
+    (scene.bundle / "STATE.template.md").write_text("---\n---\n")
+    git_fixture("--git-dir", str(scene.bare), "update-ref", "-d", "refs/heads/carol/m1", cwd=scene.tmp)
+    scene.fp_bundle = scene.tmp / "fp-bundle"
+    scene.fp_bundle.mkdir()
+    (scene.fp_bundle / "tutorial.yaml").write_text(with_retries(FP_YAML, retries))
+    (scene.fp_bundle / "STATE.template.md").write_text("---\n---\n")
+    other = scene.tmp / "other-bundle"
+    other.mkdir()
+    (other / "tutorial.yaml").write_text(OTHER_YAML)
+    (other / "STATE.template.md").write_text("---\n---\n")
+    scene.add_branch("alice/fp1", PARTICIPANTS["alice"])
+    scene.add_branch("dave/fp1", PARTICIPANTS["carol"])
+    scene.catalog = scene.tmp / "catalog.yaml"
+    scene.catalog.write_text(catalog_text(CERT_BLOCK.format(modules="m1")))
+    judged = ratings()
+    del judged["participants"]["carol"]
+    path = graded(scene, judged)
+    code, out, err = propose(scene, path)
+    assert code == 0, (out, err)
+    code, out, err = confirm(scene)
+    assert code == 0, (out, err)
+    scene.cli("collect", COHORT_URL, "fp1")
+    code, out, err = scene.cli("run", "--bundle", str(scene.fp_bundle), COHORT_URL, "fp1")
+    assert code == 0, (out, err)
+    fp_judgement = scene.tmp / "fp-judgement.json"
+    fp_judgement.write_text(json.dumps({"participants": {
+        "alice": {"design": {"points": 15, "evidence": "alice: quoted"}},
+        "dave": {"design": {"points": 0, "evidence": "dave: quoted"}}}}))
+    code, out, err = scene.cli("propose", "--bundle", str(scene.fp_bundle), "--judgement", str(fp_judgement),
+                               COHORT_URL, "fp1")
+    assert code == 0, (out, err)
+    code, out, err = scene.cli("confirm", "--bundle", str(scene.fp_bundle), "--by", "Trainer T", COHORT_URL, "fp1")
+    assert code == 0, (out, err)
+    return scene
+
+
+def mk(scene: Scene, step: str, who: str, *extra: str, bundle_id: str = "m1",
+       bundle: Path | None = None, catalog: Path | None = None) -> tuple[int, str, str]:
+    if bundle is None:
+        bundle = scene.fp_bundle if bundle_id == "fp1" else scene.bundle
+    return scene.cli("makeup", step, COHORT_URL, bundle_id, who, "--bundle", str(bundle),
+                     "--catalog", str(catalog or scene.catalog), *extra)
+
+
+def mk_judge(scene: Scene, who: str, points: dict[str, int] | None = None) -> Path:
+    path = scene.tmp / f"makeup-{who}.json"
+    path.write_text(json.dumps({"participants": {who: {
+        cid: {"points": pts, "evidence": f"{who}: quoted"} for cid, pts in (points or {}).items()}}}))
+    return path
+
+
+def mk_store(scene: Scene, who: str, bundle_id: str = "m1") -> Path:
+    with Env(scene.data):
+        return gr.store_dir(COHORT_URL, bundle_id) / "makeup" / who
+
+
+def mk_attempt(scene: Scene, who: str, points: dict[str, int] | None = None, *extra: str,
+               bundle_id: str = "m1") -> list[tuple[int, str, str]]:
+    """run, propose, confirm; returns the three results."""
+    out = [mk(scene, "run", who, bundle_id=bundle_id)]
+    out.append(mk(scene, "propose", who, "--judgement", str(mk_judge(scene, who, points)), bundle_id=bundle_id))
+    out.append(mk(scene, "confirm", who, "--by", "Trainer T", *extra, bundle_id=bundle_id))
+    return out
+
+
+def store_snapshot(scene: Scene) -> dict[str, bytes]:
+    root = scene.data / "belay" / "grading"
+    return {str(p.relative_to(root)): p.read_bytes() for p in sorted(root.rglob("*"))
+            if p.is_file() and gr.CACHE_NAME not in p.parts}
+
+
+def refused_writing_nothing(scene: Scene, label: str, needle: str, step: str, who: str, *extra: str,
+                            **kw) -> None:
+    before = store_snapshot(scene)
+    code, out, err = mk(scene, step, who, *extra, **kw)
+    after = store_snapshot(scene)
+    record(code == 1 and needle in err and "Traceback" not in err, f"makeup {step} refuses {label}", f"{code} {err}")
+    record(after == before, f"makeup {step} refusing {label} writes nothing",
+           str(sorted(set(after) ^ set(before)) or [k for k in after if after[k] != before.get(k)]))
+
+
+def test_certificate_module() -> None:
+    import certificate as cert
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = makeup_scene(tmp)
+        got = cert.load_certificate(scene.catalog)
+        record(got == cert.Certificate(title="Example Programme Certificate", modules=("m1",),
+                                       final_project=("fp1",), share=60),
+               "load_certificate reads the block", str(got))
+        record(cert.kind_of(got, "m1") == "module" and cert.kind_of(got, "fp1") == "final_project",
+               "kind_of tells a module from a final project")
+        msg = refused(cert.kind_of, got, "other")
+        record(msg is not None and "other" in msg, "kind_of refuses a bundle in neither list", str(msg))
+        scene.catalog.write_text(catalog_text(None))
+        msg = refused(cert.load_certificate, scene.catalog)
+        record(msg is not None and "no `certificate`" in msg, "load_certificate refuses a catalog with none", str(msg))
+        scene.catalog.write_text(catalog_text(CERT_BLOCK.format(modules="m1").replace("60", "0")))
+        msg = refused(cert.load_certificate, scene.catalog)
+        record(msg is not None and "final_project_share" in msg and "check 10" in msg,
+               "load_certificate refuses a catalog the validator reports, listing the findings", str(msg))
+
+
+def test_makeup_module_gate_made_up() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = makeup_scene(tmp)
+        module_final = (scene.store() / "final.json").read_bytes()
+        scene.add_branch("bob/m1-makeup", PARTICIPANTS["alice"])
+        scene.cli("collect", COHORT_URL, "m1")
+        (r_code, r_out, r_err), (p_code, p_out, p_err), (c_code, c_out, c_err) = mk_attempt(scene, "bob")
+        record(r_code == 0, "makeup run of bob succeeds", f"{r_code} {r_out} {r_err}")
+        store = mk_store(scene, "bob")
+        run = json.loads((store / "run.json").read_text()) if (store / "run.json").exists() else {}
+        record(sorted(run.get("branch", {}).get("validators", {})) == ["scorer-tests"],
+               "a module's further attempt runs the gate validators only", str(run)[:300])
+        record(p_code == 0, "makeup propose succeeds", f"{p_code} {p_err}")
+        record(c_code == 0, "makeup confirm succeeds", f"{c_code} {c_err}")
+        final = json.loads((store / "final.json").read_text()) if (store / "final.json").exists() else {}
+        record(sorted(final) == ["bundle", "bundle_version", "commit", "confirmed_at", "confirmed_by", "criteria",
+                                 "gate", "grading_hash", "kind", "participant", "validators"],
+               "a module's makeup final.json has exactly the contract's keys, no total", str(sorted(final)))
+        record(final.get("gate") is True and final.get("kind") == "module" and final.get("participant") == "bob"
+               and final.get("commit") == scene.commits["bob/m1-makeup"] and final.get("bundle") == "m1"
+               and final.get("grading_hash") == json.loads(module_final)["grading_hash"]
+               and final.get("confirmed_by") == "Trainer T" and final.get("bundle_version") == "1.2.0",
+               "bob passes the gate on the further attempt", str(final)[:400])
+        record(stat.S_IMODE((store / "final.json").stat().st_mode) == 0o600 if store.exists() else False,
+               "makeup final.json is private")
+        record((scene.store() / "final.json").read_bytes() == module_final,
+               "the module's final.json is byte for byte unchanged")
+        texts = [p.read_text() for p in store.rglob("*.json")] if store.exists() else []
+        record(texts and not any("ranking" in t or '"rank"' in t for t in texts),
+               "no ranking is written for a further attempt")
+        record(gr.attempts_used(store) == {scene.commits["bob/m1-makeup"]}, "one attempt is used")
+        code, out, err = confirm(scene, "--change", "bob:design=12:read again")
+        record(code == 0, "a grade change in the module still confirms after the makeup branch was collected",
+               f"{code} {err}")
+        # Met: a new commit is not an attempt, since nothing is open.
+        scene.add_branch("bob/m1-makeup", PARTICIPANTS["bob"])
+        scene.cli("collect", COHORT_URL, "m1")
+        refused_writing_nothing(scene, "a participant whose requirement is met", "nothing open", "run", "bob")
+
+
+def test_makeup_absent_and_nothing_open() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = makeup_scene(tmp)
+        scene.add_branch("carol/m1-makeup", PARTICIPANTS["alice"])
+        scene.add_branch("alice/m1-makeup", PARTICIPANTS["alice"])
+        scene.cli("collect", COHORT_URL, "m1")
+        results = mk_attempt(scene, "carol")
+        record([r[0] for r in results] == [0, 0, 0], "carol, absent from the module, may make it up",
+               str([(r[0], r[2]) for r in results]))
+        store = mk_store(scene, "carol")
+        record(gr.attempts_used(store) == {scene.commits["carol/m1-makeup"]}, "and it uses an attempt")
+        record(json.loads((store / "final.json").read_text())["gate"] is True, "carol's gate passes")
+        refused_writing_nothing(scene, "alice, who passed", "nothing open", "run", "alice")
+        refused_writing_nothing(scene, "a participant name that cannot be used", "participant", "run", "a;b")
+
+
+def test_makeup_retries() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = makeup_scene(tmp, retries=None)
+        scene.add_branch("bob/m1-makeup", PARTICIPANTS["alice"])
+        scene.cli("collect", COHORT_URL, "m1")
+        refused_writing_nothing(scene, "with retries absent", "retries", "run", "bob")
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = makeup_scene(tmp, retries=0)
+        scene.add_branch("bob/m1-makeup", PARTICIPANTS["alice"])
+        scene.cli("collect", COHORT_URL, "m1")
+        refused_writing_nothing(scene, "with retries: 0", "retries", "run", "bob")
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = makeup_scene(tmp, module_yaml=GATE_CRITERION_YAML)
+        # A first attempt that fails the gate again: the gate criterion is short.
+        scene.add_branch("bob/m1-makeup", PARTICIPANTS["alice"])
+        scene.cli("collect", COHORT_URL, "m1")
+        first = scene.commits["bob/m1-makeup"]
+        results = mk_attempt(scene, "bob", {"design": 10})
+        store = mk_store(scene, "bob")
+        record([r[0] for r in results] == [0, 0, 0] and json.loads((store / "final.json").read_text())["gate"] is False,
+               "a first attempt short of the gate criterion is confirmed, gate false",
+               str([(r[0], r[2]) for r in results]))
+        run = json.loads((store / "run.json").read_text())
+        prop = json.loads((store / "proposal.json").read_text())
+        record(sorted(prop["criteria"]) == ["design"] and sorted(run["branch"]["validators"]) == ["scorer-tests"],
+               "a module's attempt grades the gate validators and gate criteria", str(prop["criteria"]))
+        code, out, err = mk(scene, "confirm", "bob", "--by", "Trainer T", "--change", "design=12:read again: closer")
+        final = json.loads((store / "final.json").read_text())
+        record(code == 0 and final["criteria"]["design"]["points"] == 12
+               and final["criteria"]["design"]["reason"] == "read again: closer"
+               and final["criteria"]["design"]["changed_by_trainer"] is True and final["gate"] is False,
+               "confirming the same commit again with a --change is allowed", f"{code} {err}")
+        kept = sorted(p.name for p in store.glob("final.*.json"))
+        record(len(kept) == 1, "the earlier confirmation is archived", str(kept))
+        record(gr.attempts_used(store) == {first}, "two confirmations of one commit use one attempt",
+               str(gr.attempts_used(store)))
+        for bad, needle in (("design=21:x", "from 0 to 20"), ("design=10:x", "not a change"),
+                            ("design12:x", "is not <criterion>=<points>:<reason>"),
+                            ("scorer-tests=0:x", "validator"), ("style=1:x", "no points for"),
+                            ("design=11:", "no reason")):
+            before = store_snapshot(scene)
+            code, out, err = mk(scene, "confirm", "bob", "--by", "T", "--change", bad)
+            record(code == 1 and needle in err and store_snapshot(scene) == before,
+                   f"makeup confirm refuses --change {bad} and writes nothing", f"{code} {err}")
+        scene.add_branch("bob/m1-makeup", PARTICIPANTS["alice"] | {"README.md": "bob again\n"})
+        scene.cli("collect", COHORT_URL, "m1")
+        refused_writing_nothing(scene, "a second commit with retries: 1", "used up", "run", "bob")
+        # Raise retries: no version change, and the open proposal stays valid.
+        (scene.bundle / "tutorial.yaml").write_text(with_retries(GATE_CRITERION_YAML, 2))
+        results = [mk(scene, "run", "bob"),
+                   mk(scene, "propose", "bob", "--judgement", str(mk_judge(scene, "bob", {"design": 20})))]
+        record([r[0] for r in results] == [0, 0], "raising retries to 2 opens a second attempt",
+               str([(r[0], r[2]) for r in results]))
+        (scene.bundle / "tutorial.yaml").write_text(with_retries(GATE_CRITERION_YAML, 3))
+        code, out, err = mk(scene, "confirm", "bob", "--by", "Trainer T")
+        record(code == 0, "raising retries again leaves the open proposal valid", f"{code} {err}")
+        final = json.loads((store / "final.json").read_text())
+        record(final["gate"] is True and final["bundle_version"] == "1.2.0"
+               and gr.attempts_used(store) == {first, scene.commits["bob/m1-makeup"]},
+               "the second attempt passes, with no version change, and two attempts are used",
+               str(gr.attempts_used(store)))
+
+
+def test_makeup_final_project() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = makeup_scene(tmp)
+        with Env(scene.data):
+            fp_store = gr.store_dir(COHORT_URL, "fp1")
+        fp_final = (fp_store / "final.json").read_bytes()
+        scene.add_branch("dave/fp1-makeup", PARTICIPANTS["alice"])
+        scene.add_branch("bob/fp1-makeup", PARTICIPANTS["alice"])
+        scene.add_branch("alice/fp1-makeup", PARTICIPANTS["alice"])
+        scene.cli("collect", COHORT_URL, "fp1")
+        results = mk_attempt(scene, "dave", {"design": 15}, bundle_id="fp1")
+        record([r[0] for r in results] == [0, 0, 0], "dave retries the final project",
+               str([(r[0], r[2]) for r in results]))
+        store = mk_store(scene, "dave", "fp1")
+        run = json.loads((store / "run.json").read_text())
+        record(sorted(run["branch"]["validators"]) == ["has-readme", "has-test", "lint", "scorer-tests"],
+               "a final project's attempt runs every validator", str(sorted(run["branch"]["validators"])))
+        final = json.loads((store / "final.json").read_text())
+        record(sorted(final) == ["bundle", "bundle_version", "commit", "confirmed_at", "confirmed_by", "criteria",
+                                 "gate", "grading_hash", "kind", "max_total", "participant", "total", "validators"],
+               "a final project's makeup final.json has the contract's keys", str(sorted(final)))
+        record((final["total"], final["max_total"], final["gate"], final["kind"]) == (75, 80, True, "final_project"),
+               "dave is graded in full: total and max_total recorded", str(final)[:300])
+        record((fp_store / "final.json").read_bytes() == fp_final, "fp1's final.json is byte for byte unchanged")
+        everything = [p.read_text() for p in (scene.data / "belay" / "grading").rglob("*.json")
+                      if "makeup" in p.parts]
+        record(everything and not any("ranking" in t or '"rank"' in t for t in everything),
+               "no ranking is written anywhere for a further attempt")
+        refused_writing_nothing(scene, "someone with no entry in fp1's participants", "nothing open", "run", "bob",
+                                bundle_id="fp1")
+        refused_writing_nothing(scene, "alice, at 75 of 80", "nothing open", "run", "alice", bundle_id="fp1")
+
+
+def test_makeup_refusals() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = makeup_scene(tmp)
+        scene.add_branch("bob/m1-makeup", PARTICIPANTS["alice"])
+        scene.cli("collect", COHORT_URL, "m1")
+        good = scene.catalog.read_text()
+        scene.catalog.write_text(catalog_text(None))
+        for step in ("run", "propose", "confirm"):
+            extra = {"propose": ("--judgement", str(mk_judge(scene, "bob"))), "confirm": ("--by", "T")}.get(step, ())
+            refused_writing_nothing(scene, "a catalog with no certificate", "no `certificate`", step, "bob", *extra)
+        scene.catalog.write_text(catalog_text(CERT_BLOCK.format(modules="other")))
+        refused_writing_nothing(scene, "a bundle the certificate does not list", "does not list", "run", "bob")
+        scene.catalog.write_text(catalog_text(CERT_BLOCK.format(modules="m1").replace("share: 60", "share: 0")))
+        refused_writing_nothing(scene, "a catalog the validator reports", "final_project_share", "run", "bob")
+        scene.catalog.write_text(good)
+        final = scene.store() / "final.json"
+        kept = final.read_bytes()
+        final.unlink()
+        refused_writing_nothing(scene, "a bundle with no confirmed final.json", "no confirmed final.json", "run", "bob")
+        old = json.loads(kept)
+        del old["grading_hash"]
+        final.write_text(json.dumps(old))
+        refused_writing_nothing(scene, "a final.json confirmed by an older Belay", "confirmed again", "run", "bob")
+        final.write_bytes(kept)
+        refused_writing_nothing(scene, "a participant with no makeup branch", "no branch", "run", "carol")
+        yaml = (scene.bundle / "tutorial.yaml").read_text()
+        (scene.bundle / "tutorial.yaml").write_text(yaml.replace("lint: { points: 10 }", "lint: { points: 11 }"))
+        refused_writing_nothing(scene, "a grading block changed since the cohort was graded", "grading", "run", "bob")
+        (scene.bundle / "tutorial.yaml").write_text(yaml)
+        refused_writing_nothing(scene, "a --bundle of another id", "fp1", "run", "bob", bundle=scene.fp_bundle)
+        refused_writing_nothing(scene, "propose before run", "makeup run", "propose", "bob",
+                                "--judgement", str(mk_judge(scene, "bob")))
+        record(mk(scene, "run", "bob")[0] == 0, "control: the run succeeds")
+        record(mk(scene, "propose", "bob", "--judgement", str(mk_judge(scene, "bob")))[0] == 0,
+               "control: the proposal succeeds")
+        refused_writing_nothing(scene, "a judgement naming someone else", "dave", "propose", "bob",
+                                "--judgement", str(mk_judge(scene, "dave")))
+        refused_writing_nothing(scene, "a confirm with no --by text", "--by", "confirm", "bob", "--by", " ")
+        # Grading changed after the proposal.
+        (scene.bundle / "tutorial.yaml").write_text(yaml.replace("lint: { points: 10 }", "lint: { points: 11 }"))
+        refused_writing_nothing(scene, "a grading block changed since the proposal", "grading", "confirm", "bob",
+                                "--by", "T")
+        (scene.bundle / "tutorial.yaml").write_text(yaml)
+        # The branch moved after the proposal.
+        scene.add_branch("bob/m1-makeup", PARTICIPANTS["bob"])
+        scene.cli("collect", COHORT_URL, "m1")
+        refused_writing_nothing(scene, "a branch that moved after the proposal", "moved", "confirm", "bob", "--by", "T")
+        record(not (mk_store(scene, "bob") / "final.json").exists() and gr.attempts_used(mk_store(scene, "bob")) == set(),
+               "no attempt is used by the refusals")
+
+
+def test_makeup_runtime_fault() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = makeup_scene(tmp)
+        scene.add_branch("bob/m1-makeup", {**PARTICIPANTS["alice"], "run-tests.sh": "exit 125\n"})
+        scene.cli("collect", COHORT_URL, "m1")
+        code, out, err = mk(scene, "run", "bob")
+        record(code == 1 and "exit status 125" in err, "a runtime fault in a further attempt is reported", f"{code} {err}")
+        refused_writing_nothing(scene, "a run with a runtime fault", "exit status 125", "propose", "bob",
+                                "--judgement", str(mk_judge(scene, "bob")))
+        store = mk_store(scene, "bob")
+        record(not (store / "proposal.json").exists() and gr.attempts_used(store) == set(),
+               "a runtime fault leaves no proposal and uses no attempt")
+        refused_writing_nothing(scene, "with no proposal", "makeup propose", "confirm", "bob", "--by", "T")
+
+
+def test_makeup_module_with_no_gate() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = makeup_scene(tmp, module_yaml=NO_GATE_YAML)
+        scene.add_branch("carol/m1-makeup", {"README.md": "carol\n"})
+        scene.add_branch("bob/m1-makeup", {"README.md": "bob\n"})
+        scene.cli("collect", COHORT_URL, "m1")
+        before = len(scene.records("run"))
+        results = mk_attempt(scene, "carol")
+        store = mk_store(scene, "carol")
+        final = json.loads((store / "final.json").read_text()) if (store / "final.json").exists() else {}
+        record([r[0] for r in results] == [0, 0, 0] and final.get("gate", "x") is None
+               and final.get("validators") == {} and final.get("criteria") == {},
+               "a module with no gate runs nothing: the trainer confirms the work exists, gate null",
+               str([(r[0], r[2]) for r in results]) + str(final))
+        record(len(scene.records("run")) == before, "no container ran for it")
+        refused_writing_nothing(scene, "bob, graded with gate null", "nothing open", "run", "bob")
+
+
+def test_makeup_damaged_entry_is_not_met() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = makeup_scene(tmp)
+        with Env(scene.data):
+            fp_store = gr.store_dir(COHORT_URL, "fp1")
+        fp_final = json.loads((fp_store / "final.json").read_text())
+        fp_final["participants"]["dave"]["total"] = "40"
+        (fp_store / "final.json").write_text(json.dumps(fp_final))
+        scene.add_branch("dave/fp1-makeup", PARTICIPANTS["alice"])
+        scene.add_branch("bob/m1-makeup", PARTICIPANTS["alice"])
+        scene.cli("collect", COHORT_URL, "fp1")
+        refused_writing_nothing(scene, "a final-project entry whose total is not whole points",
+                                "the entry of dave in fp1's final.json is damaged", "run", "dave",
+                                bundle_id="fp1")
+        m1_final = json.loads((scene.store() / "final.json").read_text())
+        m1_final["participants"]["bob"]["gate"] = "no"
+        (scene.store() / "final.json").write_text(json.dumps(m1_final))
+        refused_writing_nothing(scene, "an entry whose gate is not true, false or null",
+                                "the entry of bob in m1's final.json is damaged", "run", "bob")
+
+
+def test_makeup_module_met_on_reconfirm_closes_it() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = makeup_scene(tmp, retries=2)
+        # bob fails the gate in m1, then fails a further attempt.
+        scene.add_branch("bob/m1-makeup", PARTICIPANTS["bob"])
+        scene.cli("collect", COHORT_URL, "m1")
+        results = mk_attempt(scene, "bob")
+        store = mk_store(scene, "bob")
+        record([r[0] for r in results] == [0, 0, 0]
+               and json.loads((store / "final.json").read_text())["gate"] is False,
+               "bob's first further attempt fails the gate", str([(r[0], r[2]) for r in results]))
+        # The trainer grades m1 again and bob's first result now meets the gate.
+        scene.add_branch("bob/m1", PARTICIPANTS["alice"])
+        path = graded(scene, {"participants": {k: v for k, v in ratings()["participants"].items()
+                                               if k != "carol"}})
+        code, out, err = propose(scene, path)
+        record(code == 0, "m1 is proposed again", f"{code} {err}")
+        code, out, err = confirm(scene)
+        bob = json.loads((scene.store() / "final.json").read_text())["participants"]["bob"]
+        record(code == 0 and bob["gate"] is True, "m1 is re-confirmed with bob's gate met", f"{code} {err}")
+        scene.add_branch("bob/m1-makeup", PARTICIPANTS["alice"] | {"README.md": "bob again\n"})
+        scene.cli("collect", COHORT_URL, "m1")
+        refused_writing_nothing(scene, "bob, met by a re-confirmed first result after a failed attempt",
+                                "nothing open", "run", "bob")
+
+
+def test_makeup_reconfirm_names_the_changes_it_does_not_repeat() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = makeup_scene(tmp)
+        scene.add_branch("dave/fp1-makeup", PARTICIPANTS["alice"])
+        scene.cli("collect", COHORT_URL, "fp1")
+        results = mk_attempt(scene, "dave", {"design": 10}, "--change", "design=14:read again", bundle_id="fp1")
+        record([r[0] for r in results] == [0, 0, 0], "dave's attempt confirms with a --change",
+               str([(r[0], r[2]) for r in results]))
+        code, out, err = mk(scene, "confirm", "dave", "--by", "Trainer T", bundle_id="fp1")
+        record(code == 0 and "does not repeat" in out and "design was 14, now 10: read again" in out,
+               "confirming the same attempt again names the --change it does not repeat", f"{code} {out} {err}")
+        code, out, err = mk(scene, "confirm", "dave", "--by", "Trainer T", bundle_id="fp1")
+        record(code == 0 and "does not repeat" not in out,
+               "with no earlier --change there is nothing to name", f"{code} {out}")
+
+
+def test_attempts_used() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        store = Path(tmp)
+        record(gr.attempts_used(store / "absent") == set(), "no directory: no attempt")
+        (store / "final.json").write_text(json.dumps({"commit": "a" * 40}))
+        (store / "final.2026-11-01.json").write_text(json.dumps({"commit": "b" * 40}))
+        (store / "final.2026-11-01-2.json").write_text(json.dumps({"commit": "a" * 40}))
+        (store / "proposal.json").write_text(json.dumps({"commit": "c" * 40}))
+        record(gr.attempts_used(store) == {"a" * 40, "b" * 40},
+               "attempts_used reads final.json and the archived ones, distinct commits only",
+               str(gr.attempts_used(store)))
+
+
+# --------------------------------------------------------------------------
+# certificate (final-project-and-certificate spec, sections 3, 4 and 5)
+# --------------------------------------------------------------------------
+
+E2E_BLOCK = ("certificate:\n  title: Example Programme Certificate\n  modules: [m1, m2]\n"
+             "  final_project: [fp1, fp2]\n  final_project_share: 60\n")
+TODAY = gr.now_iso()[:10]
+
+
+def cert_catalog(tmp: Path, block: str | None, ids: tuple[str, ...] = ("m1", "m2", "fp1", "fp2")) -> Path:
+    lines = ["catalog_version: 1"]
+    if block is not None:
+        lines.append(block.rstrip("\n"))
+    lines.append("tutorials:")
+    for ident in ids:
+        bundle = tmp / f"b-{ident}"
+        bundle.mkdir(exist_ok=True)
+        (bundle / "tutorial.yaml").write_text(f"id: {ident}\ngrading:\n  image: python:3.12-slim\n")
+        (bundle / "STATE.template.md").write_text("---\n---\n")
+        lines += [f"  - id: {ident}", f"    title: The {ident} course",
+                  f"    description: A course about {ident}.", "    subjects: [testing]",
+                  "    level: beginner", "    workspace_kind: new-repository",
+                  "    source:", "      type: local", f"      path: b-{ident}"]
+    path = tmp / "catalog.yaml"
+    path.write_text("\n".join(lines) + "\n")
+    return path
+
+
+def cohort_root(data: Path) -> Path:
+    with Env(data):
+        return gr.grading_root() / gr.cohort_name(COHORT_URL)
+
+
+def fentry(gate, total: int = 0, max_total: int = 80) -> dict:
+    return {"commit": "c" * 40, "validators": {}, "criteria": {}, "gate": gate, "total": total,
+            "max_total": max_total}
+
+
+def write_final(root: Path, bundle: str, participants: dict, not_graded: dict | None = None,
+                confirmed_at: str = "2026-11-01T10:00:00Z") -> None:
+    store = root / bundle
+    store.mkdir(parents=True, exist_ok=True)
+    (store / "final.json").write_text(json.dumps({
+        "module": bundle, "bundle_version": "1.0.0", "grading_hash": "h" * 64, "confirmed_by": "Trainer T",
+        "confirmed_at": confirmed_at, "participants": participants, "not_graded": not_graded or {}}))
+
+
+def write_makeup(root: Path, bundle: str, who: str, gate, *, total: int | None = None, max_total: int = 80,
+                 name: str = "final.json", commit: str = "d" * 40,
+                 confirmed_at: str = "2026-11-03T10:00:00Z") -> None:
+    """The shape Task 3's `makeup confirm` writes, keys in its order."""
+    store = root / bundle / "makeup" / who
+    store.mkdir(parents=True, exist_ok=True)
+    data = {"bundle": bundle, "kind": "module" if total is None else "final_project", "participant": who,
+            "commit": commit, "gate": gate, "validators": {}, "criteria": {}}
+    if total is not None:
+        data |= {"total": total, "max_total": max_total}
+    data |= {"grading_hash": "h" * 64, "bundle_version": "1.0.0", "confirmed_by": "Trainer T",
+             "confirmed_at": confirmed_at}
+    (store / name).write_text(json.dumps(data))
+
+
+E2E_PEOPLE = ("pat", "gail", "nina", "abe", "nofp", "twofp", "exact", "under", "flip", "mup", "fta",
+              "arch", "absmup", "fpover", "fplow", "comma", "recon")
+
+
+def full_name(who: str) -> str:
+    return "Doe, Comma" if who == "comma" else f"{who.capitalize()} Example"
+
+
+def e2e_store(root: Path) -> None:
+    """Two modules (m1 gated, m2 with no gate) and two use cases, written directly."""
+    in_m1 = {"pat": True, "gail": False, "nofp": True, "twofp": True, "exact": True, "under": True,
+             "flip": True, "mup": False, "fta": False, "arch": False, "fpover": True, "fplow": True,
+             "comma": True, "recon": False}
+    write_final(root, "m1", {w: fentry(g, 50, 60) for w, g in in_m1.items()},
+                {"nina": {"reason": "a runtime fault", "commit": "e" * 40}})
+    write_final(root, "m2", {w: fentry(None, 10, 10) for w in E2E_PEOPLE})
+    fp1 = {"pat": 60, "twofp": 70, "exact": 48, "under": 47, "flip": 70, "fta": 70, "arch": 70,
+           "absmup": 70, "fpover": 40, "fplow": 40, "gail": 70, "nina": 70, "abe": 70, "comma": 70,
+           "recon": 70}
+    write_final(root, "fp1", {w: fentry(True, t) for w, t in fp1.items()})
+    write_final(root, "fp2", {"twofp": fentry(True, 70), "mup": fentry(True, 70)})
+    write_makeup(root, "m1", "mup", True)
+    write_makeup(root, "m1", "fta", False, name="final.2026-11-02.json", commit="e" * 40,
+                 confirmed_at="2026-11-02T10:00:00Z")
+    write_makeup(root, "m1", "fta", True, commit="f" * 40)
+    write_makeup(root, "m1", "arch", True, name="final.2026-11-01.json", commit="e" * 40,
+                 confirmed_at="2026-11-01T10:00:00Z")
+    write_makeup(root, "m1", "arch", False)
+    write_makeup(root, "m1", "absmup", True)
+    write_makeup(root, "m1", "recon", False)
+    write_makeup(root, "fp1", "fpover", True, total=60)
+    write_makeup(root, "fp1", "fplow", True, total=30)
+
+
+E2E_EXPECT = {  # who: (passed, the requirement that decides, a reason fragment)
+    "pat": (True, "final project", "60 of 80 points"),
+    "gail": (False, "module m1", "gate not met in m1/final.json"),
+    "nina": (False, "module m1", "not_graded"),
+    "abe": (False, "module m1", "absent from m1"),
+    "nofp": (False, "final project", "no final project"),
+    "twofp": (False, "final project", "two final projects: fp1, fp2"),
+    "exact": (True, "final project", "48 of 80 points in fp1/final.json, at least the share of 60%"),
+    "under": (False, "final project", "47 of 80 points in fp1/final.json, under the share of 60%"),
+    "flip": (True, "module m1", "gate met in m1/final.json"),
+    "mup": (True, "module m1", "gate met in the further attempt m1/makeup/mup/final.json"),
+    "fta": (True, "module m1", "gate met in the further attempt m1/makeup/fta/final.json"),
+    "arch": (False, "module m1", "gate not met in the further attempt m1/makeup/arch/final.json"),
+    "absmup": (True, "module m1", "gate met in the further attempt m1/makeup/absmup/final.json"),
+    "fpover": (True, "final project", "60 of 80 points in the further attempt fp1/makeup/fpover/final.json"),
+    "fplow": (False, "final project", "30 of 80 points in the further attempt fp1/makeup/fplow/final.json"),
+    "comma": (True, "module m1", "gate met"),
+    "recon": (False, "module m1", "gate not met in the further attempt m1/makeup/recon/final.json"),
+}
+
+
+class CertScene:
+    """A data home with written final.json files, a catalog and a names file; no Git, no runtime."""
+
+    def __init__(self, tmp: str) -> None:
+        self.tmp = Path(tmp).resolve()
+        self.data = self.tmp / "data"
+        self.root = cohort_root(self.data)
+        self.catalog = cert_catalog(self.tmp, E2E_BLOCK)
+        e2e_store(self.root)
+        self.names = self.tmp / "names.csv"
+        self.write_names(E2E_PEOPLE)
+
+    def write_names(self, people, extra: str = "") -> None:
+        import csv
+        import io
+        buf = io.StringIO()
+        writer = csv.writer(buf, lineterminator="\n")
+        writer.writerow(["participant", "full name"])
+        for who in people:
+            writer.writerow([who, full_name(who)])
+        self.names.write_text(buf.getvalue() + extra, encoding="utf-8")
+
+    def run(self, *extra: str, names: Path | None = None, catalog: Path | None = None) -> tuple[int, str, str]:
+        return run_cli(self.data, "certificate", COHORT_URL, "--catalog", str(catalog or self.catalog),
+                       "--names", str(names or self.names), *extra)
+
+    @property
+    def out(self) -> Path:
+        return self.root / "certificate"
+
+    def results(self, out: Path | None = None) -> str:
+        return ((out or self.out) / "results.csv").read_text(encoding="utf-8")
+
+    def details(self, out: Path | None = None) -> dict:
+        return json.loads(((out or self.out) / "details.json").read_text(encoding="utf-8"))
+
+    def snapshot(self) -> list:
+        root = self.data
+        return [(str(p.relative_to(root)), p.read_bytes() if p.is_file() else None)
+                for p in sorted(root.rglob("*"))]
+
+
+def rows(text: str) -> list[list[str]]:
+    import csv
+    import io
+    return list(csv.reader(io.StringIO(text, newline="")))
+
+
+def requirement(details: dict, who: str, name: str) -> dict:
+    for req in details.get("participants", {}).get(who, {}).get("requirements", []):
+        if req.get("requirement") == name:
+            return req
+    return {}
+
+
+def test_certificate_end_to_end() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = CertScene(tmp)
+        code, out, err = scene.run()
+        record(code == 0 and "Traceback" not in err, "certificate succeeds on the fake cohort", f"{code} {out} {err}")
+        if code != 0:
+            return
+        table = {r[0]: r[1] for r in rows(scene.results())[1:]}
+        details = scene.details()
+        for who, (passed, req_name, fragment) in E2E_EXPECT.items():
+            want = "passed" if passed else "not passed"
+            record(table.get(full_name(who)) == want, f"results.csv: {who} is {want}", str(table.get(full_name(who))))
+            req = requirement(details, who, req_name)
+            record(fragment in req.get("reason", "") and req.get("result") == want if not passed
+                   else fragment in req.get("reason", "") and req.get("result") == "passed",
+                   f"details.json: {who}'s {req_name} reads '{fragment}'", str(req))
+            record(details["participants"].get(who, {}).get("result") == want, f"details.json: {who} is {want}")
+        record(all("declares no gate" in requirement(details, w, "module m2").get("reason", "")
+                   and requirement(details, w, "module m2").get("result") == "passed" for w in E2E_PEOPLE),
+               "a module with no gate: being graded is enough", str(requirement(details, "pat", "module m2")))
+        record(sorted(details["participants"]) == sorted(E2E_PEOPLE),
+               "the participant set: everyone in any final.json, and those with only a further attempt",
+               str(sorted(details["participants"])))
+        attempts = details["participants"]["fta"].get("further_attempts", [])
+        record(len(attempts) == 1 and attempts[0].get("bundle") == "m1" and attempts[0].get("attempts_used") == 2,
+               "details.json records the further attempts, counted across the archived files", str(attempts))
+        read = details["participants"]["arch"].get("read", [])
+        record({"file": "m1/makeup/arch/final.json", "confirmed_at": "2026-11-03T10:00:00Z"} in read
+               and {"file": "m1/final.json", "confirmed_at": "2026-11-01T10:00:00Z"} in read
+               and not any("final.2026" in r.get("file", "") for r in read),
+               "details.json lists every final.json read, with confirmed_at, and no archive", str(read))
+        everything = json.dumps(details)
+        record("final.2026-11-01.json" not in everything and "final.2026-11-02.json" not in everything,
+               "Review Focus 3: the certificate reads only final.json, never an archive")
+        record(not (scene.out / "certificates").exists(), "without --template, no certificates/ is written")
+        record(stat.S_IMODE(scene.out.stat().st_mode) == 0o700
+               and all(stat.S_IMODE(p.stat().st_mode) == 0o600 for p in scene.out.iterdir() if p.is_file()),
+               "the output is private: 0700 directory, 0600 files")
+        record(not [p for p in scene.root.iterdir() if p.name.startswith(".")],
+               "no temporary directory is left behind", str(list(scene.root.iterdir())))
+        # The evaluate() interface.
+        import certificate as cert
+        with Env(scene.data):
+            outcomes = cert.evaluate(scene.root, cert.load_certificate(scene.catalog))
+        record(outcomes["exact"].passed is True and outcomes["under"].passed is False
+               and ("final project", "not passed", requirement(details, "under", "final project")["reason"])
+               in outcomes["under"].requirements,
+               "evaluate() returns an Outcome per participant: passed, and (requirement, result, reason)",
+               str(outcomes.get("under")))
+        # A changed grade flips the result on the next run, and the earlier output is kept.
+        write_final(scene.root, "m1", {**json.loads((scene.root / "m1" / "final.json").read_text())["participants"],
+                                       "flip": fentry(False, 50, 60), "recon": fentry(True, 50, 60)},
+                    {"nina": {"reason": "a runtime fault", "commit": "e" * 40}})
+        code, out, err = scene.run()
+        table = {r[0]: r[1] for r in rows(scene.results())[1:]} if code == 0 else {}
+        record(code == 0 and table.get(full_name("flip")) == "not passed",
+               "a changed grade flips a result on the next run", f"{code} {err} {table.get(full_name('flip'))}")
+        req = requirement(scene.details(), "recon", "module m1") if code == 0 else {}
+        record(table.get(full_name("recon")) == "passed" and req.get("result") == "passed"
+               and req.get("reason") == "gate met in m1/final.json",
+               "a module re-confirmed to a met gate after a failed further attempt passes: either/or, "
+               "a result that met it is never replaced", f"{table.get(full_name('recon'))} {req}")
+        attempts = scene.details()["participants"]["recon"]["further_attempts"] if code == 0 else []
+        record(len(attempts) == 1 and attempts[0]["bundle"] == "m1",
+               "and the further attempt is still recorded in details.json", str(attempts))
+        kept = scene.root / f"certificate.{TODAY}"
+        record(kept.is_dir() and f"{full_name('flip')},passed" in (kept / "results.csv").read_text(),
+               "the earlier output is kept as certificate.<date>/", str(list(scene.root.iterdir())))
+
+
+def test_certificate_results_csv() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = CertScene(tmp)
+        code, out, err = scene.run()
+        if code != 0:
+            record(False, "certificate runs for the results.csv checks", err)
+            return
+        text = scene.results()
+        expected = ["full name,result"]
+        for who in sorted(E2E_PEOPLE, key=lambda w: (full_name(w).casefold(), w)):
+            name = full_name(who)
+            name = f'"{name}"' if "," in name else name
+            expected.append(f"{name},{'passed' if E2E_EXPECT[who][0] else 'not passed'}")
+        record(text == "\n".join(expected) + "\n", "results.csv is exactly the header and one row each",
+               repr(text[:500]))
+        parsed = rows(text)
+        record(all(len(r) == 2 for r in parsed) and parsed[0] == ["full name", "result"]
+               and {r[1] for r in parsed[1:]} == {"passed", "not passed"},
+               "results.csv has two columns, full name and passed or not passed")
+        record(not any(ch.isdigit() for ch in text), "results.csv holds no digit: no grade, rank or total")
+        record(f'"{full_name("comma")}",passed' in text, "a name holding a comma is quoted")
+        record(f"{full_name('pat')},passed" in text and f"{full_name('mup')},passed" in text,
+               "passed first time and passed after a further attempt read the same")
+        for word in ("reason", "gate", "points", "rank", "level", "attempt"):
+            record(word not in text.lower(), f"results.csv does not hold `{word}`")
+
+
+def test_certificate_template() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = CertScene(tmp)
+        names = scene.names.read_text().replace("Pat Example", "Pat <b>Example</b> & Co")
+        scene.names.write_text(names)
+        html_t = scene.tmp / "cert.html"
+        html_t.write_text("<p>{{name}} completed {{programme}} on {{date}}.</p>\n")
+        code, out, err = scene.run("--template", str(html_t))
+        certs = scene.out / "certificates"
+        record(code == 0, "certificate with an HTML template succeeds", err)
+        got = (certs / "pat.html").read_text() if (certs / "pat.html").exists() else ""
+        record(got == f"<p>Pat &lt;b&gt;Example&lt;/b&gt; &amp; Co completed Example Programme Certificate on "
+                      f"{TODAY}.</p>\n", "an .html template escapes a name holding <", repr(got))
+        made = sorted(p.name for p in certs.iterdir()) if certs.is_dir() else []
+        record(made == sorted(f"{w}.html" for w, (ok, _, _) in E2E_EXPECT.items() if ok),
+               "a certificate for each participant who passed, and none for anyone else", str(made))
+        md_t = scene.tmp / "cert.md"
+        md_t.write_text("# {{programme}}\n\n{{name}}, {{date}}. {{name}}\n")
+        code, out, err = scene.run("--template", str(md_t))
+        got = (certs / "pat.md").read_text() if (certs / "pat.md").exists() else ""
+        record(code == 0 and got == f"# Example Programme Certificate\n\nPat <b>Example</b> & Co, {TODAY}. "
+                                    "Pat <b>Example</b> & Co\n",
+               "a .md template substitutes plain text, every occurrence", repr(got))
+        htm_t = scene.tmp / "cert.htm"
+        htm_t.write_text("{{name}}")
+        code, out, err = scene.run("--template", str(htm_t))
+        got = (certs / "pat.htm").read_text() if (certs / "pat.htm").exists() else ""
+        record(code == 0 and got == "Pat &lt;b&gt;Example&lt;/b&gt; &amp; Co", "an .htm template is escaped too",
+               repr(got))
+        scene.names.write_text(names.replace("Pat <b>Example</b> & Co", "Pat {{date}}"))
+        code, out, err = scene.run("--template", str(md_t))
+        got = (certs / "pat.md").read_text() if (certs / "pat.md").exists() else ""
+        record(code == 0 and "Pat {{date}}," in got, "a value is substituted once, never expanded again", repr(got))
+
+
+def test_certificate_refusals() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = CertScene(tmp)
+
+        def refuses(label: str, needle: str, *extra: str, **kw) -> None:
+            before = scene.snapshot()
+            code, out, err = scene.run(*extra, **kw)
+            record(code == 1 and needle in err and "Traceback" not in err, f"certificate refuses {label}",
+                   f"{code} {err}")
+            record(scene.snapshot() == before, f"certificate refusing {label} writes nothing")
+
+        refuses("a catalog with no certificate", "no `certificate`", catalog=cert_catalog(scene.tmp, None))
+        refuses("a catalog the validator reports", "final_project_share",
+                catalog=cert_catalog(scene.tmp, E2E_BLOCK.replace("share: 60", "share: 101")))
+        scene.catalog = cert_catalog(scene.tmp, E2E_BLOCK)
+        m2 = scene.root / "m2" / "final.json"
+        kept = m2.read_bytes()
+        m2.unlink()
+        refuses("a module with no confirmed final.json", "m2")
+        m2.write_bytes(kept)
+        fps = {f: (scene.root / f / "final.json").read_bytes() for f in ("fp1", "fp2")}
+        for f in fps:
+            (scene.root / f / "final.json").unlink()
+        refuses("no final project with a confirmed final.json", "fp1")
+        (scene.root / "fp1" / "final.json").write_bytes(fps["fp1"])
+        code, out, err = scene.run()
+        record(code == 0, "control: a final project with no final.json is normal", err)
+        (scene.root / "fp2" / "final.json").write_bytes(fps["fp2"])
+        scene.write_names([w for w in E2E_PEOPLE if w != "abe"])
+        refuses("a participant with no entry in the names file", "abe")
+        scene.write_names(E2E_PEOPLE)
+        template = scene.tmp / "bad.md"
+        template.write_text("{{name}} scored {{total}}\n")
+        refuses("a template with {{total}}", "{{total}}", "--template", str(template))
+        template.write_text("{{ name }}\n")
+        refuses("a template with a spaced placeholder", "{{ name }}", "--template", str(template))
+        scene.names.write_text("id,name\n" + "".join(f"{w},{full_name(w)}\n" for w in E2E_PEOPLE))
+        refuses("a names file without the header row", "participant,full name")
+        for lead, label in (("=", "="), ("+", "+"), ("-", "-"), ("@", "@"), ("\t", "a tab"), ("\r", "a CR")):
+            scene.write_names(E2E_PEOPLE, extra="")
+            text = scene.names.read_text().replace("Gail Example", f'"{lead}HYPERLINK(1)"' if lead == "\r"
+                                                   else f"{lead}HYPERLINK(1)")
+            scene.names.write_text(text)
+            refuses(f"a full name starting with {label}, naming the row (Review Focus 2)",
+                    "row 3 of the names file has a full name starting with")
+        scene.write_names(E2E_PEOPLE, extra="pat,Pat Again\n")
+        refuses("a participant named twice in the names file", "pat")
+        scene.names.write_bytes(b"participant,full name\n" + "".join(f"{w},{full_name(w)}\n" for w in E2E_PEOPLE)
+                                .encode("utf-8") + b"zed,\xff\xfe\n")
+        refuses("a names file that is not UTF-8", "UTF-8")
+        scene.write_names(E2E_PEOPLE)
+        names = scene.names.read_text()
+        scene.names.write_text(names.replace("Gail Example", ""))
+        refuses("an empty full name", "row 3 of the names file has no full name")
+        scene.names.write_text("participant,full name,,\n"
+                               + names.split("\n", 1)[1].replace("Gail Example", "Gail Example,"))
+        code, out, err = scene.run()
+        record(code == 0 and "warning" not in err, "empty trailing columns from a spreadsheet are not a refusal",
+               f"{code} {err}")
+        scene.write_names(E2E_PEOPLE)
+        code, out, err = scene.run()
+        record(code == 0, "control: the same store and names succeed", err)
+    with tempfile.TemporaryDirectory() as tmp:
+        work = Path(tmp).resolve() / "wt"
+        work.mkdir()
+        git_fixture("init", "-q", str(work), cwd=Path(tmp))
+        data = work / "data"
+        root = cohort_root(data)
+        e2e_store(root)
+        catalog = cert_catalog(Path(tmp).resolve(), E2E_BLOCK)
+        names = Path(tmp) / "names.csv"
+        names.write_text("participant,full name\n" + "".join(f"{w},{full_name(w)}\n" for w in E2E_PEOPLE))
+        code, out, err = run_cli(data, "certificate", COHORT_URL, "--catalog", str(catalog), "--names", str(names))
+        record(code == 1 and "Git work tree" in err, "output under a Git work tree is refused", f"{code} {err}")
+        record(not (root / "certificate").exists() and not [p for p in root.iterdir() if p.name.startswith(".")],
+               "and nothing is written there")
+
+
+def test_certificate_names_from_a_spreadsheet() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = CertScene(tmp)
+        body = "participant,full name\r\n" + "".join(
+            f'{w},"{full_name(w)}"\r\n' if "," in full_name(w) else f"{w},{full_name(w)}\r\n" for w in E2E_PEOPLE)
+        scene.names.write_bytes(b"\xef\xbb\xbf" + body.encode("utf-8") + b",\r\n\r\n")
+        code, out, err = scene.run()
+        table = rows(scene.results()) if code == 0 else []
+        record(code == 0 and ["Doe, Comma", "passed"] in table and ["Pat Example", "passed"] in table
+               and table[0] == ["full name", "result"],
+               "Review Focus 1: a byte-order mark, a quoted comma and CRLF are read correctly",
+               f"{code} {err} {table[:3]}")
+        scene.write_names(E2E_PEOPLE, extra="patt,Pat Typo\n")
+        code, out, err = scene.run()
+        record(code == 0 and "warning" in err and "patt" in err and "Pat Typo" not in scene.results(),
+               "a names row for someone who is not a participant is a warning, not a refusal", f"{code} {err}")
+        record("patt" in json.dumps(scene.details().get("warnings", [])), "and the warning is in details.json")
+
+
+def test_certificate_reruns_on_one_day() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = CertScene(tmp)
+        codes = []
+        for n in range(3):
+            names = scene.names.read_text().replace("Pat Example" if n == 0 else f"Pat Run{'x' * n}", f"Pat Run{'x' * (n + 1)}")
+            scene.names.write_text(names)
+            codes.append(scene.run()[0])
+        listing = sorted(p.name for p in scene.root.iterdir() if p.name.startswith("certificate"))
+        record(codes == [0, 0, 0] and listing == ["certificate", f"certificate.{TODAY}", f"certificate.{TODAY}-2"],
+               "Review Focus 5: two re-runs on one day keep certificate.<date>/ and certificate.<date>-2/",
+               f"{codes} {listing}")
+        record("Pat Runxxx," in scene.results()
+               and "Pat Runx," in scene.results(scene.root / f"certificate.{TODAY}")
+               and "Pat Runxx," in scene.results(scene.root / f"certificate.{TODAY}-2"),
+               "the current output is the newest, and each earlier run is kept")
+
+
+def test_certificate_with_real_makeup() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = makeup_scene(tmp)
+        scene.add_branch("bob/m1-makeup", PARTICIPANTS["alice"])
+        scene.cli("collect", COHORT_URL, "m1")
+        results = mk_attempt(scene, "bob")
+        names = scene.tmp / "names.csv"
+        names.write_text("participant,full name\nalice,Alice Example\nbob,Bob Example\ndave,Dave Example\n")
+        code, out, err = scene.cli("certificate", COHORT_URL, "--catalog", str(scene.catalog), "--names", str(names))
+        record([r[0] for r in results] == [0, 0, 0] and code == 0,
+               "certificate reads the makeup final.json Task 3's commands write", f"{code} {err}")
+        if code != 0:
+            return
+        root = cohort_root(scene.data) / "certificate"
+        details = json.loads((root / "details.json").read_text())
+        record(requirement(details, "bob", "module m1").get("result") == "passed"
+               and "further attempt m1/makeup/bob/final.json" in requirement(details, "bob", "module m1")["reason"],
+               "bob's failed gate, made up through makeup confirm, counts", str(requirement(details, "bob", "module m1")))
+        record("no final project" in requirement(details, "bob", "final project").get("reason", ""),
+               "bob, with no final project, is not passed for that reason")
+        table = rows((root / "results.csv").read_text())
+        record(table == [["full name", "result"], ["Alice Example", "passed"], ["Bob Example", "not passed"],
+                         ["Dave Example", "not passed"]],
+               "alice passes; bob and dave do not", str(table))
+        record("absent from m1" in requirement(details, "dave", "module m1").get("reason", "")
+               and "40 of 80" in requirement(details, "dave", "final project").get("reason", ""),
+               "dave: absent from the module, and under the share", str(details["participants"].get("dave")))
+
+
 def main() -> int:
     for test in (test_cohort_from_url_forms, test_store_dir_follows_xdg, test_work_tree_refusal,
                  test_forget, test_scheme, test_cli, test_classify_branch, test_collect,
@@ -2352,7 +3326,17 @@ def main() -> int:
                  test_runtime_faults_are_not_scores, test_proposed_points_and_validator_changes,
                  test_damaged_proposal_and_recursion, test_rubric_edit_needs_no_rerun,
                  test_archive_without_hard_links,
-                 test_exclude_a_branch_the_proposal_does_not_cover, test_by_takes_printable_unicode):
+                 test_retries_and_grading_hash, test_retries_do_not_stale_a_proposal,
+                 test_makeup_branches, test_store_dir_refuses_certificate,
+                 test_exclude_a_branch_the_proposal_does_not_cover, test_by_takes_printable_unicode,
+                 test_certificate_module, test_attempts_used, test_makeup_module_gate_made_up,
+                 test_makeup_absent_and_nothing_open, test_makeup_retries, test_makeup_final_project,
+                 test_makeup_refusals, test_makeup_runtime_fault, test_makeup_module_with_no_gate,
+                 test_makeup_damaged_entry_is_not_met, test_makeup_module_met_on_reconfirm_closes_it,
+                 test_makeup_reconfirm_names_the_changes_it_does_not_repeat,
+                 test_certificate_end_to_end, test_certificate_results_csv, test_certificate_template,
+                 test_certificate_refusals, test_certificate_names_from_a_spreadsheet,
+                 test_certificate_reruns_on_one_day, test_certificate_with_real_makeup):
         try:
             test()
         except Exception:  # pragma: no cover

@@ -1264,6 +1264,7 @@ so **participants can read the criteria from the start**. They never see anyone'
 | `network` | `true` to give the container a network. Default `false`, and it then runs with `--network none`. |
 | `env` | Names of the trainer's environment variables passed in, and no others. A missing one is a warning. |
 | `timeout_minutes` | A positive integer: the limit per branch, for all its validators together. Default 15. |
+| `retries` | A whole number from 0 (a boolean is refused): further attempts at the module after the first. Absent means 0 (check 47). |
 | `validators` | The deterministic share: a map from a name in the manifest's `validators` to `points` (a positive integer) and optional `gate` (a boolean). |
 | `rubric` | The judged share: a list of criteria, each with a unique `id`, positive integer `points`, a `standard`, optional `paths` and optional `gate`. An `id` matches `[a-z0-9-]+` and is not the name of a validator in `grading.validators`, because the trainer changes a criterion's points by naming it (check 49). |
 
@@ -2170,6 +2171,37 @@ looks for them there and nowhere else.
   it will say about what is unmet. Word it for that.
 - **Do not write a solution into the lesson's folder.** The tutor reveals none, and the participant
   can read the folder.
+
+### Writing a final project
+
+A programme ends with a final project: the participant chooses a use case from a curated set and
+works on it alone. **It needs no new format.** A use case is a bundle in the programme's catalog,
+listed under `certificate.final_project` (`catalogue-format.md` section 5.4), and it is built from
+what a module is built from:
+
+- **Every lesson that is the participant's own work declares `exam: true`** (**Writing an exam
+  lesson**), so help stops at rung 3 whatever their levels.
+- **It declares a `grading:` block with a gate**, as a module does (section 2, **Cohort grading**).
+  The certificate needs the gate and the points: a participant passes the final project when they pass
+  its gate and reach `final_project_share` percent of its points. A bundle with no `grading` is a
+  finding of the catalogue check, and the first grading run refuses it.
+- **It may declare `starts_from: ref`**, or start empty, as the use case needs.
+- **It may declare `grading.retries`.** `retries` bounds the further attempts after the first (absent
+  means 0), which a participant takes on the same task on a branch `<participant>/<bundle-id>-makeup`.
+  A programme that wants a missed requirement to stay open sets it on every module; **all use cases in
+  `final_project` must declare the same value**, so a use case is not chosen for its retries (the
+  catalogue check says so). Check 47 takes `retries` as a known key: a whole number from 0, a boolean
+  refused. It reports unknown keys, so a course that sets it needs a Belay that has this check, and
+  raising `retries` needs no version change.
+- **Each use case is graded on its own**, on the branches `*/<bundle-id>`, so participants on
+  different use cases are never ranked against each other. A use case with one participant is a
+  cohort of one, and the tutor skips the shared review for it (`runner-protocol.md` section 20.10).
+- **A module id `certificate`, and an id ending in `-makeup`, are refused** for a bundle in the
+  `certificate` lists: the first collides with the certificate's output directory, the second with the
+  branches of further attempts.
+
+Each participant takes exactly one use case. A participant on two is not passed, because Belay cannot
+know which one counts (`runner-protocol.md` section 20.11).
 
 ### A lesson is not a script
 
