@@ -1,7 +1,7 @@
 # Learning goals, per-objective levels, and modules as bundles — Design
 
 **Date:** 2026-11-03
-**Last amended:** 2026-11-05
+**Last amended:** 2026-11-06
 **Status:** implemented — see §7 for the decisions the implementation added;
 `bundle-format.md` §2, §6, §10, §13, `catalogue-format.md` §5.3, `runner-protocol.md`
 §15.10-15.11 and §18, `state-lifecycle.md` §13, validator checks 35-41 and catalogue checks
@@ -67,7 +67,8 @@ and 2 became the one design `2026-11-03-user-stories-design.md`:
    A module is passed when its functional requirement is technically met, which is a gate on
    validators and gate rubric criteria, not on assessments.
 4. **Final project and certificate** (belay#95) — a capstone chosen from a curated set,
-   worked entirely at level C, and a certificate.
+   worked entirely at level C, and a certificate. Designed and implemented in
+   `2026-11-05-final-project-and-certificate-design.md`.
 
 Decisions already taken for (3) and (4), recorded so they are not re-litigated:
 
@@ -78,8 +79,9 @@ Decisions already taken for (3) and (4), recorded so they are not re-litigated:
   (`2026-11-03-cohort-grading-design.md` section 2.2). This replaces "a graded task runs in exam mode";
 - **a record in the participant's own repository is traceable, not tamper-proof.** Belay has
   no server, and the participant and their agent can edit anything in their workspace. A
-  certificate therefore rests on the trainer-run reviews, recorded where the trainer
-  controls them; the self-run assessments recorded here are learning, not proof.
+  certificate therefore rests on the trainer's confirmed grades (`final.json`), recorded where the
+  trainer controls them and read by `belay-grade certificate`; the self-run assessments recorded here
+  are learning, not proof.
 
 ---
 

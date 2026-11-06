@@ -352,7 +352,8 @@ branch against the rubric side by side, propose, confirm, and draft the outputs.
 - **Grades stay on the trainer's machine**, in `~/.local/share/belay/grading/`, and `belay-grade`
   refuses to keep them in a Git work tree. It never publishes, sends or pushes anything. How long
   they are kept is the trainer's decision. They leave the machine only as feedback the trainer
-  sends. The employer receives only the certificate result, passed or not passed.
+  sends. The employer receives only `results.csv` of the certificate step: a full name and passed
+  or not passed.
 - **Participant code runs only in a container**, so the trainer needs docker or podman; without one
   nothing runs. Only the checkout and the variables the module declares go in. Use a separate,
   limited key for grading, and never take the module's scheme from the cohort repository.
@@ -361,6 +362,35 @@ branch against the rubric side by side, propose, confirm, and draft the outputs.
   owns their branch and can game those, so a rubric criterion looks for it and a person confirms.
 - **Exam lessons** (`exam: true`) cap the tutor's help at rung 3 and reveal no solution, whatever the
   learner's level.
+
+#### Final project, further attempts and the certificate
+
+A programme ends in a final project, and a certificate that rests on the trainer's confirmed grades.
+
+- **A final project is a bundle**, in the programme's catalogue: exam lessons and a `grading` scheme
+  with a gate. The participant takes one use case from a curated set and works alone. Each use case
+  is graded on its own, and a use case with one participant skips the shared review
+  ([`bundle-format.md`](skills/belay/references/bundle-format.md), **Writing a final project**).
+- **The catalogue's `certificate` is the rule**: the modules, the final projects and the share of
+  the final project's points required. A participant passes when they passed every module's gate
+  and exactly one final project's gate with at least that share. Anything else is not passed, with
+  the reason kept for the trainer. There is no override: a trainer changes a grade, with a reason, and
+  runs it again ([`catalogue-format.md`](skills/belay/references/catalogue-format.md) section 5.4).
+- **Further attempts** are the course's decision, `grading.retries` per bundle. A missed requirement
+  stays open, "not met yet", until the certificate is run, and the participant works on a branch
+  `<participant>/<bundle-id>-makeup`. They change only the certificate result, never the first score or
+  the ranking.
+- **Nothing is sent.** The certificate step writes `details.json` (trainer only), `results.csv` (full
+  name, `passed` or `not passed`, and nothing else: this is what goes to the employer) and a filled
+  template per participant who passed. It needs no container runtime.
+
+```
+belay-grade makeup run|propose|confirm <repo> <bundle-id> <participant> --bundle <dir> --catalog <file>
+                                       # propose adds --judgement <file>; confirm adds --by <name>
+                                       # and repeatable --change <criterion>=<points>:<reason>
+belay-grade certificate <repo> --catalog <file> --names <file> [--template <file>]
+                                       # names file: header `participant,full name`, UTF-8
+```
 
 [`runner-protocol.md`](skills/belay/references/runner-protocol.md) section 20 is the procedure, and
 [`bundle-format.md`](skills/belay/references/bundle-format.md) section 2 has how to write a scheme.
@@ -389,7 +419,7 @@ bin/belay-validate --tasks path/to/a/directory/of/task/files
 
 Run them from a checkout of this repository ([The commands](#the-commands)).
 
-51 bundle checks, 9 catalogue checks and 3 for a directory of task files. Your run and the runner's run are the same checks
+51 bundle checks, 10 catalogue checks and 3 for a directory of task files. Your run and the runner's run are the same checks
 over the same files, which is the point: a bundle that passes here starts cleanly there. It
 checks structure — that references resolve, that no progress leaked into the course, that
 every lesson is reachable. It says nothing about whether the course is any good.
