@@ -286,7 +286,7 @@ def evaluate(store_root: Path, cert: Certificate) -> dict[str, Outcome]:
         elif len(taken) > 1:
             count = "two" if len(taken) == 2 else str(len(taken))
             ok, reason = False, (f"{count} final projects: {', '.join(taken)}; Belay cannot know which "
-                                 "one counts, so the trainer removes one through the grading steps")
+                                 "one counts, so the trainer removes them from one use case (runner-protocol.md 20.11)")
         else:
             bundle = taken[0]
             people, not_graded = tables[bundle]

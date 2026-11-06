@@ -3399,6 +3399,9 @@ Write these from the **confirmed** points, as drafts in the store:
    name, so a `start_from` naming it shows the cohort who won; a tag is the alternative
    (`catalogue-format.md` section 5.3). Say so once.
 
+**A cohort of one has no shared review:** when a module or a use case has one participant, skip
+`review.md`, because there is nothing to compare and it would describe one person's work.
+
 **You never commit, push, send or publish any of it, even when asked.** Committing the shared review,
 sending each participant their feedback and setting the next module's `start_from` are the trainer's
 actions: name what is ready and where, and stop. Nothing in the store is ever written to the cohort
@@ -3472,12 +3475,12 @@ The steps follow 20.2 to 20.6, with the same rules, one participant at a time. `
 lists the branch under **further attempts**. `--bundle` comes from a trusted source (20.1), and
 `--catalog` is the programme's catalogue. Then:
 
-- **`makeup run`** runs the same validators in the same container as `run`. It refuses, naming the
-  problem, when the catalogue has no `certificate` or does not list the bundle, the bundle has no
-  confirmed `final.json`, the participant has nothing open, the attempts are used up, the branch does
-  not exist, or the bundle's grading differs from what the cohort met. A runtime fault writes
-  `run.json` and exits 1, as `run` does, but records no result and uses no attempt: `propose` refuses
-  it. Repair it and run again (20.3).
+- **`makeup run`** runs what the attempt is graded on (above), in the same container as `run`. It
+  refuses, naming the problem, when the catalogue has no `certificate` or does not list the bundle,
+  the bundle has no confirmed `final.json`, the participant has nothing open, the attempts are used
+  up, the branch does not exist, or the bundle's grading differs from what the cohort met. A runtime
+  fault writes `run.json` and exits 1, as `run` does, but records no result and uses no attempt:
+  `propose` refuses it. Repair it and run again (20.3).
 - **`makeup propose`** takes a judgement of the same shape as 20.4, for this one participant, and
   computes the total and the gate. **A judgement with a `draft` is refused:** the shared review
   compares solutions, and one attempt has nothing to compare. For a module, the judgement holds only
@@ -3503,7 +3506,7 @@ of one has no shared review:** when a use case, or a make-up, has one participan
 
 After every module and the final projects are confirmed, and the further attempts are done, the
 trainer asks for the programme's result. The rule is the catalogue's `certificate`
-(`catalogue-format.md` section 5.3), computed with no override:
+(`catalogue-format.md` section 5.4), computed with no override:
 
 ```
 belay-grade certificate <repo> --catalog <file> --names <file> [--template <file>]
@@ -3550,8 +3553,8 @@ case's `final.json`: `confirm --exclude` cannot, and an excluded participant sta
 which counts. The way that works today is the trainer's: remove the participant's branch for the
 use case that does not count from the cohort repository, run `collect` (it prunes what the
 repository no longer has), and grade that use case again through `run`, `propose` and `confirm`, so
-the new `final.json` no longer names them. Say this is heavy, and that a tool path is a known gap
-with a follow-up to be filed. Do not delete the branch yourself.
+the new `final.json` no longer names them. Say this is heavy, and that a tool path is a known gap,
+tracked as belay#109. Do not delete the branch yourself.
 
 ### 20.12 Failure modes to refuse
 
@@ -3560,7 +3563,8 @@ with a follow-up to be filed. Do not delete the branch yourself.
 - **Using the trainer's own key.** 20.1.
 - **Running a validator outside `belay-grade run`**, or anything of a branch at all. 20.3, 20.4.
 - **Recording a runtime fault as a failure**, or confirming past one without the trainer. 20.3.
-- **Judging one participant at a time**, or typing a total or a rank. 20.4.
+- **Judging one participant at a time** (outside 20.10's further attempts), or typing a total or a
+  rank. 20.4.
 - **Running `confirm` on your own judgement, or inventing a reason for a change.** 20.6.
 - **Drafting a review, or feedback, before confirmation.** 20.7.
 - **A name or a grade in the shared review.** 20.7.

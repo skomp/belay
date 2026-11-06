@@ -2176,7 +2176,7 @@ looks for them there and nowhere else.
 
 A programme ends with a final project: the participant chooses a use case from a curated set and
 works on it alone. **It needs no new format.** A use case is a bundle in the programme's catalog,
-listed under `certificate.final_project` (`catalogue-format.md` section 5.3), and it is built from
+listed under `certificate.final_project` (`catalogue-format.md` section 5.4), and it is built from
 what a module is built from:
 
 - **Every lesson that is the participant's own work declares `exam: true`** (**Writing an exam

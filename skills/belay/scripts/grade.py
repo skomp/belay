@@ -1736,16 +1736,28 @@ def unrepeated_changes(store: Path, final_people: dict) -> list[str]:
     lines = []
     for who, entry in (people.items() if isinstance(people, dict) else ()):
         criteria = entry.get("criteria") if isinstance(entry, dict) else None
-        for cid, old in (criteria.items() if isinstance(criteria, dict) else ()):
-            if not (isinstance(old, dict) and old.get("changed_by_trainer") is True):
-                continue
-            now = final_people.get(who, {}).get("criteria", {}).get(cid)
-            if now is not None and now["changed_by_trainer"] and now["points"] == old.get("points"):
-                continue
-            state = "not in this confirmation" if now is None else f"now {now['points']}"
-            lines.append(f"{short(who)}:{short(cid)} was {short(old.get('points'))}, {state}: "
-                         f"{short(old.get('reason'))}")
+        lines += unrepeated_criteria(f"{short(who)}:", criteria,
+                                     final_people.get(who, {}).get("criteria", {}))
     return lines
+
+
+def unrepeated_criteria(prefix: str, criteria: Any, now_criteria: dict) -> list[str]:
+    """unrepeated_changes for one entry: the old `criteria` against the new ones."""
+    lines = []
+    for cid, old in (criteria.items() if isinstance(criteria, dict) else ()):
+        if not (isinstance(old, dict) and old.get("changed_by_trainer") is True):
+            continue
+        now = now_criteria.get(cid)
+        if now is not None and now["changed_by_trainer"] and now["points"] == old.get("points"):
+            continue
+        state = "not in this confirmation" if now is None else f"now {now['points']}"
+        lines.append(f"{prefix}{short(cid)} was {short(old.get('points'))}, {state}: "
+                     f"{short(old.get('reason'))}")
+    return lines
+
+
+UNREPEATED_NOTICE = ("the previous confirmation changed these, and this one does not repeat them; nothing "
+                     "is carried over, so to keep one, confirm again with its --change:")
 
 
 def check_proposal(proposal: Any) -> None:
@@ -1910,8 +1922,7 @@ def cmd_confirm(args: argparse.Namespace) -> int:
     if ranking and ranking[0]["tied"]:
         print("the top place is a tie: choosing the start branch is the trainer's; final.json stores no winner.")
     if unrepeated:
-        print("the previous confirmation changed these, and this one does not repeat them; nothing "
-              "is carried over, so to keep one, confirm again with its --change:")
+        print(UNREPEATED_NOTICE)
         for line in unrepeated:
             print(f"  {line}")
     if kept:
@@ -2037,12 +2048,19 @@ def open_requirement(ctx: Makeup) -> str | None:
 
     A module is open on a gate of false, an entry in not_graded, or no branch at the
     checkpoint. A final project is open only for someone under `participants`, on a
-    gate of false or too few points.
+    gate of false or too few points. A module whose first result meets the gate is met,
+    whatever a later attempt says, so a re-confirmation that meets it closes the module.
+    A damaged entry is refused, as `belay-grade certificate` refuses it, never read as met.
     """
+    people = ctx.module_final["participants"]
+    if ctx.kind == "module" and ctx.participant in people:
+        first = people[ctx.participant]
+        _check_requirement_entry(ctx, first, f"in {ctx.bundle}'s final.json")
+        if first.get("gate") is not False:
+            return None  # a met first result is never replaced (spec section 3.1)
     if ctx.latest is not None:
         entry, where = ctx.latest, "in the latest confirmed further attempt"
     else:
-        people = ctx.module_final["participants"]
         not_graded = ctx.module_final.get("not_graded")
         if ctx.kind == "module":
             if isinstance(not_graded, dict) and ctx.participant in not_graded:
@@ -2052,15 +2070,25 @@ def open_requirement(ctx: Makeup) -> str | None:
         elif ctx.participant not in people:
             return None
         entry, where = people[ctx.participant], f"in {ctx.bundle}'s final.json"
-    if not isinstance(entry, dict):
-        raise GradeError(f"the entry of {ctx.participant} {where} is damaged")
+    _check_requirement_entry(ctx, entry, where)
     if entry.get("gate") is False:
         return f"the gate is not met yet {where}"
     if ctx.kind == "final_project":
-        total, max_total = entry.get("total"), entry.get("max_total")
-        if _is_points(total) and _is_points(max_total) and total * 100 < ctx.share * max_total:
+        total, max_total = entry["total"], entry["max_total"]
+        if total * 100 < ctx.share * max_total:
             return f"{total} of {max_total} points {where}, under the share of {ctx.share}%"
     return None
+
+
+def _check_requirement_entry(ctx: Makeup, entry: Any, where: str) -> None:
+    """Refuse an entry the certificate would refuse, rather than read it as met."""
+    if not isinstance(entry, dict) or entry.get("gate", "absent") not in (True, False, None):
+        raise GradeError(f"the entry of {ctx.participant} {where} is damaged: it has no `gate` of "
+                         "true, false or null")
+    if ctx.kind == "final_project" and not (_is_points(entry.get("total"))
+                                            and _is_points(entry.get("max_total"))):
+        raise GradeError(f"the entry of {ctx.participant} {where} is damaged: `total` and `max_total` "
+                         "are not whole numbers")
 
 
 def admit_attempt(ctx: Makeup, commit: str) -> str:
@@ -2308,6 +2336,10 @@ def cmd_makeup_confirm(args: argparse.Namespace) -> int:
         "confirmed_at": now_iso(),
     })
     refuse_work_tree(ctx.store)
+    # Only a correction of the same commit replaces the trainer's earlier changes; a new
+    # attempt is graded afresh, and its predecessor's changes were about other work.
+    unrepeated = unrepeated_criteria("", ctx.latest.get("criteria"), criteria) \
+        if ctx.latest is not None and ctx.latest.get("commit") == proposal["commit"] else []
     kept = archive_previous(ctx.store)
     out = ctx.store / FINAL_FILE
     write_json_private(out, final)
@@ -2317,6 +2349,10 @@ def cmd_makeup_confirm(args: argparse.Namespace) -> int:
         print(f"  changed {cid} {proposal['criteria'][cid]['points']} -> {pts}: {escape_name(reason)}")
     print(_makeup_line(ctx, gate, total, proposal["max_total"]))
     print(f"further attempts used: {len(used)} of {ctx.scheme.retries}")
+    if unrepeated:
+        print(UNREPEATED_NOTICE)
+        for line in unrepeated:
+            print(f"  {line}")
     if kept:
         print(f"previous confirmation kept: {kept}")
     print(f"final: {out}")

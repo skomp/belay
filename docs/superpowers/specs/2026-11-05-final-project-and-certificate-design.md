@@ -98,7 +98,7 @@ tutorials: [ ... ]
 **Anything else is not passed, with the reason recorded**: a gate not passed, a participant in
 `not_graded` or absent from a module, in each case with no further attempt that passed; no final
 project, two final projects, or too few points. Two final projects is a reason and not a guess, because Belay cannot know which one counts;
-the trainer removes one through the grading steps.
+the trainer removes one through the grading steps (section 10.1).
 
 **The set of participants** is everyone named in any of those `final.json` files, under
 `participants` or `not_graded`, or holding a further attempt at a listed module. A participant is known by the part of their branch name before the
@@ -353,4 +353,4 @@ participant it excludes stays in `not_graded`, which decision 4 counts. What wor
 participant's branch for the use case that does not count from the cohort repository, run `collect`
 (which prunes), and grade that use case again with `run`, `propose` and `confirm`, so its `final.json` no
 longer names them. That is heavy. **A command that removes a gradable participant from one use case is a
-known gap**, and a follow-up issue will be filed for it.
+known gap**, tracked as belay#109.

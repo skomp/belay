@@ -1910,6 +1910,8 @@ def test_retries_do_not_stale_a_proposal() -> None:
         # Raise retries after the proposal: the proposal still confirms.
         (scene.bundle / "tutorial.yaml").write_text(
             "grading:\n  retries: 4\n".join(MODULE_YAML.split("grading:\n", 1)))
+        record(gr.load_scheme(scene.bundle).retries == 4, "the bundle really declares retries: 4 now",
+               str(gr.load_scheme(scene.bundle).retries))
         scene.cli("collect", COHORT_URL, "m1")
         code, out, err = confirm(scene)
         record(code == 0, "a proposal made before raising retries still confirms", f"{out} {err}")
@@ -2777,6 +2779,69 @@ def test_makeup_module_with_no_gate() -> None:
         refused_writing_nothing(scene, "bob, graded with gate null", "nothing open", "run", "bob")
 
 
+def test_makeup_damaged_entry_is_not_met() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = makeup_scene(tmp)
+        with Env(scene.data):
+            fp_store = gr.store_dir(COHORT_URL, "fp1")
+        fp_final = json.loads((fp_store / "final.json").read_text())
+        fp_final["participants"]["dave"]["total"] = "40"
+        (fp_store / "final.json").write_text(json.dumps(fp_final))
+        scene.add_branch("dave/fp1-makeup", PARTICIPANTS["alice"])
+        scene.add_branch("bob/m1-makeup", PARTICIPANTS["alice"])
+        scene.cli("collect", COHORT_URL, "fp1")
+        refused_writing_nothing(scene, "a final-project entry whose total is not whole points",
+                                "the entry of dave in fp1's final.json is damaged", "run", "dave",
+                                bundle_id="fp1")
+        m1_final = json.loads((scene.store() / "final.json").read_text())
+        m1_final["participants"]["bob"]["gate"] = "no"
+        (scene.store() / "final.json").write_text(json.dumps(m1_final))
+        refused_writing_nothing(scene, "an entry whose gate is not true, false or null",
+                                "the entry of bob in m1's final.json is damaged", "run", "bob")
+
+
+def test_makeup_module_met_on_reconfirm_closes_it() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = makeup_scene(tmp, retries=2)
+        # bob fails the gate in m1, then fails a further attempt.
+        scene.add_branch("bob/m1-makeup", PARTICIPANTS["bob"])
+        scene.cli("collect", COHORT_URL, "m1")
+        results = mk_attempt(scene, "bob")
+        store = mk_store(scene, "bob")
+        record([r[0] for r in results] == [0, 0, 0]
+               and json.loads((store / "final.json").read_text())["gate"] is False,
+               "bob's first further attempt fails the gate", str([(r[0], r[2]) for r in results]))
+        # The trainer grades m1 again and bob's first result now meets the gate.
+        scene.add_branch("bob/m1", PARTICIPANTS["alice"])
+        path = graded(scene, {"participants": {k: v for k, v in ratings()["participants"].items()
+                                               if k != "carol"}})
+        code, out, err = propose(scene, path)
+        record(code == 0, "m1 is proposed again", f"{code} {err}")
+        code, out, err = confirm(scene)
+        bob = json.loads((scene.store() / "final.json").read_text())["participants"]["bob"]
+        record(code == 0 and bob["gate"] is True, "m1 is re-confirmed with bob's gate met", f"{code} {err}")
+        scene.add_branch("bob/m1-makeup", PARTICIPANTS["alice"] | {"README.md": "bob again\n"})
+        scene.cli("collect", COHORT_URL, "m1")
+        refused_writing_nothing(scene, "bob, met by a re-confirmed first result after a failed attempt",
+                                "nothing open", "run", "bob")
+
+
+def test_makeup_reconfirm_names_the_changes_it_does_not_repeat() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = makeup_scene(tmp)
+        scene.add_branch("dave/fp1-makeup", PARTICIPANTS["alice"])
+        scene.cli("collect", COHORT_URL, "fp1")
+        results = mk_attempt(scene, "dave", {"design": 10}, "--change", "design=14:read again", bundle_id="fp1")
+        record([r[0] for r in results] == [0, 0, 0], "dave's attempt confirms with a --change",
+               str([(r[0], r[2]) for r in results]))
+        code, out, err = mk(scene, "confirm", "dave", "--by", "Trainer T", bundle_id="fp1")
+        record(code == 0 and "does not repeat" in out and "design was 14, now 10: read again" in out,
+               "confirming the same attempt again names the --change it does not repeat", f"{code} {out} {err}")
+        code, out, err = mk(scene, "confirm", "dave", "--by", "Trainer T", bundle_id="fp1")
+        record(code == 0 and "does not repeat" not in out,
+               "with no earlier --change there is nothing to name", f"{code} {out}")
+
+
 def test_attempts_used() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         store = Path(tmp)
@@ -3267,6 +3332,8 @@ def main() -> int:
                  test_certificate_module, test_attempts_used, test_makeup_module_gate_made_up,
                  test_makeup_absent_and_nothing_open, test_makeup_retries, test_makeup_final_project,
                  test_makeup_refusals, test_makeup_runtime_fault, test_makeup_module_with_no_gate,
+                 test_makeup_damaged_entry_is_not_met, test_makeup_module_met_on_reconfirm_closes_it,
+                 test_makeup_reconfirm_names_the_changes_it_does_not_repeat,
                  test_certificate_end_to_end, test_certificate_results_csv, test_certificate_template,
                  test_certificate_refusals, test_certificate_names_from_a_spreadsheet,
                  test_certificate_reruns_on_one_day, test_certificate_with_real_makeup):

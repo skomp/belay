@@ -8579,14 +8579,15 @@ def test_real_catalogue_gains_no_warning() -> None:
         "; ".join(str(w) for w in report.warnings),
     )
     record(
-        # `goals` is optional (check 8), and the published catalogue declares
-        # none, so its keys are the known ones minus `goals`. Before goals
-        # existed this compared against the whole tuple; the sibling sweep
-        # alone saw it stop holding, which is what the sweep is for.
+        # `goals` and `certificate` are optional (checks 8 and 10), and the
+        # published catalogue declares neither, so its keys are the known ones
+        # minus those two. Before goals existed this compared against the whole
+        # tuple; the sibling sweep alone saw it stop holding, which is what the
+        # sweep is for.
         sorted(document)
-        == sorted(set(vb.CATALOG_KNOWN_TOP_LEVEL_FIELDS) - {"goals"}),
+        == sorted(set(vb.CATALOG_KNOWN_TOP_LEVEL_FIELDS) - {"goals", "certificate"}),
         "its top-level keys are exactly the two this document always "
-        "carries (goals is optional and it has none), which is why check 1 "
+        "carries (goals and certificate are optional and it has neither), which is why check 1 "
         "has nothing to say about it",
         f"top-level keys = {sorted(document)}",
     )
