@@ -1264,6 +1264,7 @@ so **participants can read the criteria from the start**. They never see anyone'
 | `network` | `true` to give the container a network. Default `false`, and it then runs with `--network none`. |
 | `env` | Names of the trainer's environment variables passed in, and no others. A missing one is a warning. |
 | `timeout_minutes` | A positive integer: the limit per branch, for all its validators together. Default 15. |
+| `retries` | A whole number from 0 (a boolean is refused): further attempts at the module after the first. Absent means 0 (check 47). |
 | `validators` | The deterministic share: a map from a name in the manifest's `validators` to `points` (a positive integer) and optional `gate` (a boolean). |
 | `rubric` | The judged share: a list of criteria, each with a unique `id`, positive integer `points`, a `standard`, optional `paths` and optional `gate`. An `id` matches `[a-z0-9-]+` and is not the name of a validator in `grading.validators`, because the trainer changes a criterion's points by naming it (check 49). |
 

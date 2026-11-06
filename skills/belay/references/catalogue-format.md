@@ -183,7 +183,8 @@ tutorials:
 |---|---|---|
 | `catalog_version` | MUST | Top level. `1` for this document. A version you do not recognise is an error, not a guess. |
 | `tutorials` | MUST | Top level. The list of entries. |
-| `goals` | MAY | Top level. The programme's learning goals, each listing its learning objectives by `covers` id. Section 5.3. These three are the only top-level keys; every row below is a field of one entry. |
+| `goals` | MAY | Top level. The programme's learning goals, each listing its learning objectives by `covers` id. Section 5.3. |
+| `certificate` | MAY | Top level. The modules and final projects a programme's certificate rests on, and the share of the final project's points required: `title`, `modules`, `final_project`, `final_project_share`. Check 10 reports a malformed one. These four are the only top-level keys; every row below is a field of one entry. |
 | `id` | MUST | Stable identity, `[a-z0-9-]+`. Matches the bundle's `id`. |
 | `title` | MUST | Human-facing course name. |
 | `description` | MUST | One or two sentences. This is what a learner reads when choosing. |
@@ -231,8 +232,8 @@ likely misspelling, because that is the case with no other signal anywhere: a ru
 an entry by field name and ignores a name it does not know, so `optional_lesson_cnt` is
 silently absent rather than reported, and the entry simply advertises nothing by it.
 
-**The same rule applies at the top level.** A key beside `catalog_version`, `tutorials`
-and `goals` that this document does not define is warned about, on check 1, and the
+**The same rule applies at the top level.** A key beside `catalog_version`, `tutorials`,
+`goals` and `certificate` that this document does not define is warned about, on check 1, and the
 catalogue still passes. The validator used to reject it, which contradicted the rule
 above and defeated the point of it: the file a newer runner writes is exactly the file an
 older validator has never seen, and refusing it is the one failure an additive format

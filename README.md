@@ -508,8 +508,8 @@ tutor runs the scripts by their path instead of the `belay-*` commands
 No pytest; six plain scripts, run from a checkout of this repository.
 
 ```
-python3 tests/test_validate_bundle.py     # 1216 assertions
-python3 tests/test_catalogs.py            # 589 assertions
+python3 tests/test_validate_bundle.py     # 1221 assertions
+python3 tests/test_catalogs.py            # 619 assertions
 python3 tests/test_plan_update.py         # 129 assertions
 python3 tests/test_evidence.py            # 89 assertions
 python3 tests/test_bin_wrappers.py        # 69 assertions
@@ -533,7 +533,7 @@ BELAY_SWEEP_SIBLING_REPOS=1 python3 tests/test_validate_bundle.py
 Those are separate checkouts at their own revisions, so what they contribute is
 reported on its own line and never added to the total above — `and 24 more against
 sibling repositories outside this commit` on the machine this was measured on. The
-headline stays 1216 either way. Run it before publishing a bundle; a plain `python3
+headline stays 1221 either way. Run it before publishing a bundle; a plain `python3
 tests/test_validate_bundle.py` is the check that a commit of *this* repository is
 sound.
 

@@ -1733,6 +1733,131 @@ CATALOG_CASES: list[tuple[str, int, str, str, bool]] = [
 ]
 
 
+# --------------------------------------------------------------------------
+# Catalogue check 10: certificate (final-project-and-certificate spec, 3 and 6)
+# --------------------------------------------------------------------------
+
+CERT_OK = (
+    "certificate:\n  title: Example Programme Certificate\n"
+    "  modules: [m1, m2]\n  final_project: [f1, f2]\n"
+    "  final_project_share: 60\n"
+)
+
+
+def cert_catalog(certificate: str, ids=("m1", "m2", "f1", "f2")) -> str:
+    """A catalogue of `ids`, each in a directory of its own name, plus a certificate block."""
+    return catalog_doc(*[(i, i) for i in ids]) + certificate
+
+
+def cert_findings(certificate: str, gradings: dict | None = None, ids=("m1", "m2", "f1", "f2")):
+    """Findings of check 10. `gradings` maps id to a tutorial.yaml body; the default declares
+    a grading block with no retries; a bundle named in `skip` is not created."""
+    gradings = gradings or {}
+    with tempfile.TemporaryDirectory() as tmpdir:
+        base = Path(tmpdir) / "cat"
+        base.mkdir()
+        for i in ids:
+            body = gradings.get(i, "id: x\ngrading:\n  image: python:3.12\n")
+            if body is None:
+                continue
+            (base / i).mkdir()
+            (base / i / "tutorial.yaml").write_text(body, encoding="utf-8")
+            (base / i / "STATE.template.md").write_text("---\n---\n", encoding="utf-8")
+        target = base / "catalog.yaml"
+        target.write_text(cert_catalog(certificate, ids), encoding="utf-8")
+        report = vb.validate_catalog(target, portable=False)
+    return report, [f for f in report.findings if f.check == 10]
+
+
+def test_certificate_check() -> None:
+    print("\ncatalogue check 10: certificate:")
+    report, hits = cert_findings("")
+    record(
+        not hits and report.status.get(10, ("",))[0] == vb.NOT_APPLICABLE,
+        "absent certificate: check 10 is n/a and silent",
+        repr(report.status.get(10)),
+    )
+    report, hits = cert_findings(CERT_OK)
+    record(
+        not report.findings and report.status.get(10, ("",))[0] == vb.RAN,
+        "a valid certificate: silent, and check 10 ran",
+        "; ".join(str(f) for f in report.findings) + repr(report.status.get(10)),
+    )
+
+    def ok_with(**changes: str) -> str:
+        lines = {
+            "title": "title: Example Programme Certificate",
+            "modules": "modules: [m1, m2]",
+            "final_project": "final_project: [f1, f2]",
+            "final_project_share": "final_project_share: 60",
+        }
+        for key, value in changes.items():
+            if value is None:
+                del lines[key]
+            else:
+                lines[key] = f"{key}: {value}"
+        return "certificate:\n" + "".join(f"  {v}\n" for v in lines.values())
+
+    for share in ("1", "100"):
+        _r, hits = cert_findings(ok_with(final_project_share=share))
+        record(not hits, f"final_project_share {share} is silent", repr(hits))
+    with_retries = {"f1": "id: x\ngrading:\n  retries: 1\n", "f2": "id: x\ngrading:\n  retries: 1\n"}
+    _r, hits = cert_findings(CERT_OK, with_retries)
+    record(not hits, "two use cases with the same retries are silent", repr(hits))
+    zero = {"f1": "id: x\ngrading:\n  retries: 0\n"}
+    _r, hits = cert_findings(CERT_OK, zero)
+    record(not hits, "retries 0 against an absent retries is the same value", repr(hits))
+    _r, hits = cert_findings(CERT_OK, {"m1": None, "f1": None})
+    record(not hits, "a bundle that does not resolve is not check 10's to report (check 6 speaks)", repr(hits))
+
+    # (label, certificate block, bundle overrides, text the message must carry)
+    cases = [
+        ("certificate is not a mapping", "certificate: nope\n", None, "must be a mapping"),
+        ("an unknown key", ok_with(extra="1"), None, "unknown key 'extra'"),
+        ("a missing key: title", ok_with(title=None), None, "certificate.title is missing"),
+        ("a missing key: modules", ok_with(modules=None), None, "certificate.modules is missing"),
+        ("a missing key: final_project", ok_with(final_project=None), None, "certificate.final_project is missing"),
+        ("a missing key: final_project_share", ok_with(final_project_share=None), None,
+         "certificate.final_project_share is missing"),
+        ("an empty title", ok_with(title='""'), None, "certificate.title"),
+        ("modules empty", ok_with(modules="[]"), None, "certificate.modules"),
+        ("modules not a list", ok_with(modules="m1"), None, "certificate.modules"),
+        ("final_project holds a number", ok_with(final_project="[f1, 3]"), None, "certificate.final_project"),
+        ("an id that is not in the catalogue", ok_with(modules="[m1, nope]"), None, "'nope'"),
+        ("an id in both lists", ok_with(final_project="[m1, f2]"), None, "'m1'"),
+        ("an id twice in one list", ok_with(modules="[m1, m1]"), None, "'m1'"),
+        ("an id ending in -makeup", ok_with(modules="[m1, m2-makeup]"), None, "'m2-makeup'"),
+        ("an id equal to certificate", ok_with(modules="[m1, certificate]"), None, "'certificate'"),
+        ("share 0", ok_with(final_project_share="0"), None, "final_project_share"),
+        ("share 101", ok_with(final_project_share="101"), None, "final_project_share"),
+        ("share true", ok_with(final_project_share="true"), None, "final_project_share"),
+        ("share 60.5", ok_with(final_project_share="60.5"), None, "final_project_share"),
+        ("a listed bundle with no grading", CERT_OK, {"m2": "id: x\n"}, "'m2'"),
+        ("use cases with retries 1 and absent", CERT_OK,
+         {"f1": "id: x\ngrading:\n  retries: 1\n"}, "final_project"),
+    ]
+    for label, block, bundles, expected in cases:
+        ids = ("m1", "m2", "f1", "f2", "certificate") if "certificate]" in block else ("m1", "m2", "f1", "f2")
+        _r, hits = cert_findings(block, bundles, ids)
+        if "certificate]" in block:
+            hits = [h for h in hits if "certificate" in h.message]
+        matched = [h for h in hits if expected in h.message]
+        if matched:
+            _fired_catalog_checks.add(10)
+        record(
+            bool(matched),
+            f"fires: {label}",
+            f"expected {expected!r}; got " + (" || ".join(h.message for h in hits) or "(nothing)"),
+        )
+    # The bundle-reading rules name the listed ids they are about.
+    _r, hits = cert_findings(CERT_OK, {"f1": "id: x\ngrading:\n  retries: 1\n"})
+    record(
+        any("f1" in h.message and "f2" in h.message for h in hits),
+        "the retries finding names both use cases",
+        " || ".join(h.message for h in hits),
+    )
+
+
 def test_validator_catalog_mode() -> None:
     print("\nthe validator's catalogue mode, each check firing:")
     for label, check, text, expected, portable in CATALOG_CASES:
@@ -4695,6 +4820,7 @@ def main() -> int:
         test_configuration_errors,
         test_offline,
         test_validator_catalog_mode,
+        test_certificate_check,
         test_cli,
         test_concept_query_exact_and_alias,
         test_a_bundle_that_only_assumes_a_concept_does_not_teach_it,
