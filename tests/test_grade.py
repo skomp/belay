@@ -2406,6 +2406,390 @@ def test_by_takes_printable_unicode() -> None:
                "--by accepts printable Unicode, and stores it as given", f"{code} {err}")
 
 
+# --------------------------------------------------------------------------
+# makeup: further attempts (final-project-and-certificate spec, section 3.1)
+# --------------------------------------------------------------------------
+
+FP_YAML = MODULE_YAML.replace("id: m1\n", "id: fp1\n")
+OTHER_YAML = "id: other\ngrading:\n  image: python:3.12-slim\n"
+CERT_BLOCK = ("certificate:\n  title: Example Programme Certificate\n  modules: [{modules}]\n"
+              "  final_project: [fp1]\n  final_project_share: 60\n")
+
+
+def with_retries(yaml: str, retries: int | None) -> str:
+    if retries is None:
+        return yaml
+    return f"grading:\n  retries: {retries}\n".join(yaml.split("grading:\n", 1))
+
+
+def catalog_text(certificate: str | None) -> str:
+    lines = ["catalog_version: 1"]
+    if certificate is not None:
+        lines.append(certificate.rstrip("\n"))
+    lines.append("tutorials:")
+    for identifier, path in (("m1", "bundle"), ("fp1", "fp-bundle"), ("other", "other-bundle")):
+        lines += [f"  - id: {identifier}", f"    title: The {identifier} course",
+                  f"    description: A course about {identifier}.", "    subjects: [testing]",
+                  "    level: beginner", "    workspace_kind: new-repository",
+                  "    source:", "      type: local", f"      path: {path}"]
+    return "\n".join(lines) + "\n"
+
+
+def makeup_scene(tmp: str, *, module_yaml: str = MODULE_YAML, retries: int | None = 1) -> Scene:
+    """A confirmed m1 (alice passed, bob failed the gate, carol absent) and a confirmed
+    final project fp1 (alice 75, dave 40 of 80: under a share of 60)."""
+    scene = Scene(tmp, module_yaml=with_retries(module_yaml, retries))
+    (scene.bundle / "STATE.template.md").write_text("---\n---\n")
+    git_fixture("--git-dir", str(scene.bare), "update-ref", "-d", "refs/heads/carol/m1", cwd=scene.tmp)
+    scene.fp_bundle = scene.tmp / "fp-bundle"
+    scene.fp_bundle.mkdir()
+    (scene.fp_bundle / "tutorial.yaml").write_text(with_retries(FP_YAML, retries))
+    (scene.fp_bundle / "STATE.template.md").write_text("---\n---\n")
+    other = scene.tmp / "other-bundle"
+    other.mkdir()
+    (other / "tutorial.yaml").write_text(OTHER_YAML)
+    (other / "STATE.template.md").write_text("---\n---\n")
+    scene.add_branch("alice/fp1", PARTICIPANTS["alice"])
+    scene.add_branch("dave/fp1", PARTICIPANTS["carol"])
+    scene.catalog = scene.tmp / "catalog.yaml"
+    scene.catalog.write_text(catalog_text(CERT_BLOCK.format(modules="m1")))
+    judged = ratings()
+    del judged["participants"]["carol"]
+    path = graded(scene, judged)
+    code, out, err = propose(scene, path)
+    assert code == 0, (out, err)
+    code, out, err = confirm(scene)
+    assert code == 0, (out, err)
+    scene.cli("collect", COHORT_URL, "fp1")
+    code, out, err = scene.cli("run", "--bundle", str(scene.fp_bundle), COHORT_URL, "fp1")
+    assert code == 0, (out, err)
+    fp_judgement = scene.tmp / "fp-judgement.json"
+    fp_judgement.write_text(json.dumps({"participants": {
+        "alice": {"design": {"points": 15, "evidence": "alice: quoted"}},
+        "dave": {"design": {"points": 0, "evidence": "dave: quoted"}}}}))
+    code, out, err = scene.cli("propose", "--bundle", str(scene.fp_bundle), "--judgement", str(fp_judgement),
+                               COHORT_URL, "fp1")
+    assert code == 0, (out, err)
+    code, out, err = scene.cli("confirm", "--bundle", str(scene.fp_bundle), "--by", "Trainer T", COHORT_URL, "fp1")
+    assert code == 0, (out, err)
+    return scene
+
+
+def mk(scene: Scene, step: str, who: str, *extra: str, bundle_id: str = "m1",
+       bundle: Path | None = None, catalog: Path | None = None) -> tuple[int, str, str]:
+    if bundle is None:
+        bundle = scene.fp_bundle if bundle_id == "fp1" else scene.bundle
+    return scene.cli("makeup", step, COHORT_URL, bundle_id, who, "--bundle", str(bundle),
+                     "--catalog", str(catalog or scene.catalog), *extra)
+
+
+def mk_judge(scene: Scene, who: str, points: dict[str, int] | None = None) -> Path:
+    path = scene.tmp / f"makeup-{who}.json"
+    path.write_text(json.dumps({"participants": {who: {
+        cid: {"points": pts, "evidence": f"{who}: quoted"} for cid, pts in (points or {}).items()}}}))
+    return path
+
+
+def mk_store(scene: Scene, who: str, bundle_id: str = "m1") -> Path:
+    with Env(scene.data):
+        return gr.store_dir(COHORT_URL, bundle_id) / "makeup" / who
+
+
+def mk_attempt(scene: Scene, who: str, points: dict[str, int] | None = None, *extra: str,
+               bundle_id: str = "m1") -> list[tuple[int, str, str]]:
+    """run, propose, confirm; returns the three results."""
+    out = [mk(scene, "run", who, bundle_id=bundle_id)]
+    out.append(mk(scene, "propose", who, "--judgement", str(mk_judge(scene, who, points)), bundle_id=bundle_id))
+    out.append(mk(scene, "confirm", who, "--by", "Trainer T", *extra, bundle_id=bundle_id))
+    return out
+
+
+def store_snapshot(scene: Scene) -> dict[str, bytes]:
+    root = scene.data / "belay" / "grading"
+    return {str(p.relative_to(root)): p.read_bytes() for p in sorted(root.rglob("*"))
+            if p.is_file() and gr.CACHE_NAME not in p.parts}
+
+
+def refused_writing_nothing(scene: Scene, label: str, needle: str, step: str, who: str, *extra: str,
+                            **kw) -> None:
+    before = store_snapshot(scene)
+    code, out, err = mk(scene, step, who, *extra, **kw)
+    after = store_snapshot(scene)
+    record(code == 1 and needle in err and "Traceback" not in err, f"makeup {step} refuses {label}", f"{code} {err}")
+    record(after == before, f"makeup {step} refusing {label} writes nothing",
+           str(sorted(set(after) ^ set(before)) or [k for k in after if after[k] != before.get(k)]))
+
+
+def test_certificate_module() -> None:
+    import certificate as cert
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = makeup_scene(tmp)
+        got = cert.load_certificate(scene.catalog)
+        record(got == cert.Certificate(title="Example Programme Certificate", modules=("m1",),
+                                       final_project=("fp1",), share=60),
+               "load_certificate reads the block", str(got))
+        record(cert.kind_of(got, "m1") == "module" and cert.kind_of(got, "fp1") == "final_project",
+               "kind_of tells a module from a final project")
+        msg = refused(cert.kind_of, got, "other")
+        record(msg is not None and "other" in msg, "kind_of refuses a bundle in neither list", str(msg))
+        scene.catalog.write_text(catalog_text(None))
+        msg = refused(cert.load_certificate, scene.catalog)
+        record(msg is not None and "no `certificate`" in msg, "load_certificate refuses a catalog with none", str(msg))
+        scene.catalog.write_text(catalog_text(CERT_BLOCK.format(modules="m1").replace("60", "0")))
+        msg = refused(cert.load_certificate, scene.catalog)
+        record(msg is not None and "final_project_share" in msg and "check 10" in msg,
+               "load_certificate refuses a catalog the validator reports, listing the findings", str(msg))
+
+
+def test_makeup_module_gate_made_up() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = makeup_scene(tmp)
+        module_final = (scene.store() / "final.json").read_bytes()
+        scene.add_branch("bob/m1-makeup", PARTICIPANTS["alice"])
+        scene.cli("collect", COHORT_URL, "m1")
+        (r_code, r_out, r_err), (p_code, p_out, p_err), (c_code, c_out, c_err) = mk_attempt(scene, "bob")
+        record(r_code == 0, "makeup run of bob succeeds", f"{r_code} {r_out} {r_err}")
+        store = mk_store(scene, "bob")
+        run = json.loads((store / "run.json").read_text()) if (store / "run.json").exists() else {}
+        record(sorted(run.get("branch", {}).get("validators", {})) == ["scorer-tests"],
+               "a module's further attempt runs the gate validators only", str(run)[:300])
+        record(p_code == 0, "makeup propose succeeds", f"{p_code} {p_err}")
+        record(c_code == 0, "makeup confirm succeeds", f"{c_code} {c_err}")
+        final = json.loads((store / "final.json").read_text()) if (store / "final.json").exists() else {}
+        record(sorted(final) == ["bundle", "bundle_version", "commit", "confirmed_at", "confirmed_by", "criteria",
+                                 "gate", "grading_hash", "kind", "participant", "validators"],
+               "a module's makeup final.json has exactly the contract's keys, no total", str(sorted(final)))
+        record(final.get("gate") is True and final.get("kind") == "module" and final.get("participant") == "bob"
+               and final.get("commit") == scene.commits["bob/m1-makeup"] and final.get("bundle") == "m1"
+               and final.get("grading_hash") == json.loads(module_final)["grading_hash"]
+               and final.get("confirmed_by") == "Trainer T" and final.get("bundle_version") == "1.2.0",
+               "bob passes the gate on the further attempt", str(final)[:400])
+        record(stat.S_IMODE((store / "final.json").stat().st_mode) == 0o600 if store.exists() else False,
+               "makeup final.json is private")
+        record((scene.store() / "final.json").read_bytes() == module_final,
+               "the module's final.json is byte for byte unchanged")
+        texts = [p.read_text() for p in store.rglob("*.json")] if store.exists() else []
+        record(texts and not any("ranking" in t or '"rank"' in t for t in texts),
+               "no ranking is written for a further attempt")
+        record(gr.attempts_used(store) == {scene.commits["bob/m1-makeup"]}, "one attempt is used")
+        code, out, err = confirm(scene, "--change", "bob:design=12:read again")
+        record(code == 0, "a grade change in the module still confirms after the makeup branch was collected",
+               f"{code} {err}")
+        # Met: a new commit is not an attempt, since nothing is open.
+        scene.add_branch("bob/m1-makeup", PARTICIPANTS["bob"])
+        scene.cli("collect", COHORT_URL, "m1")
+        refused_writing_nothing(scene, "a participant whose requirement is met", "nothing open", "run", "bob")
+
+
+def test_makeup_absent_and_nothing_open() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = makeup_scene(tmp)
+        scene.add_branch("carol/m1-makeup", PARTICIPANTS["alice"])
+        scene.add_branch("alice/m1-makeup", PARTICIPANTS["alice"])
+        scene.cli("collect", COHORT_URL, "m1")
+        results = mk_attempt(scene, "carol")
+        record([r[0] for r in results] == [0, 0, 0], "carol, absent from the module, may make it up",
+               str([(r[0], r[2]) for r in results]))
+        store = mk_store(scene, "carol")
+        record(gr.attempts_used(store) == {scene.commits["carol/m1-makeup"]}, "and it uses an attempt")
+        record(json.loads((store / "final.json").read_text())["gate"] is True, "carol's gate passes")
+        refused_writing_nothing(scene, "alice, who passed", "nothing open", "run", "alice")
+        refused_writing_nothing(scene, "a participant name that cannot be used", "participant", "run", "a;b")
+
+
+def test_makeup_retries() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = makeup_scene(tmp, retries=None)
+        scene.add_branch("bob/m1-makeup", PARTICIPANTS["alice"])
+        scene.cli("collect", COHORT_URL, "m1")
+        refused_writing_nothing(scene, "with retries absent", "retries", "run", "bob")
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = makeup_scene(tmp, retries=0)
+        scene.add_branch("bob/m1-makeup", PARTICIPANTS["alice"])
+        scene.cli("collect", COHORT_URL, "m1")
+        refused_writing_nothing(scene, "with retries: 0", "retries", "run", "bob")
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = makeup_scene(tmp, module_yaml=GATE_CRITERION_YAML)
+        # A first attempt that fails the gate again: the gate criterion is short.
+        scene.add_branch("bob/m1-makeup", PARTICIPANTS["alice"])
+        scene.cli("collect", COHORT_URL, "m1")
+        first = scene.commits["bob/m1-makeup"]
+        results = mk_attempt(scene, "bob", {"design": 10})
+        store = mk_store(scene, "bob")
+        record([r[0] for r in results] == [0, 0, 0] and json.loads((store / "final.json").read_text())["gate"] is False,
+               "a first attempt short of the gate criterion is confirmed, gate false",
+               str([(r[0], r[2]) for r in results]))
+        run = json.loads((store / "run.json").read_text())
+        prop = json.loads((store / "proposal.json").read_text())
+        record(sorted(prop["criteria"]) == ["design"] and sorted(run["branch"]["validators"]) == ["scorer-tests"],
+               "a module's attempt grades the gate validators and gate criteria", str(prop["criteria"]))
+        code, out, err = mk(scene, "confirm", "bob", "--by", "Trainer T", "--change", "design=12:read again: closer")
+        final = json.loads((store / "final.json").read_text())
+        record(code == 0 and final["criteria"]["design"]["points"] == 12
+               and final["criteria"]["design"]["reason"] == "read again: closer"
+               and final["criteria"]["design"]["changed_by_trainer"] is True and final["gate"] is False,
+               "confirming the same commit again with a --change is allowed", f"{code} {err}")
+        kept = sorted(p.name for p in store.glob("final.*.json"))
+        record(len(kept) == 1, "the earlier confirmation is archived", str(kept))
+        record(gr.attempts_used(store) == {first}, "two confirmations of one commit use one attempt",
+               str(gr.attempts_used(store)))
+        for bad, needle in (("design=21:x", "from 0 to 20"), ("design=10:x", "not a change"),
+                            ("design12:x", "is not <criterion>=<points>:<reason>"),
+                            ("scorer-tests=0:x", "validator"), ("style=1:x", "no points for"),
+                            ("design=11:", "no reason")):
+            before = store_snapshot(scene)
+            code, out, err = mk(scene, "confirm", "bob", "--by", "T", "--change", bad)
+            record(code == 1 and needle in err and store_snapshot(scene) == before,
+                   f"makeup confirm refuses --change {bad} and writes nothing", f"{code} {err}")
+        scene.add_branch("bob/m1-makeup", PARTICIPANTS["alice"] | {"README.md": "bob again\n"})
+        scene.cli("collect", COHORT_URL, "m1")
+        refused_writing_nothing(scene, "a second commit with retries: 1", "used up", "run", "bob")
+        # Raise retries: no version change, and the open proposal stays valid.
+        (scene.bundle / "tutorial.yaml").write_text(with_retries(GATE_CRITERION_YAML, 2))
+        results = [mk(scene, "run", "bob"),
+                   mk(scene, "propose", "bob", "--judgement", str(mk_judge(scene, "bob", {"design": 20})))]
+        record([r[0] for r in results] == [0, 0], "raising retries to 2 opens a second attempt",
+               str([(r[0], r[2]) for r in results]))
+        (scene.bundle / "tutorial.yaml").write_text(with_retries(GATE_CRITERION_YAML, 3))
+        code, out, err = mk(scene, "confirm", "bob", "--by", "Trainer T")
+        record(code == 0, "raising retries again leaves the open proposal valid", f"{code} {err}")
+        final = json.loads((store / "final.json").read_text())
+        record(final["gate"] is True and final["bundle_version"] == "1.2.0"
+               and gr.attempts_used(store) == {first, scene.commits["bob/m1-makeup"]},
+               "the second attempt passes, with no version change, and two attempts are used",
+               str(gr.attempts_used(store)))
+
+
+def test_makeup_final_project() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = makeup_scene(tmp)
+        with Env(scene.data):
+            fp_store = gr.store_dir(COHORT_URL, "fp1")
+        fp_final = (fp_store / "final.json").read_bytes()
+        scene.add_branch("dave/fp1-makeup", PARTICIPANTS["alice"])
+        scene.add_branch("bob/fp1-makeup", PARTICIPANTS["alice"])
+        scene.add_branch("alice/fp1-makeup", PARTICIPANTS["alice"])
+        scene.cli("collect", COHORT_URL, "fp1")
+        results = mk_attempt(scene, "dave", {"design": 15}, bundle_id="fp1")
+        record([r[0] for r in results] == [0, 0, 0], "dave retries the final project",
+               str([(r[0], r[2]) for r in results]))
+        store = mk_store(scene, "dave", "fp1")
+        run = json.loads((store / "run.json").read_text())
+        record(sorted(run["branch"]["validators"]) == ["has-readme", "has-test", "lint", "scorer-tests"],
+               "a final project's attempt runs every validator", str(sorted(run["branch"]["validators"])))
+        final = json.loads((store / "final.json").read_text())
+        record(sorted(final) == ["bundle", "bundle_version", "commit", "confirmed_at", "confirmed_by", "criteria",
+                                 "gate", "grading_hash", "kind", "max_total", "participant", "total", "validators"],
+               "a final project's makeup final.json has the contract's keys", str(sorted(final)))
+        record((final["total"], final["max_total"], final["gate"], final["kind"]) == (75, 80, True, "final_project"),
+               "dave is graded in full: total and max_total recorded", str(final)[:300])
+        record((fp_store / "final.json").read_bytes() == fp_final, "fp1's final.json is byte for byte unchanged")
+        everything = [p.read_text() for p in (scene.data / "belay" / "grading").rglob("*.json")
+                      if "makeup" in p.parts]
+        record(everything and not any("ranking" in t or '"rank"' in t for t in everything),
+               "no ranking is written anywhere for a further attempt")
+        refused_writing_nothing(scene, "someone with no entry in fp1's participants", "nothing open", "run", "bob",
+                                bundle_id="fp1")
+        refused_writing_nothing(scene, "alice, at 75 of 80", "nothing open", "run", "alice", bundle_id="fp1")
+
+
+def test_makeup_refusals() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = makeup_scene(tmp)
+        scene.add_branch("bob/m1-makeup", PARTICIPANTS["alice"])
+        scene.cli("collect", COHORT_URL, "m1")
+        good = scene.catalog.read_text()
+        scene.catalog.write_text(catalog_text(None))
+        for step in ("run", "propose", "confirm"):
+            extra = {"propose": ("--judgement", str(mk_judge(scene, "bob"))), "confirm": ("--by", "T")}.get(step, ())
+            refused_writing_nothing(scene, "a catalog with no certificate", "no `certificate`", step, "bob", *extra)
+        scene.catalog.write_text(catalog_text(CERT_BLOCK.format(modules="other")))
+        refused_writing_nothing(scene, "a bundle the certificate does not list", "does not list", "run", "bob")
+        scene.catalog.write_text(catalog_text(CERT_BLOCK.format(modules="m1").replace("share: 60", "share: 0")))
+        refused_writing_nothing(scene, "a catalog the validator reports", "final_project_share", "run", "bob")
+        scene.catalog.write_text(good)
+        final = scene.store() / "final.json"
+        kept = final.read_bytes()
+        final.unlink()
+        refused_writing_nothing(scene, "a bundle with no confirmed final.json", "no confirmed final.json", "run", "bob")
+        old = json.loads(kept)
+        del old["grading_hash"]
+        final.write_text(json.dumps(old))
+        refused_writing_nothing(scene, "a final.json confirmed by an older Belay", "confirmed again", "run", "bob")
+        final.write_bytes(kept)
+        refused_writing_nothing(scene, "a participant with no makeup branch", "no branch", "run", "carol")
+        yaml = (scene.bundle / "tutorial.yaml").read_text()
+        (scene.bundle / "tutorial.yaml").write_text(yaml.replace("lint: { points: 10 }", "lint: { points: 11 }"))
+        refused_writing_nothing(scene, "a grading block changed since the cohort was graded", "grading", "run", "bob")
+        (scene.bundle / "tutorial.yaml").write_text(yaml)
+        refused_writing_nothing(scene, "a --bundle of another id", "fp1", "run", "bob", bundle=scene.fp_bundle)
+        refused_writing_nothing(scene, "propose before run", "makeup run", "propose", "bob",
+                                "--judgement", str(mk_judge(scene, "bob")))
+        record(mk(scene, "run", "bob")[0] == 0, "control: the run succeeds")
+        record(mk(scene, "propose", "bob", "--judgement", str(mk_judge(scene, "bob")))[0] == 0,
+               "control: the proposal succeeds")
+        refused_writing_nothing(scene, "a judgement naming someone else", "dave", "propose", "bob",
+                                "--judgement", str(mk_judge(scene, "dave")))
+        refused_writing_nothing(scene, "a confirm with no --by text", "--by", "confirm", "bob", "--by", " ")
+        # Grading changed after the proposal.
+        (scene.bundle / "tutorial.yaml").write_text(yaml.replace("lint: { points: 10 }", "lint: { points: 11 }"))
+        refused_writing_nothing(scene, "a grading block changed since the proposal", "grading", "confirm", "bob",
+                                "--by", "T")
+        (scene.bundle / "tutorial.yaml").write_text(yaml)
+        # The branch moved after the proposal.
+        scene.add_branch("bob/m1-makeup", PARTICIPANTS["bob"])
+        scene.cli("collect", COHORT_URL, "m1")
+        refused_writing_nothing(scene, "a branch that moved after the proposal", "moved", "confirm", "bob", "--by", "T")
+        record(not (mk_store(scene, "bob") / "final.json").exists() and gr.attempts_used(mk_store(scene, "bob")) == set(),
+               "no attempt is used by the refusals")
+
+
+def test_makeup_runtime_fault() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = makeup_scene(tmp)
+        scene.add_branch("bob/m1-makeup", {**PARTICIPANTS["alice"], "run-tests.sh": "exit 125\n"})
+        scene.cli("collect", COHORT_URL, "m1")
+        code, out, err = mk(scene, "run", "bob")
+        record(code == 1 and "exit status 125" in err, "a runtime fault in a further attempt is reported", f"{code} {err}")
+        refused_writing_nothing(scene, "a run with a runtime fault", "exit status 125", "propose", "bob",
+                                "--judgement", str(mk_judge(scene, "bob")))
+        store = mk_store(scene, "bob")
+        record(not (store / "proposal.json").exists() and gr.attempts_used(store) == set(),
+               "a runtime fault leaves no proposal and uses no attempt")
+        refused_writing_nothing(scene, "with no proposal", "makeup propose", "confirm", "bob", "--by", "T")
+
+
+def test_makeup_module_with_no_gate() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        scene = makeup_scene(tmp, module_yaml=NO_GATE_YAML)
+        scene.add_branch("carol/m1-makeup", {"README.md": "carol\n"})
+        scene.add_branch("bob/m1-makeup", {"README.md": "bob\n"})
+        scene.cli("collect", COHORT_URL, "m1")
+        before = len(scene.records("run"))
+        results = mk_attempt(scene, "carol")
+        store = mk_store(scene, "carol")
+        final = json.loads((store / "final.json").read_text()) if (store / "final.json").exists() else {}
+        record([r[0] for r in results] == [0, 0, 0] and final.get("gate", "x") is None
+               and final.get("validators") == {} and final.get("criteria") == {},
+               "a module with no gate runs nothing: the trainer confirms the work exists, gate null",
+               str([(r[0], r[2]) for r in results]) + str(final))
+        record(len(scene.records("run")) == before, "no container ran for it")
+        refused_writing_nothing(scene, "bob, graded with gate null", "nothing open", "run", "bob")
+
+
+def test_attempts_used() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        store = Path(tmp)
+        record(gr.attempts_used(store / "absent") == set(), "no directory: no attempt")
+        (store / "final.json").write_text(json.dumps({"commit": "a" * 40}))
+        (store / "final.2026-11-01.json").write_text(json.dumps({"commit": "b" * 40}))
+        (store / "final.2026-11-01-2.json").write_text(json.dumps({"commit": "a" * 40}))
+        (store / "proposal.json").write_text(json.dumps({"commit": "c" * 40}))
+        record(gr.attempts_used(store) == {"a" * 40, "b" * 40},
+               "attempts_used reads final.json and the archived ones, distinct commits only",
+               str(gr.attempts_used(store)))
+
+
 def main() -> int:
     for test in (test_cohort_from_url_forms, test_store_dir_follows_xdg, test_work_tree_refusal,
                  test_forget, test_scheme, test_cli, test_classify_branch, test_collect,
@@ -2431,7 +2815,10 @@ def main() -> int:
                  test_archive_without_hard_links,
                  test_retries_and_grading_hash, test_retries_do_not_stale_a_proposal,
                  test_makeup_branches, test_store_dir_refuses_certificate,
-                 test_exclude_a_branch_the_proposal_does_not_cover, test_by_takes_printable_unicode):
+                 test_exclude_a_branch_the_proposal_does_not_cover, test_by_takes_printable_unicode,
+                 test_certificate_module, test_attempts_used, test_makeup_module_gate_made_up,
+                 test_makeup_absent_and_nothing_open, test_makeup_retries, test_makeup_final_project,
+                 test_makeup_refusals, test_makeup_runtime_fault, test_makeup_module_with_no_gate):
         try:
             test()
         except Exception:  # pragma: no cover
