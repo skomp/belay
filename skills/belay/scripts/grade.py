@@ -15,6 +15,9 @@ Usage:
                      --catalog <file> [--judgement <file>] [--by <name> [--change <criterion>=<points>:<reason>]...]
         a further attempt, on <participant>/<bundle-id>-makeup, into <bundle-id>/makeup/<participant>/;
         final-project-and-certificate spec, section 3.1
+    grade.py certificate <repo> --catalog <file> --names <file> [--template <file>]
+        the programme's results into <cohort>/certificate/: details.json, results.csv and,
+        with a template, certificates/; final-project-and-certificate spec, sections 4 and 5
     grade.py forget <cohort>     delete one cohort's stored grades and cache
     grade.py --help
 
@@ -2349,6 +2352,20 @@ def cmd_makeup(args: argparse.Namespace) -> int:
     return args.makeup_func(args)
 
 
+def cmd_certificate(args: argparse.Namespace) -> int:
+    return _certificate_module().run(args.repo, Path(args.catalog), Path(args.names),
+                                     Path(args.template) if args.template else None)
+
+
+def _add_certificate_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("repo", help="the cohort repository's URL")
+    parser.add_argument("--catalog", required=True, help="the programme's catalog.yaml, with `certificate`")
+    parser.add_argument("--names", required=True,
+                        help="a local UTF-8 CSV with the header row `participant,full name`")
+    parser.add_argument("--template", help="a certificate template using {{name}}, {{programme}} and "
+                                           "{{date}}; an .html or .htm one is escaped")
+
+
 # --------------------------------------------------------------------------
 # Command line
 # --------------------------------------------------------------------------
@@ -2415,6 +2432,11 @@ SUBCOMMANDS: dict[str, tuple[Callable[[argparse.Namespace], int], str,
         cmd_makeup,
         "grade a further attempt at a module or final project: run, propose or confirm",
         _add_makeup_args,
+    ),
+    "certificate": (
+        cmd_certificate,
+        "write the programme's results from the confirmed final.json files: who passed",
+        _add_certificate_args,
     ),
     "forget": (
         cmd_forget,
